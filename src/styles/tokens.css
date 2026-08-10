@@ -1,0 +1,72 @@
+/* Tokens de diseño: paleta industrial-futurista sobre fondo oscuro. */
+
+:root {
+  --bg-deep: #04060c;
+  --bg: #070b14;
+  --bg-raise: #0c1320;
+  --panel: rgba(9, 15, 26, 0.94);
+  --panel-solid: #0a111d;
+  --panel-edge: rgba(56, 189, 248, 0.24);
+  --panel-edge-strong: rgba(34, 211, 238, 0.6);
+
+  --text: #dbeafe;
+  --text-dim: #8ea3bf;
+  --text-mute: #5a6c86;
+
+  --cyan: #22d3ee;
+  --cyan-soft: #67e8f9;
+  --amber: #f59e0b;
+  --amber-soft: #fbbf24;
+  --lime: #a3e635;
+  --green: #4ade80;
+  --red: #f87171;
+  --violet: #a78bfa;
+  --magenta: #f472b6;
+  --blue: #38bdf8;
+
+  --grad-cyan: linear-gradient(135deg, #22d3ee, #0ea5e9);
+  --grad-amber: linear-gradient(135deg, #fbbf24, #f97316);
+  --grad-violet: linear-gradient(135deg, #a78bfa, #7c3aed);
+  --grad-lime: linear-gradient(135deg, #bef264, #65a30d);
+
+  --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.65);
+  --shadow-glow: 0 0 22px rgba(34, 211, 238, 0.35);
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+
+  --hud-h: 54px;
+  --rail-w: 58px;
+
+  --font-display: 'Orbitron', 'Rajdhani', system-ui, sans-serif;
+  --font-ui: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+/* Corte biselado tipo panel industrial */
+.bevel {
+  clip-path: polygon(
+    10px 0,
+    100% 0,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    0 100%,
+    0 10px
+  );
+}
+
+.bevel-sm {
+  clip-path: polygon(
+    6px 0,
+    100% 0,
+    100% calc(100% - 6px),
+    calc(100% - 6px) 100%,
+    0 100%,
+    0 6px
+  );
+}

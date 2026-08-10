@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "factories",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "playerCount", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,459 @@
+import { describe, expect, it } from 'vitest';
+import { runOp } from '../src/services/backend/ops';
+import {
+  createFactoryState,
+  createPlayerState,
+} from '../src/game/logic/defaults';
+import { BALANCE } from '../src/config/balance';
+import { MACHINES, machineUpgradeCost } from '../src/config/machines';
+import { UPGRADES, upgradeCost } from '../src/config/upgrades';
+import type { FactoryState, PlayerState } from '../src/types';
+
+const T0 = 1_700_000_000_000;
+const user = (uid: string) => ({ uid, displayName: uid, photoURL: null, email: null });
+
+function world(overrides: Partial<PlayerState> = {}) {
+  const player: PlayerState = { ...createPlayerState(user('u1'), T0), ...overrides };
+  const factory: FactoryState = createFactoryState('f1', 1, T0);
+  return { player, factory };
+}
+
+/** Determinista: sin hallazgos raros. */
+const noLuck = () => 0.99;
+
+describe('opGather — recolección', () => {
+  it('añade material, gasta estamina y da XP', () => {
+    const { player, factory } = world();
+    const out = runOp('gather', player, factory, {
+      stationId: 'vein_a',
+      now: T0,
+      rand: noLuck,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.inventory.ore).toBe(1);
+    expect(out.player!.stamina).toBeLessThan(player.stamina);
+    expect(out.player!.xp).toBe(BALANCE.actions.gather.xp);
+    expect(out.factory!.stats.gathered).toBe(1);
+  });
+
+  it('rechaza si no queda estamina', () => {
+    const { player, factory } = world({ stamina: 0, staminaAt: T0 });
+    const out = runOp('gather', player, factory, { stationId: 'vein_a', now: T0, rand: noLuck });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/estamina/i);
+  });
+
+  it('rechaza si el inventario está lleno', () => {
+    const { player, factory } = world({ inventory: { ore: 10 } });
+    const out = runOp('gather', player, factory, { stationId: 'vein_a', now: T0, rand: noLuck });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/lleno/i);
+  });
+
+  it('rechaza estaciones inventadas por el cliente', () => {
+    const { player, factory } = world();
+    const out = runOp('gather', player, factory, { stationId: 'veta_falsa', now: T0 });
+    expect(out.ok).toBe(false);
+  });
+
+  it('la fuerza aumenta las unidades por acción', () => {
+    const { player, factory } = world({ upgrades: { strength: 3 } });
+    const out = runOp('gather', player, factory, { stationId: 'vein_a', now: T0, rand: noLuck });
+    expect(out.player!.inventory.ore).toBe(4);
+  });
+
+  it('la suerte puede entregar un hallazgo raro', () => {
+    const { player, factory } = world({ upgrades: { luck: 20, capacity: 2 } });
+    const out = runOp('gather', player, factory, {
+      stationId: 'vein_a',
+      now: T0,
+      rand: () => 0, // fuerza el hallazgo y el primer item de la tabla
+    });
+    expect(out.player!.inventory.crystal).toBe(1);
+  });
+});
+
+describe('opDeposit / opCollect — cadena de producción', () => {
+  it('deposita sólo material compatible y arranca la máquina', () => {
+    const { player, factory } = world({ inventory: { ore: 6, gear: 3 } });
+    const out = runOp('deposit', player, factory, { machineId: 'smelter', now: T0 });
+    expect(out.ok).toBe(true);
+    expect(out.factory!.machines.smelter.input.ore).toBe(5);
+    expect(out.player!.inventory.gear).toBe(3); // los engranajes no entran
+    expect(out.factory!.machines.smelter.cycleStartAt).toBe(T0);
+  });
+
+  it('rechaza depositar si no llevas material compatible', () => {
+    const { player, factory } = world({ inventory: { gear: 5 } });
+    const out = runOp('deposit', player, factory, { machineId: 'smelter', now: T0 });
+    expect(out.ok).toBe(false);
+  });
+
+  it('no permite usar una máquina bloqueada por nivel de fábrica', () => {
+    const { player, factory } = world({ inventory: { ingot: 10 } });
+    const out = runOp('deposit', player, factory, { machineId: 'assembler', now: T0 });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/nivel 3/i);
+  });
+
+  it('una acción de carga descarga un lote, no la mochila entera', () => {
+    // El lote por acción es `gatherAmount * 5`; con fuerza 0 son 5 unidades.
+    const { player, factory } = world({ inventory: { ore: 12 } });
+    const out = runOp('deposit', player, factory, { machineId: 'smelter', now: T0 });
+    expect(out.factory!.machines.smelter.input.ore).toBe(5);
+    expect(out.player!.inventory.ore).toBe(7);
+  });
+
+  it('recoge el producto y aporta contribución a la fábrica', () => {
+    const { player, factory } = world({ inventory: { ore: 6 } });
+    const dep = runOp('deposit', player, factory, {
+      machineId: 'smelter',
+      qty: 6,
+      now: T0,
+    });
+    expect(dep.factory!.machines.smelter.input.ore).toBe(6);
+    const later = T0 + MACHINES.smelter.cycleMs * 3 + 10;
+    const col = runOp('collect', dep.player!, dep.factory!, {
+      machineId: 'smelter',
+      now: later,
+    });
+    expect(col.ok).toBe(true);
+    expect(col.player!.inventory.ingot).toBe(3);
+    expect(col.factory!.stats.produced).toBe(3);
+    expect(col.factory!.contribution).toBeCloseTo(
+      3 * BALANCE.factory.contribPerProduced,
+      5,
+    );
+  });
+
+  it('no deja recoger si el inventario está lleno', () => {
+    const { player, factory } = world({ inventory: { scrap: 10 } });
+    const f: FactoryState = {
+      ...factory,
+      machines: {
+        ...factory.machines,
+        smelter: { ...factory.machines.smelter, output: { ingot: 5 } },
+      },
+    };
+    const out = runOp('collect', player, f, { machineId: 'smelter', now: T0 });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/lleno/i);
+  });
+
+  it('no crea producto de la nada si no hay salida lista', () => {
+    const { player, factory } = world();
+    const out = runOp('collect', player, factory, { machineId: 'smelter', now: T0 });
+    expect(out.ok).toBe(false);
+  });
+});
+
+describe('opSell — economía individual', () => {
+  it('convierte inventario en dinero y contribución', () => {
+    const { player, factory } = world({ inventory: { ingot: 4 } });
+    const out = runOp('sell', player, factory, { now: T0 });
+    expect(out.ok).toBe(true);
+    expect(out.player!.money).toBe(player.money + 4 * 18);
+    expect(out.player!.inventory.ingot).toBeUndefined();
+    expect(out.factory!.stats.sold).toBe(72);
+    expect(out.factory!.contribution).toBeGreaterThan(0);
+  });
+
+  it('no permite vender lo que no se tiene', () => {
+    const { player, factory } = world({ inventory: { ingot: 1 } });
+    const out = runOp('sell', player, factory, { items: { ingot: 9999 }, now: T0 });
+    expect(out.ok).toBe(true);
+    expect(out.player!.money).toBe(player.money + 18);
+  });
+
+  it('rechaza vender con la mochila vacía', () => {
+    const { player, factory } = world();
+    const out = runOp('sell', player, factory, { now: T0 });
+    expect(out.ok).toBe(false);
+  });
+});
+
+describe('opBuyUpgrade — mejoras personales', () => {
+  it('cobra el precio correcto y sube el nivel de la rama', () => {
+    const { player, factory } = world({ money: 100000 });
+    const cost = upgradeCost(UPGRADES.speed, 0);
+    const out = runOp('buyUpgrade', player, factory, { upgradeId: 'speed', now: T0 });
+    expect(out.ok).toBe(true);
+    expect(out.player!.money).toBe(100000 - cost);
+    expect(out.player!.upgrades.speed).toBe(1);
+  });
+
+  it('parte del gasto alimenta el progreso de la fábrica', () => {
+    const { player, factory } = world({ money: 100000 });
+    const out = runOp('buyUpgrade', player, factory, { upgradeId: 'speed', now: T0 });
+    expect(out.factory!.contribution).toBeGreaterThan(0);
+  });
+
+  it('rechaza si no hay dinero suficiente', () => {
+    const { player, factory } = world({ money: 0 });
+    const out = runOp('buyUpgrade', player, factory, { upgradeId: 'speed', now: T0 });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/dinero/i);
+  });
+
+  it('respeta el nivel mínimo de jugador de cada rama', () => {
+    const { player, factory } = world({ money: 10 ** 9, level: 1 });
+    const out = runOp('buyUpgrade', player, factory, { upgradeId: 'luck', now: T0 });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/nivel/i);
+  });
+
+  it('respeta el nivel máximo', () => {
+    const def = UPGRADES.speed;
+    const { player, factory } = world({
+      money: 10 ** 12,
+      upgrades: { speed: def.maxLevel },
+    });
+    const out = runOp('buyUpgrade', player, factory, { upgradeId: 'speed', now: T0 });
+    expect(out.ok).toBe(false);
+  });
+
+  it('rechaza mejoras inexistentes', () => {
+    const { player, factory } = world({ money: 10 ** 9 });
+    const out = runOp('buyUpgrade', player, factory, { upgradeId: 'god_mode', now: T0 });
+    expect(out.ok).toBe(false);
+  });
+});
+
+describe('opContribute — núcleo de la fábrica', () => {
+  it('convierte dinero en progreso compartido', () => {
+    // Nivel alto para que la XP de la donación no dispare una subida de nivel
+    // (que añadiría dinero de recompensa y enmascararía el descuento).
+    const { player, factory } = world({ money: 5000, level: 30 });
+    const out = runOp('contribute', player, factory, { money: 1000, now: T0 });
+    expect(out.ok).toBe(true);
+    expect(out.player!.money).toBe(4000);
+    // 900 puntos completan justo el nivel 1 → la contribución acumulada se
+    // consume al subir de nivel, pero el histórico total la conserva.
+    expect(out.factory!.totalContribution).toBe(
+      Math.round(1000 * BALANCE.factory.contribPerMoney),
+    );
+    expect(out.factory!.level).toBe(2);
+  });
+
+  it('donar también da XP al jugador que dona', () => {
+    const { player, factory } = world({ money: 5000, level: 30 });
+    const out = runOp('contribute', player, factory, { money: 1000, now: T0 });
+    expect(out.player!.xp).toBeGreaterThan(player.xp);
+  });
+
+  it('rechaza donar más de lo que se tiene', () => {
+    const { player, factory } = world({ money: 100 });
+    const out = runOp('contribute', player, factory, { money: 100000, now: T0 });
+    expect(out.ok).toBe(false);
+  });
+
+  it('rechaza donaciones por debajo del mínimo', () => {
+    const { player, factory } = world({ money: 5000 });
+    const out = runOp('contribute', player, factory, { money: 1, now: T0 });
+    expect(out.ok).toBe(false);
+  });
+
+  it('acepta materiales y los descuenta del inventario', () => {
+    const { player, factory } = world({ inventory: { ingot: 5 } });
+    const out = runOp('contribute', player, factory, {
+      items: { ingot: 5 },
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.inventory.ingot).toBeUndefined();
+    expect(out.factory!.contribution).toBe(5 * 12);
+  });
+
+  it('sube el nivel de la fábrica al superar el umbral', () => {
+    const { player, factory } = world({ money: 10 ** 7 });
+    const out = runOp('contribute', player, factory, { money: 2000, now: T0 });
+    expect(out.factory!.level).toBe(2);
+    expect(out.events.some((e) => e.kind === 'factoryLevelUp')).toBe(true);
+  });
+});
+
+describe('opUpgradeMachine — mejora compartida', () => {
+  it('acelera la máquina para todos y cobra a quien la paga', () => {
+    const { player, factory } = world({ money: 10 ** 6 });
+    const cost = machineUpgradeCost(0);
+    const out = runOp('upgradeMachine', player, factory, {
+      machineId: 'smelter',
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.money).toBe(10 ** 6 - cost);
+    expect(out.factory!.machines.smelter.level).toBe(1);
+  });
+
+  it('no se puede mejorar una máquina bloqueada', () => {
+    const { player, factory } = world({ money: 10 ** 9 });
+    const out = runOp('upgradeMachine', player, factory, {
+      machineId: 'assembler',
+      now: T0,
+    });
+    expect(out.ok).toBe(false);
+  });
+});
+
+describe('misiones y consumibles', () => {
+  it('no deja reclamar una misión incompleta', () => {
+    const { player, factory } = world();
+    const out = runOp('claimMission', player, factory, {
+      missionId: player.missions[0].id,
+      now: T0,
+    });
+    expect(out.ok).toBe(false);
+  });
+
+  it('al reclamar paga la recompensa y repone la misión', () => {
+    const { player, factory } = world();
+    const id = player.missions[0].id;
+    const ready: PlayerState = {
+      ...player,
+      missions: player.missions.map((m) =>
+        m.id === id ? { ...m, progress: 10 ** 6 } : m,
+      ),
+    };
+    const out = runOp('claimMission', ready, factory, { missionId: id, now: T0 });
+    expect(out.ok).toBe(true);
+    expect(out.player!.money).toBeGreaterThan(player.money);
+    expect(out.player!.missions).toHaveLength(player.missions.length);
+    expect(out.player!.missions.find((m) => m.id === id)?.progress ?? 0).toBe(0);
+  });
+
+  it('un consumible restaura estamina y se gasta', () => {
+    const { player, factory } = world({
+      inventory: { energyDrink: 2 },
+      stamina: 10,
+      staminaAt: T0,
+    });
+    const out = runOp('useItem', player, factory, { itemId: 'energyDrink', now: T0 });
+    expect(out.ok).toBe(true);
+    expect(out.player!.inventory.energyDrink).toBe(1);
+    expect(out.player!.stamina).toBe(70);
+  });
+
+  it('no se puede usar un objeto que no se tiene', () => {
+    const { player, factory } = world();
+    const out = runOp('useItem', player, factory, { itemId: 'energyDrink', now: T0 });
+    expect(out.ok).toBe(false);
+  });
+});
+
+describe('opTick — latido de sesión', () => {
+  it('acumula tiempo jugado con tope por llamada', () => {
+    const { player, factory } = world();
+    const out = runOp('tick', player, factory, { seconds: 10_000, now: T0 });
+    expect(out.player!.stats.playtime).toBe(300);
+  });
+
+  it('no permite al cliente inflar su estamina', () => {
+    const { player, factory } = world({ stamina: 5, staminaAt: T0 });
+    const out = runOp('tick', player, factory, {
+      seconds: 60,
+      stamina: 99999,
+      now: T0,
+    });
+    expect(out.player!.stamina).toBeLessThanOrEqual(5.001);
+  });
+});
+
+describe('concurrencia — dos jugadores sobre la misma fábrica', () => {
+  it('el segundo depósito ve el estado del primero', () => {
+    const factory = createFactoryState('f1', 1, T0);
+    const a: PlayerState = { ...createPlayerState(user('a'), T0), inventory: { ore: 4 } };
+    const b: PlayerState = { ...createPlayerState(user('b'), T0), inventory: { ore: 4 } };
+
+    const first = runOp('deposit', a, factory, { machineId: 'smelter', now: T0 });
+    const second = runOp('deposit', b, first.factory!, { machineId: 'smelter', now: T0 });
+
+    expect(second.factory!.machines.smelter.input.ore).toBe(8);
+    // Cada jugador conserva SU inventario: no se mezclan.
+    expect(first.player!.inventory.ore).toBeUndefined();
+    expect(second.player!.inventory.ore).toBeUndefined();
+  });
+
+  it('sólo uno de los dos puede recoger el mismo producto', () => {
+    const base = createFactoryState('f1', 1, T0);
+    const factory: FactoryState = {
+      ...base,
+      machines: {
+        ...base.machines,
+        smelter: { ...base.machines.smelter, output: { ingot: 2 } },
+      },
+    };
+    const a = createPlayerState(user('a'), T0);
+    const b = createPlayerState(user('b'), T0);
+
+    const first = runOp('collect', a, factory, { machineId: 'smelter', now: T0 });
+    const second = runOp('collect', b, first.factory!, { machineId: 'smelter', now: T0 });
+
+    expect(first.ok).toBe(true);
+    expect(first.player!.inventory.ingot).toBe(2);
+    expect(second.ok).toBe(false); // ya no queda nada
+  });
+
+  it('el dinero es estrictamente individual', () => {
+    const factory = createFactoryState('f1', 1, T0);
+    const a: PlayerState = { ...createPlayerState(user('a'), T0), inventory: { ingot: 10 } };
+    const b = createPlayerState(user('b'), T0);
+
+    const sale = runOp('sell', a, factory, { now: T0 });
+    expect(sale.player!.money).toBeGreaterThan(b.money);
+    expect(b.money).toBe(BALANCE.player.startingMoney);
+    // …pero la fábrica sí es compartida
+    expect(sale.factory!.contribution).toBeGreaterThan(0);
+  });
+
+  it('dos compras del mismo upgrade de máquina suben dos niveles', () => {
+    const factory = createFactoryState('f1', 1, T0);
+    const a: PlayerState = { ...createPlayerState(user('a'), T0), money: 10 ** 6 };
+    const b: PlayerState = { ...createPlayerState(user('b'), T0), money: 10 ** 6 };
+
+    const first = runOp('upgradeMachine', a, factory, { machineId: 'smelter', now: T0 });
+    const second = runOp('upgradeMachine', b, first.factory!, {
+      machineId: 'smelter',
+      now: T0,
+    });
+
+    expect(second.factory!.machines.smelter.level).toBe(2);
+    // El segundo paga el precio del nivel 2, no el del 1.
+    expect(b.money - second.player!.money).toBe(machineUpgradeCost(1));
+  });
+});
+
+describe('resistencia a entradas maliciosas', () => {
+  it('una operación desconocida no rompe nada', () => {
+    const { player, factory } = world();
+    const out = runOp('hack' as never, player, factory, {});
+    expect(out.ok).toBe(false);
+  });
+
+  it('cantidades negativas no generan dinero', () => {
+    const { player, factory } = world({ inventory: { ingot: 5 } });
+    const out = runOp('sell', player, factory, { items: { ingot: -100 }, now: T0 });
+    expect(out.ok).toBe(false);
+  });
+
+  it('depositar cantidades absurdas se acota al inventario real', () => {
+    const { player, factory } = world({ inventory: { ore: 3 } });
+    const out = runOp('deposit', player, factory, {
+      machineId: 'smelter',
+      item: 'ore',
+      qty: 10 ** 9,
+      now: T0,
+    });
+    expect(out.factory!.machines.smelter.input.ore).toBe(3);
+    expect(out.player!.inventory.ore).toBeUndefined();
+  });
+
+  it('contribuir materiales que no se tienen no da progreso', () => {
+    const { player, factory } = world();
+    const out = runOp('contribute', player, factory, {
+      items: { circuit: 10 ** 6 },
+      now: T0,
+    });
+    expect(out.ok).toBe(false);
+    expect(factory.contribution).toBe(0);
+  });
+});

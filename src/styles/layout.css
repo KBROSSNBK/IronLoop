@@ -1,0 +1,624 @@
+/* Disposición general: escenario vertical centrado en escritorio,
+   pantalla completa en móvil landscape. */
+
+.app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 20% 15%, rgba(34, 211, 238, 0.07), transparent 45%),
+    radial-gradient(circle at 82% 78%, rgba(244, 114, 182, 0.06), transparent 42%),
+    var(--bg-deep);
+}
+
+.app::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(circle at center, black 30%, transparent 78%);
+  pointer-events: none;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-width: min(100%, calc(100dvh * 0.68));
+  overflow: hidden;
+  background: #04060c;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.18), 0 0 90px rgba(0, 0, 0, 0.9);
+  isolation: isolate;
+}
+
+/* Móvil / táctil: sin marco, todo el ancho. */
+@media (pointer: coarse) {
+  .stage {
+    max-width: 100%;
+  }
+}
+
+.game-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: auto;
+}
+
+/* ───────────────────────────── HUD superior ───────────────────────────── */
+
+.hud-top {
+  position: absolute;
+  top: calc(var(--safe-t) + 8px);
+  left: calc(var(--safe-l) + 8px);
+  right: calc(var(--safe-r) + 8px);
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.hud-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  backdrop-filter: blur(8px);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.hud-identity {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hud-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid var(--cyan);
+  object-fit: cover;
+  background: #0d1a26;
+  flex: none;
+}
+
+.hud-name {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-level {
+  font-size: 11px;
+  color: var(--violet);
+  font-weight: 700;
+}
+
+.hud-money {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--amber-soft);
+  text-shadow: 0 0 12px rgba(251, 191, 36, 0.4);
+  white-space: nowrap;
+}
+
+.hud-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 88px;
+}
+
+.hud-meter-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  color: var(--text-mute);
+  font-weight: 700;
+}
+
+.hud-factory {
+  flex: none;
+  min-width: 132px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.hud-factory:hover {
+  border-color: var(--panel-edge-strong);
+}
+
+.hud-factory-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--cyan-soft);
+  letter-spacing: 0.06em;
+}
+
+.hud-online {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--green);
+  font-weight: 700;
+}
+.hud-online .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse-glow 2.4s infinite;
+}
+
+/* ───────────────────────────── Rail lateral ───────────────────────────── */
+
+.rail {
+  position: absolute;
+  top: calc(var(--safe-t) + 74px);
+  right: calc(var(--safe-r) + 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 6;
+}
+
+.rail-btn {
+  position: relative;
+  width: 46px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  backdrop-filter: blur(6px);
+  transition: transform 0.1s, border-color 0.15s, background 0.15s;
+}
+.rail-btn:hover {
+  background: rgba(34, 211, 238, 0.16);
+  border-color: var(--panel-edge-strong);
+}
+.rail-btn:active {
+  transform: scale(0.94);
+}
+.rail-btn.active {
+  background: rgba(34, 211, 238, 0.22);
+  border-color: var(--cyan);
+  box-shadow: var(--shadow-glow);
+}
+.rail-btn .badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #1a0b02;
+  background: var(--amber-soft);
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.6);
+}
+.rail-btn .key {
+  position: absolute;
+  bottom: 1px;
+  right: 3px;
+  font-size: 8px;
+  color: var(--text-mute);
+  font-weight: 700;
+}
+
+/* ─────────────────────── Barra de acciones ─────────────────────── */
+
+.action-bar {
+  position: absolute;
+  right: calc(var(--safe-r) + 12px);
+  bottom: calc(var(--safe-b) + 16px);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 10px;
+  z-index: 6;
+}
+
+.action-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 10px 12px;
+  min-width: 152px;
+  background: var(--panel);
+  border: 1px solid var(--btn-accent, var(--panel-edge));
+  backdrop-filter: blur(8px);
+  animation: slide-left 0.18s ease-out;
+  transition: transform 0.08s, background 0.15s;
+}
+.action-btn:active {
+  transform: scale(0.96);
+}
+.action-btn[data-disabled='true'] {
+  opacity: 0.5;
+}
+.action-btn .glyph {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  background: color-mix(in srgb, var(--btn-accent, #22d3ee) 22%, transparent);
+  border: 1px solid var(--btn-accent, var(--cyan));
+  flex: none;
+}
+.action-btn .txt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+.action-btn .label {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--btn-accent, var(--cyan));
+  white-space: nowrap;
+}
+.action-btn .sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+.action-btn .hotkey {
+  position: absolute;
+  top: -7px;
+  right: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: var(--panel-solid);
+  border: 1px solid var(--panel-edge);
+  color: var(--text-mute);
+}
+.action-btn .progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--btn-accent, var(--cyan));
+  transition: width 0.06s linear;
+}
+
+.hint-bubble {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--safe-b) + 16px);
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  background: rgba(6, 11, 20, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 4;
+  white-space: nowrap;
+}
+
+/* ───────────────────────────── Joystick ───────────────────────────── */
+
+.joystick {
+  position: absolute;
+  left: calc(var(--safe-l) + 16px);
+  bottom: calc(var(--safe-b) + 16px);
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.1), rgba(6, 11, 20, 0.6));
+  border: 1.5px solid rgba(34, 211, 238, 0.3);
+  touch-action: none;
+  z-index: 6;
+}
+.joystick .knob {
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #67e8f9, #0e7490);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 4px 18px rgba(34, 211, 238, 0.45);
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.joystick .ring {
+  position: absolute;
+  inset: 12px;
+  border-radius: 50%;
+  border: 1px dashed rgba(148, 163, 184, 0.22);
+  pointer-events: none;
+}
+
+.sprint-btn {
+  position: absolute;
+  left: calc(var(--safe-l) + 146px);
+  bottom: calc(var(--safe-b) + 24px);
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  z-index: 6;
+}
+.sprint-btn[data-on='true'] {
+  background: rgba(34, 211, 238, 0.28);
+  border-color: var(--cyan);
+}
+
+/* ───────────────────────────── Toasts ───────────────────────────── */
+
+.toasts {
+  position: absolute;
+  top: calc(var(--safe-t) + 74px);
+  left: calc(var(--safe-l) + 10px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 20;
+  pointer-events: none;
+  max-width: 62%;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 13px;
+  background: var(--panel);
+  border-left: 3px solid var(--cyan);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  animation: rise-in 0.2s ease-out;
+  box-shadow: var(--shadow-panel);
+}
+.toast[data-tone='good'] { border-left-color: var(--green); }
+.toast[data-tone='bad'] { border-left-color: var(--red); }
+.toast[data-tone='epic'] {
+  border-left-color: var(--amber-soft);
+  box-shadow: 0 0 26px rgba(251, 191, 36, 0.28);
+}
+.toast .icon { font-size: 17px; }
+.toast .title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.toast .body {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+/* ─────────────────── Decoración lateral en escritorio ─────────────────── */
+
+.backdrop-side {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: min(280px, 22vw);
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  padding: 28px;
+  color: var(--text-mute);
+  pointer-events: none;
+}
+.backdrop-side.left { left: 0; }
+.backdrop-side.right { right: 0; text-align: right; align-items: flex-end; }
+
+@media (min-width: 1100px) and (pointer: fine) {
+  .backdrop-side { display: flex; }
+}
+
+.backdrop-title {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  color: var(--cyan);
+  text-shadow: 0 0 26px rgba(34, 211, 238, 0.4);
+  line-height: 1.1;
+}
+.backdrop-sub {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.backdrop-keys {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.backdrop-keys b {
+  display: inline-block;
+  min-width: 46px;
+  padding: 1px 6px;
+  margin-right: 8px;
+  text-align: center;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+}
+
+/* ──────────── Pantallas bajas: móvil en horizontal ────────────
+   Con 360–420 px de alto el HUD y el rail deben encogerse o el rail
+   se sale por abajo. Todo el gameplay sigue accesible con dos pulgares. */
+
+@media (max-height: 520px) {
+  .hud-top {
+    top: calc(var(--safe-t) + 5px);
+    gap: 5px;
+  }
+  .hud-card {
+    padding: 4px 8px;
+    gap: 2px;
+  }
+  .hud-avatar {
+    width: 24px;
+    height: 24px;
+    border-width: 1.5px;
+  }
+  .hud-money {
+    font-size: 14px;
+  }
+  .hud-name {
+    font-size: 11px;
+  }
+  .hud-level,
+  .hud-meter-label {
+    font-size: 9px;
+  }
+  .bar {
+    height: 6px;
+  }
+  .hud-factory {
+    min-width: 112px;
+  }
+
+  .rail {
+    top: calc(var(--safe-t) + 62px);
+    gap: 4px;
+  }
+  .rail-btn {
+    width: 38px;
+    height: 32px;
+    font-size: 15px;
+  }
+  .rail-btn .key {
+    display: none;
+  }
+
+  .action-bar {
+    bottom: calc(var(--safe-b) + 8px);
+    /* Deja libre la columna del rail lateral para no solaparse con él. */
+    right: calc(var(--safe-r) + 52px);
+    gap: 6px;
+  }
+  .action-btn {
+    min-width: 126px;
+    padding: 6px 12px 6px 8px;
+  }
+  .action-btn .glyph {
+    width: 26px;
+    height: 26px;
+    font-size: 14px;
+  }
+  .action-btn .label {
+    font-size: 11.5px;
+  }
+  .action-btn .sub {
+    font-size: 9.5px;
+    max-width: 96px;
+  }
+
+  .joystick {
+    width: 96px;
+    height: 96px;
+    left: calc(var(--safe-l) + 10px);
+    bottom: calc(var(--safe-b) + 10px);
+  }
+  .joystick .knob {
+    width: 40px;
+    height: 40px;
+  }
+  .sprint-btn {
+    width: 44px;
+    height: 44px;
+    left: calc(var(--safe-l) + 116px);
+    bottom: calc(var(--safe-b) + 14px);
+  }
+
+  .toasts {
+    top: calc(var(--safe-t) + 58px);
+    max-width: 48%;
+  }
+  .toast {
+    padding: 5px 10px;
+  }
+  .toast .title {
+    font-size: 11px;
+  }
+  .toast .body {
+    font-size: 10px;
+  }
+
+  .hint-bubble {
+    bottom: calc(var(--safe-b) + 8px);
+    font-size: 11px;
+    padding: 5px 10px;
+  }
+}
+
+/* Paneles a pantalla completa en móvil horizontal: 410 px de ancho
+   sobre 740 dejaría el juego inutilizable detrás. */
+@media (max-height: 520px) {
+  .panel {
+    width: min(340px, 62%);
+  }
+  .panel-head {
+    padding: 8px 12px;
+  }
+  .panel-head h2 {
+    font-size: 13px;
+  }
+  .panel-body {
+    padding: 9px;
+    gap: 8px;
+  }
+}

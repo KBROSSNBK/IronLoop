@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2021",
+    "moduleResolution": "node",
+    "lib": ["es2021"],
+    "outDir": "lib",
+    /* rootDir apunta al repo para poder COMPARTIR la lógica de juego con el
+       cliente sin duplicar código: las Cloud Functions ejecutan exactamente
+       los mismos reductores puros que `src/services/backend/ops.ts`. */
+    "rootDir": "..",
+    "sourceMap": true,
+    "strict": true,
+    "noImplicitReturns": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*",
+    "../src/types/**/*",
+    "../src/config/**/*",
+    "../src/game/logic/**/*",
+    "../src/services/backend/ops.ts"
+  ],
+  "exclude": ["../src/config/env.ts"]
+}

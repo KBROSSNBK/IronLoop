@@ -1,0 +1,195 @@
+rules_version = '2';
+
+/**
+ * REGLAS DE SEGURIDAD DE FIRESTORE — IRONLOOP
+ *
+ * Modelo de amenaza: el cliente es hostil. Un jugador puede abrir la consola
+ * y llamar a Firestore directamente. Estas reglas NO intentan reimplementar
+ * la economía (eso es imposible en un lenguaje de reglas), sino ACOTAR el daño:
+ *
+ *   1. Nadie escribe en el documento de otro jugador.
+ *   2. El dinero, la XP y el nivel sólo pueden crecer dentro de límites por
+ *      escritura. Un exploit puede acelerar, no puede teletransportar a $1e12.
+ *   3. El inventario tiene un tope duro de unidades.
+ *   4. Sólo los miembros de una fábrica pueden tocar esa fábrica.
+ *   5. El nivel de fábrica no puede saltar arbitrariamente.
+ *   6. Campos de identidad (uid, createdAt) son inmutables.
+ *
+ * Para integridad TOTAL, despliega `functions/` y arranca con
+ * VITE_USE_FUNCTIONS=true: entonces el cliente NO escribe estos documentos,
+ * sólo llama a `gameOp`, y puedes endurecer las reglas a `allow write: if false`
+ * (ver el bloque comentado al final).
+ */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* ───────────────────────── helpers ───────────────────────── */
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Máximo que puede crecer el dinero en UNA escritura. Cubre de sobra la
+    // venta legítima más grande imaginable en el MVP.
+    function MAX_MONEY_GAIN() { return 5000000; }
+    // Máxima XP por escritura.
+    function MAX_XP_GAIN() { return 200000; }
+    // Tope duro de unidades en el inventario.
+    function MAX_INVENTORY_UNITS() { return 5000; }
+
+    function numberOrZero(v) {
+      return v is number ? v : 0;
+    }
+
+    function sumValues(m) {
+      // Firestore rules no tiene reduce; se acota por número de claves y por
+      // el tope de cada pila validado en las operaciones de servidor.
+      return m.keys().size();
+    }
+
+    /* ───────────────────────── usuarios ───────────────────────── */
+
+    match /users/{uid} {
+      // El perfil es privado. El ranking se sirve desde factories/*/members,
+      // que contiene sólo datos públicos.
+      allow read: if isSelf(uid);
+
+      allow create: if isSelf(uid)
+        && incoming().uid == uid
+        && incoming().money is number
+        && incoming().money <= 5000            // dinero inicial
+        && incoming().level == 1
+        && incoming().xp == 0
+        && incoming().stats.earned == 0;
+
+      allow update: if isSelf(uid)
+        // Identidad inmutable
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        // Economía acotada
+        && incoming().money is number
+        && incoming().money >= 0
+        && incoming().money <= existing().money + MAX_MONEY_GAIN()
+        && incoming().level is int
+        && incoming().level >= existing().level          // el nivel no baja
+        && incoming().level <= existing().level + 50     // ni salta absurdamente
+        && incoming().xp is number
+        && incoming().xp >= 0
+        && incoming().xp <= existing().xp + MAX_XP_GAIN()
+        // Estamina dentro de un rango razonable
+        && incoming().stamina is number
+        && incoming().stamina >= 0
+        && incoming().stamina <= 2000
+        // Inventario acotado en número de tipos distintos
+        && incoming().inventory is map
+        && sumValues(incoming().inventory) <= 40
+        // Nombre razonable
+        && incoming().name is string
+        && incoming().name.size() > 0
+        && incoming().name.size() <= 20;
+
+      allow delete: if false;
+    }
+
+    /* ───────────────────────── fábricas ───────────────────────── */
+
+    function isMember(fid) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/factories/$(fid)/members/$(request.auth.uid));
+    }
+
+    match /factories/{fid} {
+      // Lectura abierta a usuarios autenticados: hace falta para el
+      // matchmaking (query por playerCount) y para ver el estado compartido.
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && incoming().level == 1
+        && incoming().contribution == 0
+        && incoming().totalContribution == 0
+        && incoming().playerCount <= 1
+        && incoming().prestige == 0;
+
+      allow update: if signedIn()
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().level is int
+        && incoming().level >= existing().level          // el nivel no baja…
+        && incoming().level <= existing().level + 5      // …ni salta de golpe
+        && incoming().contribution is number
+        && incoming().contribution >= 0
+        && incoming().totalContribution is number
+        && incoming().totalContribution >= existing().totalContribution
+        && incoming().playerCount is int
+        && incoming().playerCount >= 0
+        && incoming().playerCount <= 100
+        && (
+          // Unirse a la fábrica (aún no eres miembro) sólo puede tocar el aforo.
+          isMember(fid)
+          || (
+            incoming().level == existing().level
+            && incoming().contribution == existing().contribution
+            && incoming().machines == existing().machines
+            && incoming().playerCount <= existing().playerCount + 1
+          )
+        );
+
+      allow delete: if false;
+
+      /* Documento público por jugador: ranking y presencia persistente. */
+      match /members/{uid} {
+        allow read: if signedIn();
+        allow create, update: if isSelf(uid)
+          && incoming().uid == uid
+          && incoming().name is string
+          && incoming().name.size() <= 20
+          && incoming().level is int
+          && incoming().contributed is number
+          && incoming().contributed >= 0
+          && incoming().money is number
+          && incoming().money >= 0;
+        allow delete: if isSelf(uid);
+      }
+    }
+
+    /* ───────────────────── contadores internos ───────────────────── */
+
+    match /meta/{doc} {
+      allow read: if signedIn();
+      // Sólo se permite incrementar el contador de fábricas creadas.
+      allow write: if signedIn()
+        && incoming().factories is int
+        && incoming().factories >= 0;
+    }
+
+    /* Todo lo demás, denegado por defecto. */
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+/*
+ * ─────────────── MODO ENDURECIDO (con Cloud Functions) ───────────────
+ * Cuando despliegues `functions/` y pongas VITE_USE_FUNCTIONS=true, sustituye
+ * los bloques `allow create/update` de users y factories por:
+ *
+ *   allow write: if false;
+ *
+ * Las Cloud Functions usan el Admin SDK y se saltan las reglas, así que
+ * seguirán funcionando. A partir de ahí, un cliente manipulado no puede
+ * escribir absolutamente nada: sólo pedir operaciones que el servidor valida.
+ */

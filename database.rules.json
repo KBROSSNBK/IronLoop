@@ -1,0 +1,36 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "presence": {
+      "$factoryId": {
+        ".read": "auth != null",
+
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.hasChildren(['uid','name','level','x','y','dir','act','t'])",
+
+          "uid":  { ".validate": "newData.val() === auth.uid" },
+          "name": { ".validate": "newData.isString() && newData.val().length <= 20" },
+          "level":{ ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10000" },
+
+          "x": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1440" },
+          "y": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1040" },
+
+          "dir": { ".validate": "newData.isString() && newData.val().length <= 6" },
+          "act": { ".validate": "newData.isString() && newData.val().length <= 10" },
+
+          "t": { ".validate": "newData.isNumber() && newData.val() <= now + 5000" },
+
+          "appearance": {
+            ".validate": "newData.hasChildren()",
+            "$slot": { ".validate": "newData.isString() && newData.val().length <= 12" }
+          },
+
+          "$other": { ".validate": false }
+        }
+      }
+    }
+  }
+}

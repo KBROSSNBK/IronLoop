@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>IRONLOOP — Fábrica cooperativa</title>
+    <meta
+      name="description"
+      content="Juego incremental multiplayer cooperativo. Construid una fábrica juntos: extrae, produce, vende y automatiza."
+    />
+    <meta name="theme-color" content="#05070d" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="IRONLOOP" />
+
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="64x64" href="./icons/favicon-64.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="IRONLOOP — Fábrica cooperativa" />
+    <meta
+      property="og:description"
+      content="Juego incremental multiplayer cooperativo en el navegador."
+    />
+    <meta property="og:type" content="website" />
+
+    <style>
+      /* Pantalla de arranque antes de que React monte */
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #05070d;
+        color: #22d3ee;
+        font-family: 'Orbitron', system-ui, sans-serif;
+        letter-spacing: 0.2em;
+        font-weight: 900;
+        font-size: 22px;
+        z-index: 999;
+        transition: opacity 0.35s;
+      }
+      #root:not(:empty) + #boot {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="boot">IRONLOOP</div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
