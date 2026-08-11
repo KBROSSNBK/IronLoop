@@ -445,6 +445,110 @@
   border-color: var(--cyan);
 }
 
+/* ───────────────────────────── Emotes ───────────────────────────── */
+
+.emote-dock {
+  position: absolute;
+  left: calc(var(--safe-l) + 16px);
+  bottom: calc(var(--safe-b) + 16px);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+/* En táctil el joystick ocupa esa esquina: el botón sube por encima. */
+.emote-dock[data-touch='true'] {
+  left: calc(var(--safe-l) + 34px);
+  bottom: calc(var(--safe-b) + 168px);
+}
+
+.emote-btn {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  backdrop-filter: blur(6px);
+  transition: transform 0.1s, border-color 0.15s, background 0.15s;
+}
+.emote-btn:hover {
+  background: rgba(244, 114, 182, 0.18);
+  border-color: var(--magenta);
+}
+.emote-btn:active {
+  transform: scale(0.93);
+}
+.emote-btn.open {
+  background: rgba(244, 114, 182, 0.26);
+  border-color: var(--magenta);
+  box-shadow: 0 0 20px rgba(244, 114, 182, 0.4);
+}
+
+.emote-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 7px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-panel);
+  animation: rise-in 0.14s ease-out;
+}
+
+.emote-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px 6px 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: background 0.12s, transform 0.08s;
+}
+.emote-item:hover {
+  background: rgba(244, 114, 182, 0.2);
+}
+.emote-item:active {
+  transform: scale(0.95);
+}
+.emote-item .ico {
+  font-size: 19px;
+}
+.emote-item .nm {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.emote-item .kb {
+  font-size: 9px;
+  color: var(--text-mute);
+  font-family: var(--font-display);
+  margin-left: auto;
+  padding-left: 6px;
+}
+
+@media (max-height: 520px) {
+  .emote-dock[data-touch='true'] {
+    left: calc(var(--safe-l) + 24px);
+    bottom: calc(var(--safe-b) + 132px);
+  }
+  .emote-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 19px;
+  }
+  .emote-item {
+    padding: 4px 8px 4px 6px;
+  }
+  .emote-item .nm {
+    font-size: 11px;
+  }
+}
+
 /* ───────────────────────────── Toasts ───────────────────────────── */
 
 .toasts {

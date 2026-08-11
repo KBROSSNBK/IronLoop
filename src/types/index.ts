@@ -125,6 +125,10 @@ export interface PresenceState {
   dir: FacingDir;
   act: ActivityKind;
   appearance: Appearance;
+  /** Emote en curso (id de config/emotes) o null. */
+  emote?: string | null;
+  /** Instante en que empezó el emote (ms). */
+  emoteAt?: number;
   /** Timestamp del emisor (ms). */
   t: number;
 }

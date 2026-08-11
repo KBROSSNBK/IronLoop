@@ -4,6 +4,7 @@ import { TopHud } from './hud/TopHud';
 import { SideRail } from './hud/SideRail';
 import { ActionBar } from './hud/ActionBar';
 import { Joystick } from './hud/Joystick';
+import { EmoteWheel } from './hud/EmoteWheel';
 import { Toasts } from './hud/Toasts';
 import { InventoryPanel } from './panels/InventoryPanel';
 import { UpgradesPanel } from './panels/UpgradesPanel';
@@ -42,6 +43,7 @@ export function GameScreen() {
       <TopHud />
       <SideRail />
       <ActionBar />
+      <EmoteWheel />
       {isTouch && <Joystick />}
       <Toasts />
       {showFps && <div className="fps-badge">{fps} FPS</div>}

@@ -3,6 +3,8 @@
  * El bucle de juego lee siempre el mismo objeto, no le importa el dispositivo.
  */
 
+import { EMOTES } from '../../config/emotes';
+
 export type ActionSlot = 'primary' | 'secondary';
 
 interface InputState {
@@ -50,6 +52,22 @@ export function onPanelHotkey(fn: (p: PanelHotkey) => void): () => void {
   return () => panelListeners.delete(fn);
 }
 
+/* ── Emotes ── */
+
+let pendingEmote: string | null = null;
+
+/** Lanza un emote (desde la rueda táctil o desde una tecla). */
+export function triggerEmote(id: string): void {
+  pendingEmote = id;
+}
+
+/** El bucle de juego lo consume una vez por frame. */
+export function consumeEmote(): string | null {
+  const e = pendingEmote;
+  pendingEmote = null;
+  return e;
+}
+
 const PANEL_KEYS: Record<string, PanelHotkey> = {
   keyi: 'inventory',
   keyu: 'upgrades',
@@ -86,6 +104,13 @@ function onKeyDown(e: KeyboardEvent) {
   }
   const panel = PANEL_KEYS[code];
   if (panel) panelListeners.forEach((fn) => fn(panel));
+
+  // Teclas 1–8: emotes rápidos.
+  const digit = /^digit([1-8])$/.exec(code);
+  if (digit) {
+    const def = EMOTES[Number(digit[1]) - 1];
+    if (def) triggerEmote(def.id);
+  }
 }
 
 function onKeyUp(e: KeyboardEvent) {

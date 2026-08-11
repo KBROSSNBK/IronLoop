@@ -23,6 +23,9 @@
 
           "t": { ".validate": "newData.isNumber() && newData.val() <= now + 5000" },
 
+          "emote": { ".validate": "newData.isString() && newData.val().length <= 12" },
+          "emoteAt": { ".validate": "newData.isNumber() && newData.val() <= now + 5000" },
+
           "appearance": {
             ".validate": "newData.hasChildren()",
             "$slot": { ".validate": "newData.isString() && newData.val().length <= 12" }

@@ -9,9 +9,11 @@ import { Fx } from './engine/fx';
 import {
   attachInput,
   consumeActions,
+  consumeEmote,
   input,
   pollInput,
 } from './engine/input';
+import { getEmote } from '../config/emotes';
 import {
   findNearestInteractable,
   machineFrontPoint,
@@ -27,7 +29,7 @@ import {
   getStaticLayer,
 } from './render/world';
 import { computeMachineVisuals, drawMachine, drawRobots } from './render/machines';
-import { drawCharacter, drawNameTag } from './render/character';
+import { drawCharacter, drawEmoteBubble, drawNameTag } from './render/character';
 import { resolveActions, idleHint, type ActionOption } from './systems/interaction';
 import { useSessionStore, reportSprintStamina } from '../state/useSessionStore';
 import { useGameplayStore } from '../state/useGameplayStore';
@@ -51,6 +53,8 @@ interface RemoteEntity {
   act: ActivityKind;
   animTime: number;
   lastAt: number;
+  emote: string | null;
+  emoteAt: number;
 }
 
 export function GameCanvas() {
@@ -71,6 +75,8 @@ export function GameCanvas() {
       dir: 'down' as FacingDir,
       act: 'idle' as ActivityKind,
       animTime: 0,
+      emote: null as string | null,
+      emoteAt: 0,
     };
     const remotes = new Map<string, RemoteEntity>();
     let lastPresenceRef: PresenceState[] | null = null;
@@ -101,6 +107,7 @@ export function GameCanvas() {
     let prevPrimaryHeld = false;
     let holdProgress = 0;
     let autoAction: { kind: ActionOption['kind']; targetId: string; label: string } | null = null;
+    let lastPublishAt = 0;
 
     /* ── canvas / DPR ── */
     const resize = () => {
@@ -224,6 +231,8 @@ export function GameCanvas() {
             act: p.act,
             animTime: Math.random() * 10,
             lastAt: now,
+            emote: p.emote ?? null,
+            emoteAt: p.emoteAt ?? 0,
           });
         } else {
           e.fromX = e.x;
@@ -237,6 +246,13 @@ export function GameCanvas() {
           e.level = p.level;
           e.appearance = p.appearance;
           e.lastAt = now;
+          // Un emote nuevo dispara sus partículas también en remoto.
+          if (p.emote && (p.emoteAt ?? 0) > e.emoteAt) {
+            const def = getEmote(p.emote);
+            if (def?.particle) fx.burst(e.x, e.y - 20, def.particle, 12, 70, 'spark');
+          }
+          e.emote = p.emote ?? null;
+          e.emoteAt = p.emoteAt ?? 0;
         }
       }
       for (const [uid, e] of remotes) {
@@ -298,8 +314,38 @@ export function GameCanvas() {
       // La estamina gastada al esprintar se consolida en el tick de sesión.
       if (sprintDrain > 0) reportSprintStamina(staminaNow);
 
+      /* — emotes — */
+      const emoteId = consumeEmote();
+      let emoteJustStarted = false;
+      if (emoteId) {
+        const def = getEmote(emoteId);
+        if (def) {
+          me.emote = emoteId;
+          me.emoteAt = now;
+          emoteJustStarted = true;
+          if (def.particle) fx.burst(me.x, me.y - 20, def.particle, 16, 85, 'spark');
+          emit('sfx', { name: 'pickup' });
+        }
+      }
+      const emoteDef = getEmote(me.emote);
+      const emoteElapsed = me.emote ? (now - me.emoteAt) / 1000 : 0;
+      if (emoteDef && emoteElapsed > emoteDef.durationMs / 1000) me.emote = null;
+      // Chispas periódicas mientras dura un emote vistoso.
+      if (emoteDef?.particle && me.emote && Math.random() < dt * 6) {
+        fx.burst(me.x + (Math.random() - 0.5) * 20, me.y - 10, emoteDef.particle, 1, 40, 'spark');
+      }
+
       /* — presencia — */
-      if (player && factory) {
+      // Sólo se emite a ritmo alto si hay algo que ver; parado basta un latido.
+      const movingNow = input.x !== 0 || input.y !== 0;
+      const publishNow =
+        movingNow ||
+        emoteJustStarted ||
+        !!me.emote ||
+        busyAction ||
+        now - lastPublishAt >= BALANCE.net.idleHeartbeatMs;
+      if (player && factory && publishNow) {
+        lastPublishAt = now;
         session.publishPresence({
           uid: player.uid,
           name: player.name,
@@ -309,6 +355,8 @@ export function GameCanvas() {
           dir: me.dir,
           act: me.act,
           appearance: player.appearance,
+          emote: me.emote,
+          emoteAt: me.emoteAt,
           t: now,
         });
       }
@@ -446,6 +494,8 @@ export function GameCanvas() {
               level: e.level,
               isLocal: false,
               alpha: 0.98,
+              emote: e.emote,
+              emoteElapsed: e.emote ? (now - e.emoteAt) / 1000 : 0,
             }),
         });
       }
@@ -466,6 +516,8 @@ export function GameCanvas() {
               actionProgress: busyAction
                 ? (nowMs - actionStart) / Math.max(1, actionUntil - actionStart)
                 : undefined,
+              emote: me.emote,
+              emoteElapsed,
             }),
         });
       }
@@ -497,8 +549,12 @@ export function GameCanvas() {
       // Etiquetas y números por encima de la iluminación
       for (const e of remotes.values()) {
         drawNameTag(ctx, e.x, e.y, e.name, e.level, false);
+        if (e.emote) drawEmoteBubble(ctx, e.x, e.y, e.emote, (now - e.emoteAt) / 1000);
       }
-      if (player) drawNameTag(ctx, me.x, me.y, player.name, player.level, true);
+      if (player) {
+        drawNameTag(ctx, me.x, me.y, player.name, player.level, true);
+        if (me.emote) drawEmoteBubble(ctx, me.x, me.y, me.emote, emoteElapsed);
+      }
       fx.drawTexts(ctx);
 
       ctx.restore();
@@ -565,6 +621,12 @@ export function GameCanvas() {
           return false;
         },
         where: () => ({ x: Math.round(me.x), y: Math.round(me.y) }),
+        emoteState: () => ({
+          id: me.emote,
+          elapsed: me.emote ? (Date.now() - me.emoteAt) / 1000 : 0,
+        }),
+        remotes: () =>
+          [...remotes.values()].map((r) => ({ name: r.name, emote: r.emote })),
       };
     }
 

@@ -42,3 +42,6 @@ pnpm-debug.log*
 # Caché de herramientas
 .vite/
 coverage/
+
+# Script local de ayuda para subir a GitHub
+SUBIR-A-GITHUB.bat

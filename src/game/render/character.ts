@@ -5,6 +5,7 @@
  */
 
 import type { Appearance, ActivityKind, FacingDir } from '../../types';
+import { getEmote } from '../../config/emotes';
 
 export interface CharacterDrawArgs {
   x: number;
@@ -21,6 +22,48 @@ export interface CharacterDrawArgs {
   actionProgress?: number;
   /** Atenúa a jugadores remotos con señal antigua. */
   alpha?: number;
+  /** Emote en curso (id de config/emotes). */
+  emote?: string | null;
+  /** Segundos transcurridos desde que empezó el emote. */
+  emoteElapsed?: number;
+}
+
+/** Deformaciones que aplica un emote al cuerpo. */
+interface EmotePose {
+  hop: number;
+  tilt: number;
+  shakeX: number;
+  armL: number;
+  armR: number;
+  legSpread: number;
+}
+
+const NO_POSE: EmotePose = { hop: 0, tilt: 0, shakeX: 0, armL: 0, armR: 0, legSpread: 0 };
+
+function emotePose(anim: string, t: number): EmotePose {
+  switch (anim) {
+    case 'dance': {
+      // Cadera que se balancea, salto en contratiempo y brazos alternos:
+      // simple de calcular pero muy legible desde lejos.
+      const beat = t * 7.2;
+      return {
+        hop: Math.abs(Math.sin(beat)) * 4.5,
+        tilt: Math.sin(beat * 0.5) * 0.2,
+        shakeX: Math.sin(beat * 0.5) * 2.5,
+        armL: Math.max(0, Math.sin(beat)) * 11,
+        armR: Math.max(0, Math.sin(beat + Math.PI)) * 11,
+        legSpread: Math.abs(Math.sin(beat * 0.5)) * 2.5,
+      };
+    }
+    case 'jump':
+      return { ...NO_POSE, hop: Math.max(0, Math.sin(t * 6.5)) * 11, armL: 9, armR: 9 };
+    case 'wave':
+      return { ...NO_POSE, armR: 12 + Math.sin(t * 13) * 3, tilt: 0.05 };
+    case 'shake':
+      return { ...NO_POSE, shakeX: Math.sin(t * 26) * 2.2, tilt: Math.sin(t * 26) * 0.05 };
+    default:
+      return NO_POSE;
+  }
 }
 
 function roundRect(
@@ -72,6 +115,11 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   const workSwing = working ? Math.sin(c.t * 18) : 0;
   const tired = c.act === 'tired';
 
+  const emoteDef = getEmote(c.emote);
+  const emoteT = c.emoteElapsed ?? 0;
+  const emoting = !!emoteDef && emoteT < emoteDef.durationMs / 1000;
+  const pose = emoting ? emotePose(emoteDef.anim, emoteT) : NO_POSE;
+
   ctx.save();
   ctx.globalAlpha = c.alpha ?? 1;
   // Escalado alrededor de la cadera: el resto del dibujo usa coordenadas de mundo.
@@ -79,11 +127,18 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   ctx.scale(CHARACTER_SCALE, CHARACTER_SCALE);
   ctx.translate(-x, -y);
 
-  // Sombra
-  ctx.fillStyle = 'rgba(0,0,0,0.38)';
+  // Sombra: se queda en el suelo aunque el personaje salte.
+  ctx.fillStyle = `rgba(0,0,0,${0.38 - pose.hop * 0.015})`;
   ctx.beginPath();
-  ctx.ellipse(x, y + 16, 10, 3.6, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y + 16, 10 - pose.hop * 0.2, 3.6, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  // El emote inclina, sacude y levanta el cuerpo (la sombra ya está pintada).
+  if (emoting) {
+    ctx.translate(x + pose.shakeX, y - pose.hop);
+    ctx.rotate(pose.tilt);
+    ctx.translate(-x, -y);
+  }
 
   const bodyY = y - 8 - bob;
   const headY = y - 15 - bob;
@@ -94,21 +149,22 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   const legColor = ap.outfit === 'suit' ? shade(ap.outfitColor, -50) : '#26303f';
   ctx.fillStyle = legColor;
   const legOffset = swing * 3;
-  roundRect(ctx, x - 6, y + 4 - bob, 5, 11 + legOffset * 0.3, 2);
+  const sp = pose.legSpread;
+  roundRect(ctx, x - 6 - sp, y + 4 - bob, 5, 11 + legOffset * 0.3, 2);
   ctx.fill();
-  roundRect(ctx, x + 1, y + 4 - bob, 5, 11 - legOffset * 0.3, 2);
+  roundRect(ctx, x + 1 + sp, y + 4 - bob, 5, 11 - legOffset * 0.3, 2);
   ctx.fill();
 
   // Calzado
   ctx.fillStyle = SHOE_COLORS[ap.shoes] ?? '#3b2a1d';
-  roundRect(ctx, x - 7, y + 13 - bob + legOffset * 0.25, 6.5, 4, 1.6);
+  roundRect(ctx, x - 7 - sp, y + 13 - bob + legOffset * 0.25, 6.5, 4, 1.6);
   ctx.fill();
-  roundRect(ctx, x + 0.5, y + 13 - bob - legOffset * 0.25, 6.5, 4, 1.6);
+  roundRect(ctx, x + 0.5 + sp, y + 13 - bob - legOffset * 0.25, 6.5, 4, 1.6);
   ctx.fill();
   if (ap.shoes === 'servo') {
     ctx.fillStyle = ap.accent;
-    ctx.fillRect(x - 7, y + 16 - bob, 6.5, 1);
-    ctx.fillRect(x + 0.5, y + 16 - bob, 6.5, 1);
+    ctx.fillRect(x - 7 - sp, y + 16 - bob, 6.5, 1);
+    ctx.fillRect(x + 0.5 + sp, y + 16 - bob, 6.5, 1);
   }
 
   // Torso
@@ -144,18 +200,20 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   // Brazos
   const armY = bodyY + 2;
   const armSwing = working ? workSwing * 5 : swing * 3.5;
+  const armLY = armY + armSwing * 0.35 - pose.armL;
+  const armRY = armY - armSwing * 0.35 + (working ? 2 : 0) - pose.armR;
   ctx.fillStyle = shade(ap.outfitColor, -28);
-  roundRect(ctx, x - torsoW / 2 - 3.4, armY + armSwing * 0.35, 4, 10, 2);
+  roundRect(ctx, x - torsoW / 2 - 3.4, armLY, 4, 10, 2);
   ctx.fill();
-  roundRect(ctx, x + torsoW / 2 - 0.6, armY - armSwing * 0.35 + (working ? 2 : 0), 4, 10, 2);
+  roundRect(ctx, x + torsoW / 2 - 0.6, armRY, 4, 10, 2);
   ctx.fill();
   // Manos
   ctx.fillStyle = ap.body;
   ctx.beginPath();
-  ctx.arc(x - torsoW / 2 - 1.4, armY + 10 + armSwing * 0.35, 2.1, 0, Math.PI * 2);
+  ctx.arc(x - torsoW / 2 - 1.4, armLY + 10, 2.1, 0, Math.PI * 2);
   ctx.fill();
   ctx.beginPath();
-  ctx.arc(x + torsoW / 2 + 1.4, armY + 10 - armSwing * 0.35 + (working ? 2 : 0), 2.1, 0, Math.PI * 2);
+  ctx.arc(x + torsoW / 2 + 1.4, armRY + 10, 2.1, 0, Math.PI * 2);
   ctx.fill();
 
   // Cabeza
@@ -316,6 +374,68 @@ function drawActionRing(
   ctx.arc(x, y, 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
   ctx.stroke();
   ctx.restore();
+}
+
+/**
+ * Bocadillo del emote. Se dibuja después de la iluminación, junto a la
+ * etiqueta de nombre, para que se lea siempre.
+ */
+export function drawEmoteBubble(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  emoteId: string,
+  elapsed: number,
+): void {
+  const def = getEmote(emoteId);
+  if (!def) return;
+  const total = def.durationMs / 1000;
+  if (elapsed < 0 || elapsed > total) return;
+
+  // Entrada con rebote y salida desvaneciéndose.
+  const inT = Math.min(1, elapsed / 0.22);
+  const pop = 1 + Math.sin(inT * Math.PI) * 0.35;
+  const fade = elapsed > total - 0.4 ? Math.max(0, (total - elapsed) / 0.4) : 1;
+  const float = Math.sin(elapsed * 3) * 2;
+  const by = y - 66 + float;
+
+  ctx.save();
+  ctx.globalAlpha = fade;
+  ctx.translate(x, by);
+  ctx.scale(pop, pop);
+
+  // Bocadillo
+  ctx.fillStyle = 'rgba(8,14,26,0.92)';
+  roundRectPath(ctx, -15, -14, 30, 26, 8);
+  ctx.fill();
+  ctx.strokeStyle = def.particle ?? 'rgba(148,163,184,0.5)';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  // Pico
+  ctx.beginPath();
+  ctx.moveTo(-4, 11);
+  ctx.lineTo(0, 17);
+  ctx.lineTo(4, 11);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(8,14,26,0.92)';
+  ctx.fill();
+
+  ctx.font = '17px "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(def.icon, 0, -1);
+  ctx.restore();
+}
+
+function roundRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  roundRect(ctx, x, y, w, h, r);
 }
 
 /** Etiqueta con nombre y nivel. Se dibuja aparte para quedar sobre todo. */
