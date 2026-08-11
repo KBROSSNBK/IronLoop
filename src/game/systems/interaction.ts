@@ -103,6 +103,54 @@ export function resolveActions(ctx: ActionContext): ActionOption[] {
     return options;
   }
 
+  if (target.kind === 'conveyor' && target.conveyor) {
+    const belt = target.conveyor;
+    const machineId = belt.feeds!;
+    const def = getMachine(machineId);
+    const state = factory.machines[machineId];
+    const beltOn = factory.level >= belt.fromLevel;
+    const machineOn = factory.level >= def.unlockFactoryLevel;
+
+    if (!beltOn || !machineOn || !state) {
+      const need = Math.max(belt.fromLevel, def.unlockFactoryLevel);
+      options.push({
+        kind: 'deposit',
+        targetId: machineId,
+        label: 'CINTA PARADA',
+        sub: `Requiere fábrica nivel ${need}`,
+        icon: '🔌',
+        color: '#64748b',
+        holdable: false,
+        disabled: 'Cinta sin energía',
+      });
+      return options;
+    }
+
+    const settled = settleMachine(state, machineId, factory.level, ctx.now);
+    const loadable = Object.keys(def.input).filter(
+      (item) => (player.inventory[item] ?? 0) > 0 && inputRoom(settled.state, machineId, item) > 0,
+    );
+    const carried = loadable.reduce((a, i) => a + (player.inventory[i] ?? 0), 0);
+
+    options.push({
+      kind: 'deposit',
+      targetId: machineId,
+      label: 'PONER EN CINTA',
+      sub:
+        loadable.length > 0
+          ? `${loadable.map((i) => getItem(i).icon).join('')} ×${carried} → ${def.short}`
+          : `Acepta ${Object.keys(def.input).map((i) => getItem(i).name).join(', ')}`,
+      icon: '🛒',
+      color: '#38bdf8',
+      holdable: true,
+      disabled:
+        loadable.length === 0
+          ? 'No llevas material para esta cinta'
+          : undefined,
+    });
+    return options;
+  }
+
   if (target.kind === 'machine' && target.machine) {
     const def = getMachine(target.id);
     const state = factory.machines[target.id];

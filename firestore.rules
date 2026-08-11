@@ -34,6 +34,18 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    /**
+     * Administradores. Es la autorización REAL del botón de reset: la lista
+     * del cliente (VITE_ADMIN_EMAILS) sólo decide si se pinta el botón.
+     * `email_verified` importa: sin él, un proveedor que permita correos sin
+     * verificar podría suplantar la dirección.
+     */
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['kbros.contacto@gmail.com'];
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -69,6 +81,20 @@ service cloud.firestore {
         && incoming().money <= 5000            // dinero inicial
         && incoming().level == 1
         && incoming().xp == 0
+        && incoming().stats.earned == 0;
+
+      /**
+       * Reinicio de fábrica: el jugador pone SU PROPIO progreso a cero.
+       * Es la única vía por la que el nivel y el dinero pueden bajar, y sólo
+       * puede ir hacia un estado inicial, nunca a valores arbitrarios.
+       */
+      allow update: if isSelf(uid)
+        && incoming().uid == existing().uid
+        && incoming().resetAckAt is number
+        && incoming().resetAckAt > existing().get('resetAckAt', 0)
+        && incoming().level == 1
+        && incoming().xp == 0
+        && incoming().money <= 5000
         && incoming().stats.earned == 0;
 
       allow update: if isSelf(uid)
@@ -118,6 +144,13 @@ service cloud.firestore {
         && incoming().totalContribution == 0
         && incoming().playerCount <= 1
         && incoming().prestige == 0;
+
+      // Un administrador puede reiniciar la fábrica (bajar el nivel), cosa que
+      // las reglas normales prohíben a propósito.
+      allow update: if isAdmin()
+        && incoming().id == existing().id
+        && incoming().level is int
+        && incoming().level >= 1;
 
       allow update: if signedIn()
         && incoming().id == existing().id

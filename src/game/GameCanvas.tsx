@@ -4,6 +4,7 @@ import { DEBUG_ENABLED } from '../config/env';
 import { MACHINE_LIST } from '../config/machines';
 import { SPAWN, STATIONS, TILE } from '../config/world';
 import { factoryProgress, currentStamina } from './logic/progression';
+import { settleRobots } from './logic/robots';
 import { Camera } from './engine/camera';
 import { Fx } from './engine/fx';
 import {
@@ -108,6 +109,14 @@ export function GameCanvas() {
     let holdProgress = 0;
     let autoAction: { kind: ActionOption['kind']; targetId: string; label: string } | null = null;
     let lastPublishAt = 0;
+
+    /* Extracción automática: basta con quedarse quieto medio segundo junto a
+       un yacimiento. Sólo aplica a extraer; máquinas y venta siguen siendo
+       manuales a propósito, porque ahí sí interesa que decidas tú. */
+    const AUTO_GATHER_MS = 500;
+    let nearGatherSince = 0;
+    /** Si lo cancelas a mano, no vuelve a engancharse hasta que te alejes. */
+    let gatherSuppressed = false;
 
     /* ── canvas / DPR ── */
     const resize = () => {
@@ -390,6 +399,7 @@ export function GameCanvas() {
       for (const slot of queued) {
         // Con el modo automático activo, volver a pulsar lo cancela.
         if (slot === 'primary' && autoAction) {
+          if (autoAction.kind === 'gather') gatherSuppressed = true;
           autoAction = null;
           primaryDownAt = 0;
           emit('toast', { title: 'AUTOMÁTICO DETENIDO', icon: '⏹️', tone: 'info' });
@@ -420,6 +430,35 @@ export function GameCanvas() {
         emit('sfx', { name: 'mission' });
       }
 
+      /* Enganche automático al quedarse quieto junto a un yacimiento. */
+      const gatherOpt = actions.find((a) => a.kind === 'gather');
+      const standingStill = input.x === 0 && input.y === 0;
+      if (!gatherOpt) {
+        nearGatherSince = 0;
+        gatherSuppressed = false; // al alejarse se rearma
+      } else if (!standingStill) {
+        nearGatherSince = 0;
+      } else if (nearGatherSince === 0) {
+        nearGatherSince = nowMs;
+      }
+
+      if (
+        gatherOpt &&
+        !gatherOpt.disabled &&
+        !gatherSuppressed &&
+        !autoAction &&
+        nearGatherSince > 0 &&
+        nowMs - nearGatherSince >= AUTO_GATHER_MS
+      ) {
+        autoAction = { kind: 'gather', targetId: gatherOpt.targetId, label: gatherOpt.label };
+        emit('toast', {
+          title: 'EXTRACCIÓN AUTOMÁTICA',
+          body: 'Aléjate o pulsa la acción para parar.',
+          icon: '⛏️',
+          tone: 'good',
+        });
+      }
+
       if (autoAction) {
         const opt = actions.find(
           (a) => a.kind === autoAction!.kind && a.targetId === autoAction!.targetId,
@@ -429,7 +468,10 @@ export function GameCanvas() {
           autoAction = null;
         } else if (opt.disabled) {
           const reason = opt.disabled;
+          const wasGather = autoAction.kind === 'gather';
           autoAction = null;
+          // Evita repetir el aviso mientras sigas plantado en la veta.
+          if (wasGather) gatherSuppressed = true;
           emit('toast', { title: 'AUTOMÁTICO DETENIDO', body: reason, icon: '⏹️', tone: 'bad' });
         } else if (!busyAction && !pendingOp) {
           void runAction(opt);
@@ -469,15 +511,18 @@ export function GameCanvas() {
       const sortables: { y: number; draw: () => void }[] = [];
 
       if (factory) {
-        for (const v of computeMachineVisuals(factory.machines, level, now)) {
+        // Se liquidan los robots también para pintar: lo que ves en los
+        // buffers es exactamente lo que devolverá la próxima operación.
+        const live = settleRobots(factory, now).factory;
+        for (const v of computeMachineVisuals(live.machines, level, now)) {
           sortables.push({
             y: (v.def.ty + v.def.th - 1) * TILE,
             draw: () => drawMachine(ctx, v, time, fx),
           });
         }
+        sortables.push({ y: 1e8, draw: () => drawRobots(ctx, live.robots, time) });
       }
       sortables.push({ y: -1e9, draw: () => drawProps(ctx, time) });
-      sortables.push({ y: 1e8, draw: () => drawRobots(ctx, level, time) });
 
       for (const e of remotes.values()) {
         sortables.push({

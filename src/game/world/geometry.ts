@@ -5,6 +5,7 @@
  */
 
 import {
+  CONVEYORS,
   PROPS,
   STATIONS,
   TILE,
@@ -13,6 +14,8 @@ import {
   WORLD_H,
   WORLD_ROWS,
   WORLD_W,
+  conveyorLoadPoint,
+  type ConveyorDef,
   type Rect,
   type StationDef,
 } from '../../config/world';
@@ -104,7 +107,7 @@ export function moveWithCollision(
 
 /* ─────────────────────────── INTERACCIÓN ─────────────────────────── */
 
-export type InteractableKind = 'station' | 'machine';
+export type InteractableKind = 'station' | 'machine' | 'conveyor';
 
 export interface Interactable {
   kind: InteractableKind;
@@ -118,6 +121,7 @@ export interface Interactable {
   distance: number;
   station?: StationDef;
   machine?: MachineDef;
+  conveyor?: ConveyorDef;
 }
 
 function centerOfStation(s: StationDef) {
@@ -158,6 +162,21 @@ function allInteractables(): Omit<Interactable, 'distance'>[] {
       x: c.x,
       y: c.y,
       machine: m,
+    });
+  }
+  // Extremo de carga de las cintas que alimentan una máquina.
+  for (const c of CONVEYORS) {
+    if (!c.feeds) continue;
+    const p = conveyorLoadPoint(c);
+    list.push({
+      kind: 'conveyor',
+      id: c.id,
+      label: c.label ?? 'CINTA',
+      icon: '🛒',
+      accent: '#38bdf8',
+      x: p.x,
+      y: p.y,
+      conveyor: c,
     });
   }
   cachedInteractables = list;

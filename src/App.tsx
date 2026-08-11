@@ -16,6 +16,24 @@ export default function App() {
   const muted = useUiStore((s) => s.muted);
   const musicOn = useUiStore((s) => s.musicOn);
 
+  /**
+   * Retira la pantalla de arranque en cuanto React ha pintado.
+   *
+   * Antes esto dependía del selector CSS `#root:not(:empty) + #boot`, pero el
+   * navegador no siempre reevalúa `:empty` al montar (sobre todo tras una
+   * recarga provocada por el service worker): el overlay se quedaba opaco a
+   * pantalla completa y el juego parecía no abrir, aunque estuviera cargado
+   * debajo. Quitarlo aquí es determinista.
+   */
+  useEffect(() => {
+    const bootEl = document.getElementById('boot');
+    if (!bootEl) return;
+    bootEl.style.opacity = '0';
+    bootEl.style.pointerEvents = 'none';
+    const id = window.setTimeout(() => bootEl.remove(), 400);
+    return () => window.clearTimeout(id);
+  }, []);
+
   useEffect(() => {
     void boot();
   }, [boot]);

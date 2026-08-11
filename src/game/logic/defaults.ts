@@ -9,6 +9,7 @@ import type {
   LifetimeStats,
   MachineState,
   PlayerState,
+  RobotState,
 } from '../../types';
 
 export function emptyStats(): LifetimeStats {
@@ -51,6 +52,7 @@ export function createPlayerState(user: AuthUser, now = Date.now()): PlayerState
     lastSeenAt: now,
     lastOfflineClaimAt: now,
     onboarded: false,
+    resetAckAt: 0,
   };
 }
 
@@ -68,12 +70,14 @@ export function createFactoryState(id: string, index: number, now = Date.now()):
     contribution: 0,
     totalContribution: 0,
     machines,
+    robots: {},
     stats: { gathered: 0, produced: 0, sold: 0, contributed: 0 },
     objectives: {},
     playerCount: 0,
     createdAt: now,
     updatedAt: now,
     prestige: 0,
+    resetAt: 0,
   };
 }
 
@@ -124,11 +128,20 @@ export function normalizeFactory(raw: Partial<FactoryState>, id: string): Factor
   for (const [k, v] of Object.entries(raw.machines ?? {})) {
     machines[k] = { ...createMachineState(), ...v };
   }
+  const robots: Record<string, RobotState> = {};
+  for (const [k, v] of Object.entries(raw.robots ?? {})) {
+    robots[k] = {
+      level: v?.level ?? 0,
+      lastRunAt: v?.lastRunAt ?? Date.now(),
+      moved: v?.moved ?? 0,
+    };
+  }
   return {
     ...base,
     ...raw,
     id,
     machines,
+    robots,
     stats: { ...base.stats, ...(raw.stats ?? {}) },
     objectives: { ...(raw.objectives ?? {}) },
   } as FactoryState;

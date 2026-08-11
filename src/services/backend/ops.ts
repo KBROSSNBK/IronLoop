@@ -25,6 +25,8 @@ import {
   type UpgradeId,
 } from '../../config/upgrades';
 import { FACTORY_OBJECTIVES } from '../../config/factoryLevels';
+import { ROBOT_CONTRIB_RATIO, getRobot, robotCost } from '../../config/robots';
+import { settleRobots } from '../../game/logic/robots';
 import { STATIONS } from '../../config/world';
 import type {
   FactoryMember,
@@ -33,6 +35,7 @@ import type {
   OfflineReport,
   PlayerState,
 } from '../../types';
+import { createPlayerState } from '../../game/logic/defaults';
 import {
   addToInventory,
   applyFactoryContribution,
@@ -788,7 +791,113 @@ export function opSetAppearance(
   };
 }
 
-/* ───────────────────── 11. TICK DE SESIÓN ───────────────────── */
+/* ───────────────────── 11. COMPRAR / MEJORAR ROBOT ───────────────────── */
+
+export function opBuyRobot(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { robotId: string; now: number },
+): OpOutcome<{ level: number; cost: number }> {
+  const def = getRobot(args.robotId);
+  if (!def) return fail('Robot desconocido');
+  if (factory.level < def.unlockFactoryLevel)
+    return fail(`Requiere fábrica nivel ${def.unlockFactoryLevel}`);
+
+  const cur = factory.robots?.[def.id] ?? { level: 0, lastRunAt: args.now, moved: 0 };
+  if (cur.level >= def.maxLevel) return fail('Nivel máximo');
+
+  const cost = robotCost(def, cur.level);
+  if (player.money < cost) return fail('Dinero insuficiente');
+
+  const events: OpEvent[] = [];
+  let p: PlayerState = { ...player, money: player.money - cost };
+  p = grantXp(p, Math.round(cost * 0.05), events, args.now);
+
+  const robots = {
+    ...(factory.robots ?? {}),
+    [def.id]: { ...cur, level: cur.level + 1, lastRunAt: args.now },
+  };
+  let f: FactoryState = { ...factory, robots, updatedAt: args.now };
+  const contrib = Math.round(cost * ROBOT_CONTRIB_RATIO);
+  f = addContribution(f, contrib, events);
+  p = stat(p, { contributed: contrib });
+
+  events.push({ kind: 'money', amount: -cost });
+  events.push({
+    kind: 'info',
+    text: cur.level === 0 ? `${def.name} desplegado` : `${def.name} → nivel ${cur.level + 1}`,
+  });
+  events.push({ kind: 'contribution', amount: contrib });
+
+  return {
+    ok: true,
+    player: p,
+    factory: f,
+    memberDelta: { contributed: contrib, money: p.money },
+    events,
+    data: { level: cur.level + 1, cost },
+  };
+}
+
+/* ───────────────────── 12. APLICAR REINICIO DE FÁBRICA ───────────────────── */
+
+/**
+ * Cuando un administrador reinicia la fábrica, cada jugador arrastra su propio
+ * progreso a cero la próxima vez que entra. Se conservan únicamente identidad
+ * y aspecto: nombre, foto y skin, que no forman parte del progreso.
+ *
+ * Se hace desde el cliente de cada jugador (y no escribiendo el documento de
+ * todos desde el admin) para que nadie pueda tocar documentos ajenos.
+ */
+export function opApplyFactoryReset(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { now: number },
+): OpOutcome<{ applied: boolean }> {
+  const resetAt = factory.resetAt ?? 0;
+  if (resetAt <= (player.resetAckAt ?? 0)) {
+    return { ok: true, player, factory, events: [], data: { applied: false } };
+  }
+
+  const fresh = createPlayerState(
+    {
+      uid: player.uid,
+      displayName: player.name,
+      photoURL: player.photoURL,
+      email: null,
+    },
+    args.now,
+  );
+
+  const p: PlayerState = {
+    ...fresh,
+    // Identidad y aspecto sobreviven; el progreso no.
+    name: player.name,
+    photoURL: player.photoURL,
+    appearance: player.appearance,
+    factoryId: player.factoryId,
+    createdAt: player.createdAt,
+    onboarded: player.onboarded,
+    resetAckAt: resetAt,
+    lastOfflineClaimAt: args.now,
+  };
+
+  return {
+    ok: true,
+    player: p,
+    factory,
+    memberDelta: { money: p.money },
+    events: [
+      {
+        kind: 'info',
+        text: 'La fábrica se ha reiniciado: todos empezáis de cero',
+      },
+    ],
+    data: { applied: true },
+  };
+}
+
+/* ───────────────────── 13. TICK DE SESIÓN ───────────────────── */
 
 /**
  * Latido de sesión: acumula tiempo jugado y avanza las misiones de tipo
@@ -831,6 +940,8 @@ export type OpName =
   | 'claimOffline'
   | 'useItem'
   | 'setAppearance'
+  | 'buyRobot'
+  | 'applyFactoryReset'
   | 'tick';
 
 type AnyOp = (p: PlayerState, f: FactoryState, args: never) => OpOutcome<never>;
@@ -847,6 +958,8 @@ export const OPS = {
   claimOffline: opClaimOffline,
   useItem: opUseItem,
   setAppearance: opSetAppearance,
+  buyRobot: opBuyRobot,
+  applyFactoryReset: opApplyFactoryReset,
   tick: opTick,
 } as unknown as Record<OpName, AnyOp>;
 
@@ -859,7 +972,20 @@ export function runOp(
   const op = OPS[name];
   if (!op) return fail(`Operación desconocida: ${name}`);
   try {
-    return op(player, factory, args as never) as OpOutcome;
+    // Los robots se liquidan ANTES de cualquier operación: así el material que
+    // han movido mientras nadie miraba ya está en su sitio cuando el jugador
+    // interactúa, y se persiste en la misma transacción.
+    const now =
+      typeof (args as { now?: number })?.now === 'number'
+        ? (args as { now: number }).now
+        : Date.now();
+    const settled = settleRobots(factory, now);
+    const out = op(player, settled.factory, args as never) as OpOutcome;
+    // Aunque la operación falle, conviene guardar el trabajo de los robots.
+    if (!out.ok && settled.transfers.length > 0) {
+      return { ...out, factory: settled.factory };
+    }
+    return out;
   } catch (e) {
     return fail(e instanceof Error ? e.message : 'Error interno');
   }

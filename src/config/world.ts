@@ -189,15 +189,39 @@ export interface ConveyorDef {
   len: number;
   dir: 'right' | 'left' | 'up' | 'down';
   fromLevel: number;
+  /**
+   * Máquina a la que entrega la cinta. Si está definida, la cinta deja de ser
+   * decoración: puedes acercarte a su extremo de carga y soltar material, que
+   * viaja hasta esa máquina. Ahorra el paseo de ida y vuelta.
+   */
+  feeds?: string;
+  /** Nombre corto para la UI de interacción. */
+  label?: string;
 }
 
 export const CONVEYORS: ConveyorDef[] = [
-  { id: 'c1', tx: 11, ty: 6.5, len: 12, dir: 'right', fromLevel: 2 },
-  { id: 'c2', tx: 29, ty: 9, len: 5, dir: 'down', fromLevel: 2 },
+  { id: 'c1', tx: 11, ty: 6.5, len: 12, dir: 'right', fromLevel: 2, feeds: 'smelter', label: 'CINTA A FUNDIDORA' },
+  { id: 'c2', tx: 29, ty: 9, len: 5, dir: 'down', fromLevel: 2, feeds: 'assembler', label: 'CINTA A ENSAMBLADORA' },
   { id: 'c3', tx: 23, ty: 16.5, len: 8, dir: 'left', fromLevel: 4 },
   { id: 'c4', tx: 18, ty: 16, len: 4, dir: 'down', fromLevel: 4 },
-  { id: 'c5', tx: 16, ty: 16.5, len: 7, dir: 'left', fromLevel: 6 },
+  { id: 'c5', tx: 16, ty: 16.5, len: 7, dir: 'left', fromLevel: 6, feeds: 'lab', label: 'CINTA A LABORATORIO' },
 ];
+
+/** Punto de carga de una cinta: el extremo por el que entra el material. */
+export function conveyorLoadPoint(c: ConveyorDef): { x: number; y: number } {
+  const w = c.dir === 'left' || c.dir === 'right' ? c.len : 0.7;
+  const h = c.dir === 'up' || c.dir === 'down' ? c.len : 0.7;
+  switch (c.dir) {
+    case 'right':
+      return { x: c.tx * TILE, y: (c.ty + h / 2) * TILE };
+    case 'left':
+      return { x: (c.tx + w) * TILE, y: (c.ty + h / 2) * TILE };
+    case 'down':
+      return { x: (c.tx + w / 2) * TILE, y: c.ty * TILE };
+    case 'up':
+      return { x: (c.tx + w / 2) * TILE, y: (c.ty + h) * TILE };
+  }
+}
 
 /** Puestos de robots — aparecen cuando la automatización sube. */
 export const ROBOT_ROUTES: { id: string; points: { x: number; y: number }[]; fromLevel: number }[] = [

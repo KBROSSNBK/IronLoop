@@ -7,7 +7,8 @@
 import { MACHINE_LIST, MACHINE_UPGRADE, type MachineDef } from '../../config/machines';
 import { ROBOT_ROUTES, TILE } from '../../config/world';
 import { getItem } from '../../config/items';
-import type { MachineState } from '../../types';
+import { ROBOTS } from '../../config/robots';
+import type { MachineState, RobotState } from '../../types';
 import { settleMachine, type SettleResult } from '../logic/production';
 import type { Fx } from '../engine/fx';
 import { roundRect } from './world';
@@ -296,14 +297,21 @@ function drawGear(
   ctx.restore();
 }
 
-/** Robots de transporte: prueba visual de que la fábrica se automatiza. */
+/**
+ * Robots de transporte. Sólo se dibujan los que la fábrica ha comprado de
+ * verdad: así ver un robot patrullando significa que alguien lo pagó y que
+ * está moviendo material, no que se alcanzó cierto nivel.
+ */
 export function drawRobots(
   ctx: CanvasRenderingContext2D,
-  factoryLevel: number,
+  robots: Record<string, RobotState>,
   time: number,
 ): void {
-  for (const route of ROBOT_ROUTES) {
-    if (factoryLevel < route.fromLevel) continue;
+  for (const def of ROBOTS) {
+    const state = robots?.[def.id];
+    if (!state || state.level <= 0) continue;
+    const route = ROBOT_ROUTES.find((r) => r.id === def.routeId);
+    if (!route) continue;
     const pts = route.points;
     const segs = pts.length;
     const speed = 0.16;

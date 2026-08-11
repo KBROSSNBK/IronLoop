@@ -51,6 +51,11 @@ export interface PlayerState {
   /** Timestamp de la última liquidación de producción offline. */
   lastOfflineClaimAt: number;
   onboarded: boolean;
+  /**
+   * Último reinicio de fábrica que este jugador ya ha aplicado a su progreso.
+   * Si `factory.resetAt` es mayor, el cliente ejecuta el reinicio al entrar.
+   */
+  resetAckAt: number;
 }
 
 /* ─────────────────────────── FÁBRICA ─────────────────────────── */
@@ -66,6 +71,15 @@ export interface MachineState {
   cycleStartAt: number;
   /** Ciclos totales completados (para métricas y objetivos). */
   cycles: number;
+}
+
+/** Robot logístico comprado por la fábrica. */
+export interface RobotState {
+  level: number;
+  /** Instante desde el que se cuenta su trabajo pendiente (ms epoch). */
+  lastRunAt: number;
+  /** Unidades transportadas en total (métrica visible en el Taller). */
+  moved: number;
 }
 
 export interface FactoryStats {
@@ -85,6 +99,8 @@ export interface FactoryState {
   /** Contribución histórica total. */
   totalContribution: number;
   machines: Record<string, MachineState>;
+  /** robotId → estado. Vacío hasta que alguien compra el primero. */
+  robots: Record<string, RobotState>;
   stats: FactoryStats;
   /** objetivoId → progreso; los completados se marcan con `-1`. */
   objectives: Record<string, number>;
@@ -93,6 +109,13 @@ export interface FactoryState {
   updatedAt: number;
   /** Reservado para el sistema de prestigio (fase futura). */
   prestige: number;
+  /**
+   * Instante del último reinicio administrativo. Cuando sube, cada jugador
+   * reinicia su propio progreso la próxima vez que entra (ver `resetAckAt`).
+   * Se hace así, y no escribiendo el documento de cada usuario, porque un
+   * administrador no debe poder tocar documentos ajenos.
+   */
+  resetAt: number;
 }
 
 /** Documento ligero por miembro (Firestore: factories/{fid}/members/{uid}).

@@ -280,6 +280,7 @@ async function enterGame(
         useUiStore.getState().celebrateFactory(f.level);
         emit('factoryLevelUp', { level: f.level });
       }
+      void maybeApplyFactoryReset(b, get, set);
     }),
     b.watchMembers(factoryId, (m) => set({ members: m })),
     b.watchPresence(factoryId, user.uid, (list) => set({ presence: list })),
@@ -287,6 +288,11 @@ async function enterGame(
 
   // Espera al primer snapshot de fábrica antes de declarar la sesión lista.
   await waitFor(() => get().factory !== null, 6000);
+
+  // Si un administrador reinició la fábrica mientras no estabas, tu progreso
+  // se pone a cero aquí, antes de mostrar nada.
+  await maybeApplyFactoryReset(b, get, set);
+
   set({ phase: 'ready' });
 
   // Producción offline acumulada.
@@ -325,6 +331,42 @@ async function enterGame(
     window.removeEventListener('pagehide', bye);
     window.removeEventListener('beforeunload', bye);
   });
+}
+
+/**
+ * Aplica el reinicio de fábrica al progreso propio si aún no se ha aplicado.
+ * Idempotente: la operación fija `resetAckAt`, así que sólo corre una vez.
+ */
+let applyingReset = false;
+async function maybeApplyFactoryReset(
+  b: Backend,
+  get: () => SessionState,
+  set: (partial: Partial<SessionState>) => void,
+): Promise<void> {
+  if (applyingReset) return;
+  const { player, factory } = get();
+  if (!player || !factory) return;
+  if ((factory.resetAt ?? 0) <= (player.resetAckAt ?? 0)) return;
+
+  applyingReset = true;
+  try {
+    const out = await b.runOp(player.uid, factory.id, 'applyFactoryReset', {
+      now: Date.now(),
+    });
+    if (out.ok && out.player) set({ player: out.player, offlineReport: null });
+    if (out.ok && (out.data as { applied?: boolean } | undefined)?.applied) {
+      useUiStore.getState().pushToast({
+        title: 'FÁBRICA REINICIADA',
+        body: 'Todos los operarios empezáis de cero.',
+        icon: '♻️',
+        tone: 'epic',
+      });
+    }
+  } catch (e) {
+    console.error('[reset] no se pudo aplicar', e);
+  } finally {
+    applyingReset = false;
+  }
 }
 
 /** El bucle de juego registra aquí la estamina gastada por sprint. */

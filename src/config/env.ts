@@ -75,4 +75,21 @@ export const ADMIN_UIDS: string[] = ((env.VITE_ADMIN_UIDS as string) || '')
   .map((s) => s.trim())
   .filter(Boolean);
 
+/**
+ * Correos con permisos de administrador.
+ *
+ * Ojo: esto sólo decide si se PINTA el botón. La autorización real vive en
+ * `firestore.rules`, que comprueba `request.auth.token.email`; sin eso, un
+ * cliente manipulado podría enseñarse el botón a sí mismo.
+ */
+export const ADMIN_EMAILS: string[] = ((env.VITE_ADMIN_EMAILS as string) || '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return ADMIN_EMAILS.includes(email.toLowerCase());
+}
+
 export const APP_VERSION = '0.1.0-mvp';

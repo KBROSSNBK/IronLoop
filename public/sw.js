@@ -2,21 +2,19 @@
  * Service Worker de IRONLOOP.
  *
  * Estrategia:
- *  · App shell (HTML/JS/CSS/iconos) → cache-first con actualización en segundo
- *    plano: la partida abre al instante y sin conexión muestra un aviso claro.
- *  · Peticiones a Firebase / Google → SIEMPRE red. Nunca se cachean datos de
- *    juego: el estado debe venir del servidor.
+ *  · Navegación (HTML) → SIEMPRE red primero, con la caché sólo como red de
+ *    seguridad si no hay conexión. Así un despliegue nuevo se ve al instante.
+ *  · Assets con hash en el nombre → caché primero (son inmutables).
+ *  · Firebase / Google → nunca se cachean: el estado debe venir del servidor.
+ *
+ * IMPORTANTE: sube VERSION en cada cambio de esta estrategia. Al activarse,
+ * borra todas las cachés anteriores y avisa a las pestañas para que recarguen,
+ * lo que evita que un móvil se quede clavado en una versión antigua.
  */
 
-const VERSION = 'ironloop-v1';
-const SHELL = [
-  './',
-  './index.html',
-  './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/favicon-64.png',
-];
+const VERSION = 'ironloop-v3';
+
+const SHELL = ['./', './index.html', './manifest.webmanifest'];
 
 const NETWORK_ONLY_HOSTS = [
   'firestore.googleapis.com',
@@ -28,6 +26,8 @@ const NETWORK_ONLY_HOSTS = [
   'apis.google.com',
   'accounts.google.com',
   'cloudfunctions.net',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
 ];
 
 self.addEventListener('install', (event) => {
@@ -45,44 +45,65 @@ self.addEventListener('activate', (event) => {
     caches
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => {
+        // Avisa a las pestañas abiertas de que hay versión nueva.
+        for (const client of clients) client.postMessage({ type: 'SW_UPDATED', version: VERSION });
+      }),
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
-  const url = new URL(req.url);
+  let url;
+  try {
+    url = new URL(req.url);
+  } catch {
+    return;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   if (NETWORK_ONLY_HOSTS.some((h) => url.hostname.includes(h))) return;
 
-  // Navegación: red primero (para recibir despliegues nuevos), cache de reserva.
+  // Navegación: red primero. Nunca se sirve HTML viejo si hay conexión.
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-store' })
         .then((res) => {
           const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put('./index.html', copy));
+          caches.open(VERSION).then((c) => c.put('./index.html', copy)).catch(() => {});
           return res;
         })
-        .catch(() => caches.match('./index.html').then((r) => r ?? Response.error())),
+        .catch(() =>
+          caches
+            .match('./index.html')
+            .then((r) => r ?? new Response('Sin conexión', { status: 503 })),
+        ),
     );
     return;
   }
 
-  // Recursos estáticos: cache primero + revalidación silenciosa.
+  // Sólo se cachean recursos propios. Los assets llevan hash: son inmutables.
+  if (url.origin !== self.location.origin) return;
+
   event.respondWith(
     caches.match(req).then((cached) => {
-      const network = fetch(req)
+      if (cached) return cached;
+      return fetch(req)
         .then((res) => {
-          if (res.ok && url.origin === self.location.origin) {
+          if (res.ok) {
             const copy = res.clone();
-            caches.open(VERSION).then((c) => c.put(req, copy));
+            caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {});
           }
           return res;
         })
-        .catch(() => cached ?? Response.error());
-      return cached ?? network;
+        .catch(() => new Response('', { status: 504 }));
     }),
   );
 });
