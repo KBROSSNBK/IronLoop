@@ -109,6 +109,44 @@ detecta y muestra un mensaje explícito.
 
 ---
 
+## 7b. Login fiable en móvil (opcional)
+
+Por defecto el login usa `<proyecto>.firebaseapp.com` como `authDomain`. Eso
+significa que el diálogo de Google vive en **otro dominio** distinto al de tu
+app, así que depende de cookies de terceros. Safari/iOS las bloquea por
+defecto y Chrome está en ello, de modo que `signInWithRedirect` puede fallar en
+bastantes móviles.
+
+La solución recomendada por Firebase es servir el handler de OAuth desde **tu
+propio dominio**. Firebase Hosting ya lo publica en `/__/auth/handler`, pero
+Google sólo autoriza automáticamente el redirect de `firebaseapp.com`, así que
+hay que darlo de alta a mano:
+
+1. <https://console.cloud.google.com/apis/credentials> (elige tu proyecto).
+2. En **ID de cliente de OAuth 2.0**, abre el llamado
+   *Web client (auto created by Google Service)*.
+3. En **URI de redireccionamiento autorizados**, añade:
+
+   ```
+   https://TU-PROYECTO.web.app/__/auth/handler
+   ```
+
+   (y el de tu dominio propio, si tienes uno).
+4. Guarda y espera un par de minutos a que propague.
+5. En `.env`:
+
+   ```env
+   VITE_AUTH_SAME_ORIGIN=true
+   ```
+
+6. `npm run deploy`.
+
+> ⚠️ Si activas `VITE_AUTH_SAME_ORIGIN=true` **sin** hacer los pasos 1–4, el
+> login fallará con `Error 400: redirect_uri_mismatch`. Con la opción en
+> `false` (el valor por defecto) todo funciona sin tocar nada.
+
+---
+
 ## 8. Desplegar las Security Rules
 
 ```bash

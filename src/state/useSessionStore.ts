@@ -338,14 +338,21 @@ function staminaOverride(): number | undefined {
   return v;
 }
 
+/**
+ * Espera activa con temporizador, NO con requestAnimationFrame: en una pestaña
+ * en segundo plano el navegador congela los frames y la carga se quedaría
+ * colgada para siempre en la pantalla de "Sincronizando maquinaria".
+ */
 function waitFor(pred: () => boolean, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
+    if (pred()) return resolve();
     const start = Date.now();
-    const check = () => {
-      if (pred() || Date.now() - start > timeoutMs) return resolve();
-      requestAnimationFrame(check);
-    };
-    check();
+    const id = window.setInterval(() => {
+      if (pred() || Date.now() - start > timeoutMs) {
+        window.clearInterval(id);
+        resolve();
+      }
+    }, 50);
   });
 }
 

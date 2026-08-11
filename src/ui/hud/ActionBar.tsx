@@ -9,6 +9,8 @@ const HOTKEYS = ['E', 'Q', ''];
 export function ActionBar() {
   const actions = useGameplayStore((s) => s.actions);
   const progress = useGameplayStore((s) => s.actionProgress);
+  const holdProgress = useGameplayStore((s) => s.holdProgress);
+  const autoAction = useGameplayStore((s) => s.autoAction);
   const hint = useGameplayStore((s) => s.hint);
   const isTouch = useUiStore((s) => s.isTouch);
   const setPanel = useUiStore((s) => s.setPanel);
@@ -55,11 +57,20 @@ export function ActionBar() {
             <span className="sub">{opt.disabled ?? opt.sub}</span>
           </span>
           {!isTouch && HOTKEYS[i] && <span className="hotkey">{HOTKEYS[i]}</span>}
+          {i === 0 && autoAction === opt.label && <span className="auto-badge">♾️ AUTO</span>}
           {i === 0 && progress > 0 && progress < 1 && (
             <span className="progress" style={{ width: `${progress * 100}%` }} />
           )}
+          {/* Aro de carga hacia el modo automático al mantener pulsado */}
+          {i === 0 && holdProgress > 0 && (
+            <span className="hold-fill" style={{ width: `${holdProgress * 100}%` }} />
+          )}
         </button>
       ))}
+
+      {actions[0]?.holdable && !autoAction && (
+        <span className="auto-tip">Mantén pulsado 3 s para automático</span>
+      )}
     </div>
   );
 }

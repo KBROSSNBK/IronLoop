@@ -77,9 +77,24 @@
   pointer-events: auto;
 }
 
+/* La tarjeta de identidad se ajusta a su contenido: si creciera a todo lo
+   ancho, las barras de XP y estamina se estirarían muchísimo y dominarían
+   visualmente la pantalla. */
 .hud-identity {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+}
+
+.hud-meters {
+  display: flex;
+  gap: 8px;
+}
+
+.hud-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 104px;
 }
 
 .hud-row {
@@ -325,6 +340,38 @@
   transition: width 0.06s linear;
 }
 
+/* Relleno que avanza mientras mantienes pulsado hacia el modo automático */
+.action-btn .hold-fill {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--btn-accent, #22d3ee) 26%, transparent);
+  pointer-events: none;
+  transition: width 0.08s linear;
+}
+
+.action-btn .auto-badge {
+  position: absolute;
+  top: -8px;
+  left: 8px;
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #04121a;
+  background: var(--lime);
+  box-shadow: 0 0 12px rgba(163, 230, 53, 0.6);
+}
+
+.auto-tip {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-mute);
+  background: rgba(6, 11, 20, 0.8);
+  padding: 3px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  pointer-events: none;
+}
+
 .hint-bubble {
   position: absolute;
   left: 50%;
@@ -345,10 +392,11 @@
 
 /* ───────────────────────────── Joystick ───────────────────────────── */
 
+/* Separado del borde: pegado a la esquina resulta incómodo para el pulgar. */
 .joystick {
   position: absolute;
-  left: calc(var(--safe-l) + 16px);
-  bottom: calc(var(--safe-b) + 16px);
+  left: calc(var(--safe-l) + 34px);
+  bottom: calc(var(--safe-b) + 34px);
   width: 118px;
   height: 118px;
   border-radius: 50%;
@@ -380,8 +428,8 @@
 
 .sprint-btn {
   position: absolute;
-  left: calc(var(--safe-l) + 146px);
-  bottom: calc(var(--safe-b) + 24px);
+  left: calc(var(--safe-l) + 164px);
+  bottom: calc(var(--safe-b) + 42px);
   width: 54px;
   height: 54px;
   border-radius: 50%;
@@ -570,8 +618,8 @@
   .joystick {
     width: 96px;
     height: 96px;
-    left: calc(var(--safe-l) + 10px);
-    bottom: calc(var(--safe-b) + 10px);
+    left: calc(var(--safe-l) + 24px);
+    bottom: calc(var(--safe-b) + 24px);
   }
   .joystick .knob {
     width: 40px;
@@ -580,8 +628,11 @@
   .sprint-btn {
     width: 44px;
     height: 44px;
-    left: calc(var(--safe-l) + 116px);
-    bottom: calc(var(--safe-b) + 14px);
+    left: calc(var(--safe-l) + 130px);
+    bottom: calc(var(--safe-b) + 30px);
+  }
+  .hud-meter {
+    width: 88px;
   }
 
   .toasts {

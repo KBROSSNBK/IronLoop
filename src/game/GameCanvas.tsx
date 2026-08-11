@@ -32,7 +32,7 @@ import { resolveActions, idleHint, type ActionOption } from './systems/interacti
 import { useSessionStore, reportSprintStamina } from '../state/useSessionStore';
 import { useGameplayStore } from '../state/useGameplayStore';
 import { useUiStore } from '../state/useUiStore';
-import { on } from '../services/bus';
+import { emit, on } from '../services/bus';
 import type { ActivityKind, FacingDir, PresenceState } from '../types';
 
 interface RemoteEntity {
@@ -91,6 +91,16 @@ export function GameCanvas() {
     let target: Interactable | null = null;
     let actions: ActionOption[] = [];
     let pendingOp = false;
+
+    /* Modo automático: mantener pulsada la acción principal durante
+       AUTO_HOLD_MS la deja "enganchada" y se sigue repitiendo sola aunque
+       sueltes el botón. Se corta al volver a pulsar, al alejarse o cuando
+       la acción deja de ser posible. */
+    const AUTO_HOLD_MS = 3000;
+    let primaryDownAt = 0;
+    let prevPrimaryHeld = false;
+    let holdProgress = 0;
+    let autoAction: { kind: ActionOption['kind']; targetId: string; label: string } | null = null;
 
     /* ── canvas / DPR ── */
     const resize = () => {
@@ -323,15 +333,62 @@ export function GameCanvas() {
         actions = [];
       }
 
+      /* — pulsaciones y modo automático — */
+      if (input.primaryHeld && !prevPrimaryHeld) primaryDownAt = nowMs;
+      if (!input.primaryHeld) primaryDownAt = 0;
+      prevPrimaryHeld = input.primaryHeld;
+
       const queued = consumeActions();
       for (const slot of queued) {
-        const idx = slot === 'primary' ? 0 : 1;
-        const opt = actions[idx];
+        // Con el modo automático activo, volver a pulsar lo cancela.
+        if (slot === 'primary' && autoAction) {
+          autoAction = null;
+          primaryDownAt = 0;
+          emit('toast', { title: 'AUTOMÁTICO DETENIDO', icon: '⏹️', tone: 'info' });
+          emit('sfx', { name: 'click' });
+          continue;
+        }
+        const opt = actions[slot === 'primary' ? 0 : 1];
         if (opt) void runAction(opt);
       }
-      // Mantener pulsado repite la acción principal si es sostenible.
-      if (input.primaryHeld && !busyAction && !pendingOp && actions[0]?.holdable) {
-        void runAction(actions[0]);
+
+      // Activación: 3 s manteniendo pulsada una acción repetible.
+      const primary = actions[0];
+      holdProgress =
+        !autoAction && input.primaryHeld && primaryDownAt > 0 && primary?.holdable
+          ? Math.min(1, (nowMs - primaryDownAt) / AUTO_HOLD_MS)
+          : 0;
+
+      if (!autoAction && holdProgress >= 1 && primary) {
+        autoAction = { kind: primary.kind, targetId: primary.targetId, label: primary.label };
+        holdProgress = 0;
+        primaryDownAt = 0;
+        emit('toast', {
+          title: `AUTOMÁTICO: ${primary.label}`,
+          body: 'Se repetirá solo. Pulsa de nuevo para parar.',
+          icon: '♾️',
+          tone: 'good',
+        });
+        emit('sfx', { name: 'mission' });
+      }
+
+      if (autoAction) {
+        const opt = actions.find(
+          (a) => a.kind === autoAction!.kind && a.targetId === autoAction!.targetId,
+        );
+        if (!opt) {
+          // Te has alejado o la acción ya no existe.
+          autoAction = null;
+        } else if (opt.disabled) {
+          const reason = opt.disabled;
+          autoAction = null;
+          emit('toast', { title: 'AUTOMÁTICO DETENIDO', body: reason, icon: '⏹️', tone: 'bad' });
+        } else if (!busyAction && !pendingOp) {
+          void runAction(opt);
+        }
+      } else if (input.primaryHeld && !busyAction && !pendingOp && primary?.holdable) {
+        // Mantener pulsado repite la acción principal aunque no llegue a 3 s.
+        void runAction(primary);
       }
 
       /* — cámara y efectos — */
@@ -473,6 +530,8 @@ export function GameCanvas() {
           actionProgress: busyAction
             ? (nowMs - actionStart) / Math.max(1, actionUntil - actionStart)
             : 0,
+          holdProgress,
+          autoAction: autoAction?.label ?? null,
         });
       }
 

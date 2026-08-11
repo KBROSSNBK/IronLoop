@@ -40,33 +40,39 @@ export function TopHud() {
           </div>
         </div>
 
-        <div className="hud-stack" style={{ minWidth: 0 }}>
-          <div className="hud-meter-label">
-            <span>XP</span>
-            <span className="mono-num">
-              {compact(player.xp)} / {compact(xpForLevel(player.level))}
-            </span>
-          </div>
-          <div className="bar">
-            <i style={{ width: `${xpRatio * 100}%`, background: 'var(--grad-violet)' }} />
+        {/* Dos medidores compactos en fila: ocupan mucho menos ancho que
+            dos barras a lo largo de toda la tarjeta. */}
+        <div className="hud-meters">
+          <div className="hud-meter">
+            <div className="hud-meter-label">
+              <span>XP</span>
+              <span className="mono-num">
+                {compact(player.xp)}/{compact(xpForLevel(player.level))}
+              </span>
+            </div>
+            <div className="bar">
+              <i style={{ width: `${xpRatio * 100}%`, background: 'var(--grad-violet)' }} />
+            </div>
           </div>
 
-          <div className="hud-meter-label">
-            <span>ESTAMINA</span>
-            <span className="mono-num">
-              {Math.round(stamina)} / {Math.round(staminaMax)}
-            </span>
-          </div>
-          <div className="bar">
-            <i
-              style={{
-                width: `${staRatio * 100}%`,
-                background:
-                  staRatio < 0.2
-                    ? 'linear-gradient(135deg,#f87171,#dc2626)'
-                    : 'linear-gradient(135deg,#4ade80,#16a34a)',
-              }}
-            />
+          <div className="hud-meter">
+            <div className="hud-meter-label">
+              <span>EST</span>
+              <span className="mono-num">
+                {Math.round(stamina)}/{Math.round(staminaMax)}
+              </span>
+            </div>
+            <div className="bar">
+              <i
+                style={{
+                  width: `${staRatio * 100}%`,
+                  background:
+                    staRatio < 0.2
+                      ? 'linear-gradient(135deg,#f87171,#dc2626)'
+                      : 'linear-gradient(135deg,#4ade80,#16a34a)',
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>

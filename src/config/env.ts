@@ -23,18 +23,28 @@ export const FIREBASE_CONFIG = {
 /**
  * authDomain efectivo.
  *
- * Si la app se sirve desde su propio dominio de Firebase Hosting, usamos ESE
- * dominio como authDomain en lugar de `<proyecto>.firebaseapp.com`. Firebase
- * Hosting publica el handler de OAuth en `/__/auth/handler`, así que el login
- * pasa a ser del MISMO origen y deja de depender de cookies de terceros.
+ * Por defecto se usa el `<proyecto>.firebaseapp.com` que viene en la
+ * configuración, porque es el ÚNICO redirect URI que Google registra
+ * automáticamente al activar el proveedor. Usar otro dominio sin darlo de alta
+ * provoca `Error 400: redirect_uri_mismatch` en el login.
  *
- * Eso es justo lo que rompe `signInWithRedirect` en Safari/iOS y en Chrome con
- * el bloqueo de cookies de terceros activado — es decir, en buena parte de los
- * móviles. Fuera de Hosting se usa el valor configurado en .env.
+ * Opcionalmente se puede servir el handler de OAuth desde el propio dominio de
+ * Hosting (mismo origen), lo que evita depender de cookies de terceros y hace
+ * `signInWithRedirect` mucho más fiable en Safari/iOS. Para activarlo:
+ *
+ *   1. Google Cloud Console → APIs y servicios → Credenciales
+ *   2. Abrir el "Web client (auto created by Google Service)" del proyecto
+ *   3. Añadir en *URI de redireccionamiento autorizados*:
+ *        https://TU-DOMINIO/__/auth/handler
+ *   4. Poner VITE_AUTH_SAME_ORIGIN=true y volver a desplegar
+ *
+ * Ver FIREBASE_SETUP.md § "Login fiable en móvil".
  */
+export const AUTH_SAME_ORIGIN = env.VITE_AUTH_SAME_ORIGIN === 'true';
+
 export function resolveAuthDomain(): string | undefined {
   const configured = FIREBASE_CONFIG.authDomain;
-  if (typeof window === 'undefined') return configured;
+  if (!AUTH_SAME_ORIGIN || typeof window === 'undefined') return configured;
   const host = window.location.hostname;
   if (host.endsWith('.web.app') || host.endsWith('.firebaseapp.com')) return host;
   return configured;
