@@ -47,16 +47,12 @@ service cloud.firestore {
     function MAX_MONEY_GAIN() { return 5000000; }
     // Máxima XP por escritura.
     function MAX_XP_GAIN() { return 200000; }
-    // Tope duro de unidades en el inventario.
-    function MAX_INVENTORY_UNITS() { return 5000; }
 
-    function numberOrZero(v) {
-      return v is number ? v : 0;
-    }
-
-    function sumValues(m) {
-      // Firestore rules no tiene reduce; se acota por número de claves y por
-      // el tope de cada pila validado en las operaciones de servidor.
+    // Firestore rules no tiene `reduce`, así que no se puede sumar el
+    // contenido del inventario. Se acota el número de TIPOS distintos; el
+    // tamaño de cada pila lo validan las operaciones (ops.ts) contra la
+    // capacidad real del jugador.
+    function distinctKeys(m) {
       return m.keys().size();
     }
 
@@ -95,7 +91,7 @@ service cloud.firestore {
         && incoming().stamina <= 2000
         // Inventario acotado en número de tipos distintos
         && incoming().inventory is map
-        && sumValues(incoming().inventory) <= 40
+        && distinctKeys(incoming().inventory) <= 40
         // Nombre razonable
         && incoming().name is string
         && incoming().name.size() > 0

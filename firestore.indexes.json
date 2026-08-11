@@ -1,13 +1,5 @@
 {
-  "indexes": [
-    {
-      "collectionGroup": "factories",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "playerCount", "order": "DESCENDING" },
-        { "fieldPath": "__name__", "order": "DESCENDING" }
-      ]
-    }
-  ],
+  "comment": "El matchmaking usa where('playerCount','<',N) + orderBy('playerCount'), que Firestore resuelve con el índice automático de un solo campo. No hace falta declarar índices compuestos: si en el futuro se añade una consulta con dos campos, Firestore mostrará en consola el enlace para crearla y se declara aquí.",
+  "indexes": [],
   "fieldOverrides": []
 }
