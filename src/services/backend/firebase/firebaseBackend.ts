@@ -60,7 +60,7 @@ import {
   type Functions,
 } from 'firebase/functions';
 
-import { FIREBASE_CONFIG } from '../../../config/env';
+import { FIREBASE_CONFIG, resolveAuthDomain } from '../../../config/env';
 import { BALANCE } from '../../../config/balance';
 import type {
   AuthUser,
@@ -95,7 +95,9 @@ export class FirebaseBackend implements Backend {
   async init(): Promise<void> {
     this.app = initializeApp({
       apiKey: FIREBASE_CONFIG.apiKey!,
-      authDomain: FIREBASE_CONFIG.authDomain!,
+      // Mismo origen cuando se sirve desde Firebase Hosting: imprescindible
+      // para que el login funcione en móvil (ver `resolveAuthDomain`).
+      authDomain: resolveAuthDomain()!,
       projectId: FIREBASE_CONFIG.projectId!,
       storageBucket: FIREBASE_CONFIG.storageBucket,
       messagingSenderId: FIREBASE_CONFIG.messagingSenderId,

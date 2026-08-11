@@ -84,7 +84,10 @@ export default function App() {
             </button>
           </div>
         )}
-        <OrientationHint />
+        {/* El aviso de orientación sólo tiene sentido DENTRO de la partida.
+            Mostrarlo sobre el login tapaba el botón de entrar y en el móvil
+            parecía que el juego no arrancaba. */}
+        {phase === 'ready' && <OrientationHint />}
       </main>
 
       <aside className="backdrop-side right">

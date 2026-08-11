@@ -20,6 +20,26 @@ export const FIREBASE_CONFIG = {
   databaseURL: env.VITE_FIREBASE_DATABASE_URL as string | undefined,
 };
 
+/**
+ * authDomain efectivo.
+ *
+ * Si la app se sirve desde su propio dominio de Firebase Hosting, usamos ESE
+ * dominio como authDomain en lugar de `<proyecto>.firebaseapp.com`. Firebase
+ * Hosting publica el handler de OAuth en `/__/auth/handler`, así que el login
+ * pasa a ser del MISMO origen y deja de depender de cookies de terceros.
+ *
+ * Eso es justo lo que rompe `signInWithRedirect` en Safari/iOS y en Chrome con
+ * el bloqueo de cookies de terceros activado — es decir, en buena parte de los
+ * móviles. Fuera de Hosting se usa el valor configurado en .env.
+ */
+export function resolveAuthDomain(): string | undefined {
+  const configured = FIREBASE_CONFIG.authDomain;
+  if (typeof window === 'undefined') return configured;
+  const host = window.location.hostname;
+  if (host.endsWith('.web.app') || host.endsWith('.firebaseapp.com')) return host;
+  return configured;
+}
+
 export const HAS_FIREBASE_CONFIG = Boolean(
   FIREBASE_CONFIG.apiKey &&
     FIREBASE_CONFIG.projectId &&

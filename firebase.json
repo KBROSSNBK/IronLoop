@@ -23,7 +23,16 @@
         "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
       },
       {
-        "source": "/index.html",
+        "comment": "El HTML NUNCA se cachea. Por defecto Firebase Hosting sirve la raíz con max-age=3600, lo que dejaba a los móviles con el bundle antiguo hasta una hora después de cada despliegue. Los assets sí se cachean para siempre porque llevan hash en el nombre.",
+        "source": "**/*.html",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0" }]
+      },
+      {
+        "source": "/",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0" }]
+      },
+      {
+        "source": "/manifest.webmanifest",
         "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
       }
     ]
