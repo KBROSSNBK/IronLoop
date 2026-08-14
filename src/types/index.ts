@@ -1,7 +1,8 @@
 import type { Appearance } from '../config/cosmetics';
 import type { WeaponState } from '../config/weapons';
+import type { RobotMode } from '../config/robots';
 
-export type { Appearance, WeaponState };
+export type { Appearance, WeaponState, RobotMode };
 
 /* ─────────────────────────── JUGADOR ─────────────────────────── */
 
@@ -104,6 +105,10 @@ export interface RobotState {
   lastRunAt: number;
   /** Unidades transportadas en total (métrica visible en el Taller). */
   moved: number;
+  /** Qué hace: llevar a la cinta, vender, o estar parado. */
+  mode: RobotMode;
+  /** Dinero generado en total vendiendo (métrica del Taller). */
+  sold: number;
 }
 
 /**
@@ -145,6 +150,18 @@ export interface FactoryState {
   ground: Record<string, GroundItem>;
   /** cintaId → material en tránsito. */
   belts: Record<string, BeltState>;
+  /**
+   * uid → último instante en que se le vio activo. Se usa para repartir el
+   * dinero de las ventas automáticas entre quienes están conectados.
+   * Vive en el documento de fábrica, no en RTDB, porque las operaciones
+   * transaccionales necesitan leerlo.
+   */
+  online: Record<string, number>;
+  /**
+   * uid → dinero pendiente de cobrar de las ventas de los robots. Cada
+   * jugador reclama SÓLO su parte, así que no puede duplicarse ni robarse.
+   */
+  saleLedger: Record<string, number>;
   stats: FactoryStats;
   /** objetivoId → progreso; los completados se marcan con `-1`. */
   objectives: Record<string, number>;

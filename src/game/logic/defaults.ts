@@ -77,6 +77,8 @@ export function createFactoryState(id: string, index: number, now = Date.now()):
     robots: {},
     ground: {},
     belts: {},
+    online: {},
+    saleLedger: {},
     stats: { gathered: 0, produced: 0, sold: 0, contributed: 0 },
     objectives: {},
     playerCount: 0,
@@ -146,6 +148,9 @@ export function normalizeFactory(raw: Partial<FactoryState>, id: string): Factor
       level: v?.level ?? 0,
       lastRunAt: v?.lastRunAt ?? Date.now(),
       moved: v?.moved ?? 0,
+      // Los robots antiguos no tenían modo: por defecto siguen repartiendo.
+      mode: v?.mode ?? 'belt',
+      sold: v?.sold ?? 0,
     };
   }
   return {
@@ -156,6 +161,8 @@ export function normalizeFactory(raw: Partial<FactoryState>, id: string): Factor
     robots,
     ground: { ...(raw.ground ?? {}) },
     belts: { ...(raw.belts ?? {}) },
+    online: { ...(raw.online ?? {}) },
+    saleLedger: { ...(raw.saleLedger ?? {}) },
     stats: { ...base.stats, ...(raw.stats ?? {}) },
     objectives: { ...(raw.objectives ?? {}) },
   } as FactoryState;

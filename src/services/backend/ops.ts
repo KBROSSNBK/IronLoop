@@ -25,8 +25,13 @@ import {
   type UpgradeId,
 } from '../../config/upgrades';
 import { FACTORY_OBJECTIVES } from '../../config/factoryLevels';
-import { ROBOT_CONTRIB_RATIO, getRobot, robotCost } from '../../config/robots';
-import { settleFactory } from '../../game/logic/robots';
+import {
+  ROBOT_CONTRIB_RATIO,
+  getRobot,
+  robotCost,
+  type RobotMode,
+} from '../../config/robots';
+import { ONLINE_WINDOW_MS, settleFactory } from '../../game/logic/robots';
 import { getBelt, pushToBelt } from '../../game/logic/belts';
 import {
   DEFAULT_WEAPON,
@@ -189,6 +194,32 @@ function bumpObjectives(
   next = { ...next, objectives };
   if (bonus > 0) next = addContribution(next, bonus, events);
   return next;
+}
+
+/**
+ * Cobra la parte que le corresponde al jugador de las ventas hechas por los
+ * robots. Cada uno reclama SÓLO su entrada del reparto, así que el dinero no
+ * se puede duplicar ni cobrar dos veces.
+ */
+function claimSaleShare(
+  player: PlayerState,
+  factory: FactoryState,
+): { player: PlayerState; factory: FactoryState; money: number; events: OpEvent[] } {
+  const pending = Math.floor(factory.saleLedger?.[player.uid] ?? 0);
+  if (pending <= 0) return { player, factory, money: 0, events: [] };
+
+  const ledger = { ...factory.saleLedger };
+  delete ledger[player.uid];
+
+  const events: OpEvent[] = [
+    { kind: 'money', amount: pending },
+    { kind: 'info', text: `Tus robots vendieron por ${pending.toLocaleString('es-ES')} $` },
+  ];
+
+  let p: PlayerState = { ...player, money: player.money + pending };
+  p = stat(p, { earned: pending });
+
+  return { player: p, factory: { ...factory, saleLedger: ledger }, money: pending, events };
 }
 
 /** Rectángulo del muelle de venta, con un margen de tolerancia. */
@@ -1091,6 +1122,46 @@ export function opTrashItem(
   };
 }
 
+/** Cambia lo que hace un robot: repartir, vender o quedarse parado. */
+export function opSetRobotMode(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { robotId: string; mode: RobotMode; now: number },
+): OpOutcome<{ mode: RobotMode }> {
+  const def = getRobot(args.robotId);
+  if (!def) return fail('Robot desconocido');
+  if (!['belt', 'sell', 'off'].includes(args.mode)) return fail('Modo inválido');
+  if (args.mode === 'belt' && !def.to) {
+    return fail('Este robot está al final de la cadena: sólo puede vender');
+  }
+
+  const cur = factory.robots?.[def.id];
+  if (!cur || cur.level <= 0) return fail('Ese robot no está desplegado');
+  if ((cur.mode ?? 'belt') === args.mode) {
+    return { ok: true, player, factory, events: [], data: { mode: args.mode } };
+  }
+
+  const label =
+    args.mode === 'sell' ? 'vendiendo' : args.mode === 'off' ? 'parado' : 'a la cinta';
+
+  return {
+    ok: true,
+    player,
+    factory: {
+      ...factory,
+      robots: {
+        ...factory.robots,
+        // Al cambiar de modo se reinicia el reloj: no se arrastra trabajo
+        // pendiente de la tarea anterior.
+        [def.id]: { ...cur, mode: args.mode, lastRunAt: args.now },
+      },
+      updatedAt: args.now,
+    },
+    events: [{ kind: 'info', text: `${def.name}: ${label}` }],
+    data: { mode: args.mode },
+  };
+}
+
 /* ───────────────────── 12b. ARMAS Y COMBATE ───────────────────── */
 
 /** Compra o equipa un arma. Equipar algo ya comprado es gratis. */
@@ -1248,7 +1319,13 @@ export function opBuyRobot(
   if (factory.level < def.unlockFactoryLevel)
     return fail(`Requiere fábrica nivel ${def.unlockFactoryLevel}`);
 
-  const cur = factory.robots?.[def.id] ?? { level: 0, lastRunAt: args.now, moved: 0 };
+  const cur = factory.robots?.[def.id] ?? {
+    level: 0,
+    lastRunAt: args.now,
+    moved: 0,
+    mode: (def.to ? 'belt' : 'sell') as RobotMode,
+    sold: 0,
+  };
   if (cur.level >= def.maxLevel) return fail('Nivel máximo');
 
   const cost = robotCost(def, cur.level);
@@ -1260,7 +1337,14 @@ export function opBuyRobot(
 
   const robots = {
     ...(factory.robots ?? {}),
-    [def.id]: { ...cur, level: cur.level + 1, lastRunAt: args.now },
+    [def.id]: {
+      ...cur,
+      level: cur.level + 1,
+      lastRunAt: args.now,
+      // Los terminales sólo pueden vender; el resto empieza repartiendo.
+      mode: cur.mode ?? (def.to ? 'belt' : 'sell'),
+      sold: cur.sold ?? 0,
+    },
   };
   let f: FactoryState = { ...factory, robots, updatedAt: args.now };
   const contrib = Math.round(cost * ROBOT_CONTRIB_RATIO);
@@ -1386,6 +1470,7 @@ export type OpName =
   | 'useItem'
   | 'setAppearance'
   | 'buyRobot'
+  | 'setRobotMode'
   | 'buyWeapon'
   | 'buyWeaponStat'
   | 'combatReward'
@@ -1411,6 +1496,7 @@ export const OPS = {
   useItem: opUseItem,
   setAppearance: opSetAppearance,
   buyRobot: opBuyRobot,
+  setRobotMode: opSetRobotMode,
   buyWeapon: opBuyWeapon,
   buyWeaponStat: opBuyWeaponStat,
   combatReward: opCombatReward,
@@ -1438,13 +1524,43 @@ export function runOp(
       typeof (args as { now?: number })?.now === 'number'
         ? (args as { now: number }).now
         : Date.now();
-    const settled = settleFactory(factory, now);
-    const out = op(player, settled.factory, args as never) as OpOutcome;
-    // Aunque la operación falle, conviene guardar el trabajo de los robots.
-    if (!out.ok && settled.transfers.length > 0) {
-      return { ...out, factory: settled.factory };
+    // El jugador que actúa se marca como conectado: es lo que decide entre
+    // quiénes se reparte el dinero de las ventas automáticas.
+    // Se poda a la vez para que el registro no crezca sin fin con jugadores
+    // que pasaron por aquí hace semanas.
+    const online: Record<string, number> = { [player.uid]: now };
+    for (const [uid, at] of Object.entries(factory.online ?? {})) {
+      if (uid !== player.uid && now - at < ONLINE_WINDOW_MS * 4) online[uid] = at;
     }
-    return out;
+    let base: FactoryState = { ...factory, online };
+    const settled = settleFactory(base, now);
+    base = settled.factory;
+
+    // Y cobra lo que los robots hayan vendido a su nombre.
+    const claimed = claimSaleShare(player, base);
+    const actor = claimed.player;
+    base = claimed.factory;
+
+    const out = op(actor, base, args as never) as OpOutcome;
+
+    const merge = (o: OpOutcome): OpOutcome => ({
+      ...o,
+      player: o.player ?? actor,
+      factory: o.factory ?? base,
+      events: claimed.events.length ? [...claimed.events, ...(o.events ?? [])] : o.events,
+      memberDelta: claimed.money
+        ? { ...(o.memberDelta ?? {}), money: (o.player ?? actor).money }
+        : o.memberDelta,
+    });
+
+    // Aunque la operación falle, se conserva el trabajo de los robots y el
+    // cobro pendiente: no se pierde dinero por un clic rechazado.
+    if (!out.ok) {
+      return claimed.money || settled.transfers.length > 0
+        ? { ...out, player: actor, factory: base }
+        : out;
+    }
+    return merge(out);
   } catch (e) {
     return fail(e instanceof Error ? e.message : 'Error interno');
   }

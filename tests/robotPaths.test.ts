@@ -26,21 +26,33 @@ describe('recorridos de los robots', () => {
     }
   });
 
-  it('cada robot termina junto al extremo de carga de su cinta', () => {
+  it('cada robot con destino termina junto al extremo de carga de su cinta', () => {
     for (const def of ROBOTS) {
+      // Los robots terminales no reparten: sólo venden, no tienen cinta.
+      if (!def.viaConveyor) continue;
       const belt = BELTS.find((c) => c.id === def.viaConveyor);
       expect(belt, `falta la cinta ${def.viaConveyor}`).toBeTruthy();
       const load = conveyorLoadPoint(belt!);
       const end = def.path[def.path.length - 1];
-      expect(Math.hypot(end.x - load.x, end.y - load.y)).toBeLessThan(60);
+      expect(
+        Math.hypot(end.x - load.x, end.y - load.y),
+        `${def.id} no llega a su cinta`,
+      ).toBeLessThan(60);
     }
   });
 
   it('la cinta de cada robot alimenta la máquina de destino', () => {
     for (const def of ROBOTS) {
+      if (!def.viaConveyor) continue;
       const belt = BELTS.find((c) => c.id === def.viaConveyor)!;
       expect(belt.feeds).toBe(def.to);
     }
+  });
+
+  it('los robots terminales no tienen destino ni cinta', () => {
+    const terminales = ROBOTS.filter((r) => !r.to);
+    expect(terminales.length).toBeGreaterThan(0);
+    for (const def of terminales) expect(def.viaConveyor).toBeUndefined();
   });
 
   it('ningún punto del recorrido atraviesa muros ni máquinas', () => {

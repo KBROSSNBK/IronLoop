@@ -15,8 +15,8 @@
           "name": { ".validate": "newData.isString() && newData.val().length <= 20" },
           "level":{ ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10000" },
 
-          "x": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1440" },
-          "y": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1040" },
+          "x": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1920" },
+          "y": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1360" },
 
           "dir": { ".validate": "newData.isString() && newData.val().length <= 6" },
           "act": { ".validate": "newData.isString() && newData.val().length <= 10" },

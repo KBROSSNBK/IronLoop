@@ -6,8 +6,10 @@
  */
 
 export const TILE = 40;
-export const WORLD_COLS = 36;
-export const WORLD_ROWS = 26;
+// El mapa creció hacia el este y el sur para alojar la Zona Minera, la
+// Tecnológica, la Peligrosa y la Avanzada sin apretar las zonas originales.
+export const WORLD_COLS = 48;
+export const WORLD_ROWS = 34;
 export const WORLD_W = WORLD_COLS * TILE;
 export const WORLD_H = WORLD_ROWS * TILE;
 
@@ -44,6 +46,12 @@ export const ZONES: ZoneDef[] = [
   { id: 'dock', label: 'MUELLE DE CARGA', icon: '🚚', tx: 16, ty: 20, tw: 8, th: 5, floor: 'hazard', accent: '#fbbf24' },
   { id: 'workshop', label: 'TALLER', icon: '🛠️', tx: 2, ty: 21, tw: 7, th: 4, floor: 'concrete', accent: '#f472b6' },
   { id: 'salvage', label: 'RECOLECCIÓN', icon: '♻️', tx: 23, ty: 20, tw: 12, th: 5, floor: 'dirt', accent: '#34d399' },
+
+  // ── Ampliación: zonas nuevas al este y al sur ──
+  { id: 'mine', label: 'ZONA MINERA', icon: '⛏️', tx: 36, ty: 2, tw: 11, th: 10, floor: 'dirt', accent: '#fb923c', liveAtLevel: 3 },
+  { id: 'tech', label: 'ZONA TECNOLÓGICA', icon: '🔬', tx: 36, ty: 13, tw: 11, th: 9, floor: 'tech', accent: '#a3e635', liveAtLevel: 6 },
+  { id: 'danger', label: 'ZONA PELIGROSA', icon: '☢️', tx: 36, ty: 23, tw: 11, th: 10, floor: 'hazard', accent: '#f87171', liveAtLevel: 8 },
+  { id: 'advanced', label: 'ZONA AVANZADA', icon: '💠', tx: 14, ty: 26, tw: 20, th: 7, floor: 'tech', accent: '#22d3ee', liveAtLevel: 10 },
 ];
 
 export type StationType = 'oreVein' | 'sell' | 'core' | 'shop' | 'salvage';
@@ -151,6 +159,75 @@ export const STATIONS: StationDef[] = [
     accent: '#34d399',
     yields: [{ item: 'scrap', amount: 2 }],
     desc: 'Rebusca chatarra. Aliméntala a la Recicladora y se vuelve acero.',
+  },
+
+  // ── Zona Minera: cobre abundante y una veta profunda de titanio ──
+  {
+    id: 'vein_copper_a',
+    type: 'oreVein',
+    label: 'VETA DE COBRE',
+    icon: '⛏️',
+    tx: 37,
+    ty: 4,
+    tw: 3,
+    th: 2,
+    accent: '#fb923c',
+    yields: [{ item: 'copper', amount: 1 }],
+    desc: 'Cobre para aleaciones y baterías.',
+  },
+  {
+    id: 'vein_copper_b',
+    type: 'oreVein',
+    label: 'VETA DE COBRE',
+    icon: '⛏️',
+    tx: 43,
+    ty: 7,
+    tw: 3,
+    th: 2,
+    accent: '#fb923c',
+    yields: [{ item: 'copper', amount: 1 }],
+    desc: 'Cobre para aleaciones y baterías.',
+  },
+  {
+    id: 'vein_titanium',
+    type: 'oreVein',
+    label: 'VETA PROFUNDA',
+    icon: '⛏️',
+    tx: 40,
+    ty: 9.5,
+    tw: 3,
+    th: 2,
+    accent: '#cbd5e1',
+    yields: [{ item: 'titanium', amount: 1 }],
+    desc: 'Titanio. Escaso, pesado y necesario para los Núcleos.',
+  },
+
+  // ── Zona Peligrosa: mejor material, más enemigos ──
+  {
+    id: 'vein_danger',
+    type: 'oreVein',
+    label: 'FILÓN INESTABLE',
+    icon: '☢️',
+    tx: 38,
+    ty: 26,
+    tw: 3,
+    th: 2,
+    accent: '#f87171',
+    yields: [{ item: 'titanium', amount: 2 }],
+    desc: 'Rinde el doble, pero aquí los drones no perdonan.',
+  },
+  {
+    id: 'salvage_danger',
+    type: 'salvage',
+    label: 'RESTOS RADIACTIVOS',
+    icon: '☢️',
+    tx: 43,
+    ty: 29,
+    tw: 3,
+    th: 2,
+    accent: '#f87171',
+    yields: [{ item: 'crystal', amount: 1 }],
+    desc: 'Cristal resonante entre los escombros. Zona hostil.',
   },
 ];
 
@@ -272,6 +349,41 @@ export const CONVEYORS: ConveyorDef[] = [
     fromLevel: 4,
     feeds: 'assembler',
     label: 'CINTA DE RECICLADO',
+  },
+
+  // ── Zona Minera → Fundición de Aleaciones ──
+  {
+    id: 'c9',
+    tx: 43.65,
+    ty: 11.5,
+    len: 3,
+    dir: 'down',
+    fromLevel: 5,
+    feeds: 'alloy',
+    label: 'CINTA DE COBRE',
+  },
+  // Laboratorio → Planta de Baterías: cruza la nave de punta a punta.
+  {
+    id: 'c10',
+    tx: 15,
+    ty: 13.05,
+    len: 28,
+    dir: 'right',
+    fromLevel: 7,
+    feeds: 'batteryPlant',
+    accepts: ['circuit'],
+    label: 'CINTA DE CIRCUITOS',
+  },
+  // Aleaciones y Baterías → Reactor de Núcleos.
+  {
+    id: 'c11',
+    tx: 28,
+    ty: 22.6,
+    len: 12,
+    dir: 'left',
+    fromLevel: 10,
+    feeds: 'reactor',
+    label: 'CINTA AL REACTOR',
   },
 ];
 

@@ -9,7 +9,14 @@
 
 import type { ItemId } from './items';
 
-export type MachineKind = 'smelter' | 'assembler' | 'lab' | 'recycler';
+export type MachineKind =
+  | 'smelter'
+  | 'assembler'
+  | 'lab'
+  | 'recycler'
+  | 'alloy'
+  | 'battery'
+  | 'reactor';
 
 export interface MachineDef {
   id: string;
@@ -130,6 +137,71 @@ export const MACHINES = {
     th: 4,
     accent: '#34d399',
     desc: 'Convierte 4 de Chatarra en 1 Lingote de Acero.',
+  },
+
+  // ── Cadena avanzada: cobre y titanio → aleación → batería → núcleo ──
+  alloy: {
+    id: 'alloy',
+    kind: 'alloy',
+    name: 'Fundición de Aleaciones',
+    short: 'ALEACIONES',
+    icon: '🧿',
+    input: { copper: 2, ingot: 1 },
+    output: { alloy: 1 },
+    cycleMs: 9000,
+    inputCap: 40,
+    outputCap: 30,
+    unlockFactoryLevel: 5,
+    xpPerDeposit: 6,
+    xpPerCollect: 16,
+    tx: 38,
+    ty: 14,
+    tw: 5,
+    th: 4,
+    accent: '#38bdf8',
+    desc: 'Funde 2 Cobre y 1 Lingote en 1 Aleación Reforzada.',
+  },
+  batteryPlant: {
+    id: 'batteryPlant',
+    kind: 'battery',
+    name: 'Planta de Baterías',
+    short: 'BATERÍAS',
+    icon: '🔋',
+    input: { circuit: 1, copper: 2 },
+    output: { battery: 1 },
+    cycleMs: 14000,
+    inputCap: 30,
+    outputCap: 24,
+    unlockFactoryLevel: 7,
+    xpPerDeposit: 12,
+    xpPerCollect: 34,
+    tx: 38,
+    ty: 18,
+    tw: 5,
+    th: 4,
+    accent: '#a3e635',
+    desc: 'Combina 1 Circuito y 2 Cobre en 1 Batería de Alta Carga.',
+  },
+  reactor: {
+    id: 'reactor',
+    kind: 'reactor',
+    name: 'Reactor de Núcleos',
+    short: 'REACTOR',
+    icon: '💠',
+    input: { alloy: 2, battery: 1, titanium: 2 },
+    output: { core: 1 },
+    cycleMs: 22000,
+    inputCap: 24,
+    outputCap: 20,
+    unlockFactoryLevel: 10,
+    xpPerDeposit: 22,
+    xpPerCollect: 90,
+    tx: 20,
+    ty: 27,
+    tw: 6,
+    th: 4,
+    accent: '#22d3ee',
+    desc: 'Ensambla Aleación, Batería y Titanio en 1 Núcleo de Energía.',
   },
 } as const satisfies Record<string, MachineDef>;
 

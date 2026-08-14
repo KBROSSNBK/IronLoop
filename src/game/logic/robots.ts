@@ -23,7 +23,9 @@ import {
   type RobotDef,
 } from '../../config/robots';
 import { getMachine } from '../../config/machines';
+import { getItem } from '../../config/items';
 import { settleMachine } from './production';
+import type { RobotMode } from '../../config/robots';
 import { settleBelts, type BeltDelivery } from './belts';
 import type { FactoryState, MachineState, RobotState } from '../../types';
 
@@ -31,6 +33,41 @@ export interface RobotTransfer {
   robotId: string;
   item: string;
   amount: number;
+  /** Si el robot estaba en modo venta, dinero generado. */
+  money?: number;
+}
+
+/** Ventana en la que se considera que un jugador sigue conectado. */
+export const ONLINE_WINDOW_MS = 90_000;
+
+/** uids conectados ahora mismo, según el registro del documento de fábrica. */
+export function onlineUids(factory: FactoryState, now: number): string[] {
+  return Object.entries(factory.online ?? {})
+    .filter(([, at]) => now - at < ONLINE_WINDOW_MS)
+    .map(([uid]) => uid)
+    .sort();
+}
+
+/**
+ * Reparte una venta entre los jugadores conectados.
+ *
+ * Solo uno → 100% para él. Dos → 50/50. El resto por reparto entero, y los
+ * céntimos sobrantes van al primero para que la suma cuadre exactamente con
+ * lo vendido: ni se crea ni se pierde dinero.
+ */
+export function splitSale(
+  ledger: Record<string, number>,
+  uids: string[],
+  amount: number,
+): Record<string, number> {
+  if (uids.length === 0 || amount <= 0) return ledger;
+  const share = Math.floor(amount / uids.length);
+  const rest = amount - share * uids.length;
+  const next = { ...ledger };
+  uids.forEach((uid, i) => {
+    next[uid] = (next[uid] ?? 0) + share + (i === 0 ? rest : 0);
+  });
+  return next;
 }
 
 export interface RobotSettleResult {
@@ -81,37 +118,79 @@ export function settleRobots(factory: FactoryState, now: number): RobotSettleRes
   const transfers: RobotTransfer[] = [];
   let changed = false;
 
+  let ledger = factory.saleLedger ?? {};
+  const connected = onlineUids(factory, now);
+  let soldTotal = 0;
+
   for (const [id, state] of owned) {
     const def = getRobot(id);
     if (!def) continue;
 
+    const mode: RobotMode = state.mode ?? 'belt';
+    if (mode === 'off') {
+      // Parado por decisión del jugador: no acumula tiempo pendiente.
+      robots[id] = { ...state, lastRunAt: now };
+      changed = true;
+      continue;
+    }
+
     const from = machines[def.from];
-    const to = machines[def.to];
-    // Un robot sin sus dos máquinas desbloqueadas simplemente no trabaja.
-    if (!from || !to || !machineUnlocked(factory, def.from) || !machineUnlocked(factory, def.to)) {
+    const sourceOk = !!from && machineUnlocked(factory, def.from);
+    // En modo cinta hace falta destino. Vendiendo hace falta alguien a quien
+    // pagarle: sin nadie conectado el robot espera, no malvende el material.
+    const to = def.to ? machines[def.to] : undefined;
+    const destOk =
+      mode === 'sell'
+        ? connected.length > 0
+        : !!def.to && !!to && machineUnlocked(factory, def.to);
+
+    if (!sourceOk || !destOk) {
       robots[id] = { ...state, lastRunAt: now };
       changed = true;
       continue;
     }
 
     const capacity = pendingCapacity(def, state, now);
-    const available = from.output[def.item] ?? 0;
-    const room = inputRoomFor(to, def.to, def.item);
+    const available = from!.output[def.item] ?? 0;
+    const room =
+      mode === 'sell'
+        ? Number.POSITIVE_INFINITY
+        : inputRoomFor(to!, def.to!, def.item);
     const moved = Math.min(capacity, available, room);
 
     if (moved > 0) {
-      const res = moveItems(from, to, def.item, moved);
-      machines[def.from] = res.from;
-      machines[def.to] = res.to;
       // Consume sólo el tiempo que costó lo transportado: si va a tope,
       // el resto del tiempo sigue disponible en la siguiente liquidación.
       const usedMs = (moved / robotRate(def, state.level)) * 60000;
-      robots[id] = {
-        ...state,
-        lastRunAt: Math.min(now, state.lastRunAt + usedMs),
-        moved: state.moved + moved,
-      };
-      transfers.push({ robotId: id, item: def.item, amount: moved });
+
+      if (mode === 'sell') {
+        // Sale de la máquina y se convierte en dinero repartido.
+        const out = { ...from!.output };
+        out[def.item] = available - moved;
+        if (out[def.item] <= 0) delete out[def.item];
+        machines[def.from] = { ...from!, output: out };
+
+        const money = Math.round(getItem(def.item).sellPrice * moved);
+        ledger = splitSale(ledger, connected, money);
+        soldTotal += money;
+        robots[id] = {
+          ...state,
+          lastRunAt: Math.min(now, state.lastRunAt + usedMs),
+          moved: state.moved + moved,
+          sold: (state.sold ?? 0) + money,
+        };
+        transfers.push({ robotId: id, item: def.item, amount: moved, money });
+      } else {
+        const res = moveItems(from!, to!, def.item, moved);
+        machines[def.from] = res.from;
+        machines[def.to!] = res.to;
+        robots[id] = {
+          ...state,
+          lastRunAt: Math.min(now, state.lastRunAt + usedMs),
+          moved: state.moved + moved,
+        };
+        transfers.push({ robotId: id, item: def.item, amount: moved });
+      }
       changed = true;
     } else if (available <= 0) {
       // Sin material en origen: no se guarda tiempo, así no hay avalancha
@@ -123,7 +202,17 @@ export function settleRobots(factory: FactoryState, now: number): RobotSettleRes
   }
 
   if (!changed) return { factory, transfers: [] };
-  return { factory: { ...factory, machines, robots }, transfers };
+
+  let next: FactoryState = { ...factory, machines, robots, saleLedger: ledger };
+  if (soldTotal > 0) {
+    // Vender por robot también empuja el progreso compartido, igual que
+    // cuando vende un jugador.
+    next = {
+      ...next,
+      stats: { ...next.stats, sold: next.stats.sold + soldTotal },
+    };
+  }
+  return { factory: next, transfers };
 }
 
 /* ───────────────── liquidación completa de la fábrica ───────────────── */
@@ -281,10 +370,19 @@ export function robotVisual(def: RobotDef, hasWork: boolean, timeSec: number): R
 
 /** ¿Tiene el robot material que mover ahora mismo? */
 export function robotHasWork(factory: FactoryState, def: RobotDef): boolean {
+  const state = factory.robots?.[def.id];
+  if (!state || state.level <= 0) return false;
+  const mode: RobotMode = state.mode ?? 'belt';
+  if (mode === 'off') return false;
+
   const from = factory.machines[def.from];
-  const to = factory.machines[def.to];
-  if (!from || !to) return false;
-  if (!machineUnlocked(factory, def.from) || !machineUnlocked(factory, def.to)) return false;
+  if (!from || !machineUnlocked(factory, def.from)) return false;
+
+  if (mode === 'belt') {
+    if (!def.to) return false;
+    const to = factory.machines[def.to];
+    if (!to || !machineUnlocked(factory, def.to)) return false;
+  }
   return (from.output[def.item] ?? 0) > 0;
 }
 
@@ -300,24 +398,28 @@ export interface RobotStatus {
   owned: boolean;
   available: boolean;
   /** Qué está haciendo ahora mismo. */
-  status: 'locked' | 'idle' | 'working' | 'no-source' | 'dest-full';
+  status: 'locked' | 'idle' | 'working' | 'no-source' | 'off';
 }
 
 export function robotStatuses(factory: FactoryState): RobotStatus[] {
   return ROBOTS.map((def) => {
-    const state = factory.robots?.[def.id] ?? { level: 0, lastRunAt: 0, moved: 0 };
+    const state: RobotState = factory.robots?.[def.id] ?? {
+      level: 0,
+      lastRunAt: 0,
+      moved: 0,
+      mode: def.to ? 'belt' : 'sell',
+      sold: 0,
+    };
     const owned = state.level > 0;
     const available = robotAvailable(factory, def);
     let status: RobotStatus['status'] = 'locked';
     if (!available) status = 'locked';
     else if (!owned) status = 'idle';
+    else if ((state.mode ?? 'belt') === 'off') status = 'off';
     else {
       const from = factory.machines[def.from];
-      const to = factory.machines[def.to];
-      const available2 = from?.output[def.item] ?? 0;
-      const room = to ? inputRoomFor(to, def.to, def.item) : 0;
-      if (available2 <= 0) status = 'no-source';
-      else if (room <= 0) status = 'dest-full';
+      const stock = from?.output[def.item] ?? 0;
+      if (stock <= 0) status = 'no-source';
       else status = 'working';
     }
     return { def, state, owned, available, status };

@@ -320,7 +320,12 @@ describe('zona de RECOLECCIÓN', () => {
   it('existe con sus estaciones y rinde chatarra', () => {
     const salvage = STATIONS.filter((s) => s.type === 'salvage');
     expect(salvage.length).toBeGreaterThan(0);
-    for (const s of salvage) expect(s.yields?.[0].item).toBe('scrap');
+    // Los montones de la zona base dan chatarra; el de la Zona Peligrosa da
+    // cristal, que es justo lo que compensa el riesgo.
+    const base = salvage.filter((s) => s.id.startsWith('salvage_') && s.id !== 'salvage_danger');
+    expect(base.length).toBeGreaterThan(0);
+    for (const s of base) expect(s.yields?.[0].item).toBe('scrap');
+    expect(STATIONS.find((s) => s.id === 'salvage_danger')?.yields?.[0].item).toBe('crystal');
   });
 
   it('usa la misma mecánica de extracción y el mismo inventario', () => {

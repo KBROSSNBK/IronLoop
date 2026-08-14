@@ -2,7 +2,13 @@ import { useState } from 'react';
 import { Panel } from './Panel';
 import { useSessionStore } from '../../state/useSessionStore';
 import { UPGRADE_LIST, upgradeCost } from '../../config/upgrades';
-import { ROBOT_CONTRIB_RATIO, robotCarry, robotCost, robotRate } from '../../config/robots';
+import {
+  ROBOT_CONTRIB_RATIO,
+  ROBOT_MODES,
+  robotCarry,
+  robotCost,
+  robotRate,
+} from '../../config/robots';
 import { getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
 import { robotStatuses } from '../../game/logic/robots';
@@ -117,15 +123,16 @@ export function UpgradesPanel() {
             const maxed = state.level >= def.maxLevel;
             const afford = player.money >= cost;
             const from = getMachine(def.from);
-            const to = getMachine(def.to);
+            const to = def.to ? getMachine(def.to) : null;
             const item = getItem(def.item);
+            const mode = state.mode ?? (def.to ? 'belt' : 'sell');
 
             const statusText: Record<typeof status, string> = {
               locked: `🔒 Requiere fábrica nivel ${def.unlockFactoryLevel}`,
               idle: 'Sin desplegar',
-              working: '🟢 Transportando',
+              working: mode === 'sell' ? '💰 Vendiendo' : '🟢 Transportando',
               'no-source': '⏸ Esperando material en origen',
-              'dest-full': '⚠️ Entrada de destino llena',
+              off: '⏸️ Detenido por el operario',
             };
 
             return (
@@ -141,7 +148,8 @@ export function UpgradesPanel() {
                 </div>
 
                 <div className="recipe">
-                  {from.icon} {from.short} → {item.icon} → {to.icon} {to.short}
+                  {from.icon} {from.short} → {item.icon} →{' '}
+                  {to ? `${to.icon} ${to.short}` : '💰 VENTA'}
                 </div>
                 <div className="stat">{def.desc}</div>
                 <div className="stat">{statusText[status]}</div>
@@ -153,8 +161,39 @@ export function UpgradesPanel() {
                       viaje · <b className="mono-num">{robotRate(def, state.level)}</b>/min
                     </div>
                     <div className="stat">
-                      Transportado en total: <b className="mono-num">{compact(state.moved)}</b>
+                      Transportado: <b className="mono-num">{compact(state.moved)}</b>
+                      {(state.sold ?? 0) > 0 && (
+                        <>
+                          {' '}
+                          · Vendido: <b className="mono-num">{moneyExact(state.sold ?? 0)}</b>
+                        </>
+                      )}
                     </div>
+
+                    {/* Control de operación: repartir, vender o parar. */}
+                    <div className="robot-modes">
+                      {ROBOT_MODES.map((m) => {
+                        const disabled = m.id === 'belt' && !def.to;
+                        return (
+                          <button
+                            key={m.id}
+                            className="mode-btn"
+                            data-on={mode === m.id}
+                            disabled={busy || disabled}
+                            title={disabled ? 'Este robot no tiene máquina de destino' : m.desc}
+                            onClick={() => void op('setRobotMode', { robotId: def.id, mode: m.id })}
+                          >
+                            {m.icon} {m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {mode === 'sell' && (
+                      <div className="stat" style={{ color: 'var(--amber-soft)' }}>
+                        Lo que venda se reparte a partes iguales entre los operarios
+                        conectados en ese momento.
+                      </div>
+                    )}
                   </>
                 )}
 

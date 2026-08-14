@@ -16,8 +16,11 @@ export interface RobotDef {
   desc: string;
   /** Máquina de la que recoge (su buffer de SALIDA). */
   from: string;
-  /** Máquina en la que deja (su buffer de ENTRADA). */
-  to: string;
+  /**
+   * Máquina en la que deja. Si no existe (final de la cadena) el robot no
+   * puede repartir: su único trabajo útil es VENDER.
+   */
+  to?: string;
   /** Item que transporta. */
   item: string;
   /** Unidades por minuto y por nivel. */
@@ -33,10 +36,29 @@ export interface RobotDef {
    * bordear las máquinas — hay un test que comprueba que no atraviesan nada.
    */
   path: { x: number; y: number }[];
-  /** Cinta por la que entrega, sólo para el texto de la UI. */
-  viaConveyor: string;
+  /** Cinta por la que entrega. Los robots terminales no tienen. */
+  viaConveyor?: string;
   accent: string;
 }
+
+/**
+ * Qué está haciendo un robot.
+ *  · `belt`  — lleva el material a la cinta de la siguiente máquina (por defecto)
+ *  · `sell`  — lo vende, y el dinero se reparte entre los jugadores conectados
+ *  · `off`   — parado
+ */
+export type RobotMode = 'belt' | 'sell' | 'off';
+
+export const ROBOT_MODES: { id: RobotMode; label: string; icon: string; desc: string }[] = [
+  { id: 'belt', label: 'A la cinta', icon: '🛒', desc: 'Alimenta la siguiente máquina.' },
+  {
+    id: 'sell',
+    label: 'Vender',
+    icon: '💰',
+    desc: 'Vende lo que recoge y reparte el dinero entre los conectados.',
+  },
+  { id: 'off', label: 'Parado', icon: '⏸️', desc: 'No hace nada.' },
+];
 
 export const ROBOTS: RobotDef[] = [
   {
@@ -104,6 +126,92 @@ export const ROBOTS: RobotDef[] = [
     ],
     viaConveyor: 'c8',
     accent: '#34d399',
+  },
+  {
+    id: 'hauler_circuit',
+    name: 'Portador MK-III',
+    icon: '🔌',
+    desc: 'Saca los Circuitos del Laboratorio y los manda a la Planta de Baterías.',
+    from: 'lab',
+    to: 'batteryPlant',
+    item: 'circuit',
+    ratePerMin: 8,
+    maxLevel: 10,
+    baseCost: 60000,
+    costGrowth: 1.78,
+    unlockFactoryLevel: 7,
+    // Frente del Laboratorio → rodea el pilar por el sur → cinta de circuitos.
+    path: [
+      { x: 420, y: 790 },
+      { x: 620, y: 790 },
+      { x: 620, y: 545 },
+    ],
+    viaConveyor: 'c10',
+    accent: '#c084fc',
+  },
+  {
+    id: 'hauler_alloy',
+    name: 'Portador Pesado',
+    icon: '🧿',
+    desc: 'Lleva las Aleaciones al Reactor de Núcleos.',
+    from: 'alloy',
+    to: 'reactor',
+    item: 'alloy',
+    ratePerMin: 7,
+    maxLevel: 10,
+    baseCost: 90000,
+    costGrowth: 1.8,
+    unlockFactoryLevel: 10,
+    path: [
+      { x: 1620, y: 700 },
+      { x: 1770, y: 700 },
+      { x: 1770, y: 918 },
+      { x: 1600, y: 918 },
+    ],
+    viaConveyor: 'c11',
+    accent: '#38bdf8',
+  },
+  {
+    id: 'hauler_battery',
+    name: 'Portador de Carga',
+    icon: '🔋',
+    desc: 'Lleva las Baterías al Reactor de Núcleos.',
+    from: 'batteryPlant',
+    to: 'reactor',
+    item: 'battery',
+    ratePerMin: 5,
+    maxLevel: 10,
+    baseCost: 180000,
+    costGrowth: 1.82,
+    unlockFactoryLevel: 10,
+    path: [
+      { x: 1620, y: 862 },
+      { x: 1770, y: 862 },
+      { x: 1770, y: 918 },
+      { x: 1600, y: 918 },
+    ],
+    viaConveyor: 'c11',
+    accent: '#a3e635',
+  },
+  {
+    id: 'hauler_core',
+    name: 'Custodio de Núcleos',
+    icon: '💠',
+    desc:
+      'Retira los Núcleos del Reactor. Al final de la cadena no hay a dónde ' +
+      'llevarlos: su trabajo es venderlos y repartir el dinero.',
+    from: 'reactor',
+    item: 'core',
+    ratePerMin: 3,
+    maxLevel: 10,
+    baseCost: 400000,
+    costGrowth: 1.85,
+    unlockFactoryLevel: 12,
+    path: [
+      { x: 920, y: 1220 },
+      { x: 1080, y: 1220 },
+    ],
+    accent: '#22d3ee',
   },
 ];
 
