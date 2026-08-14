@@ -23,6 +23,8 @@ export type ActionKind =
 export interface ActionOption {
   kind: ActionKind;
   targetId: string;
+  /** Si la acción entra por una cinta, su id: el material viajará por ella. */
+  beltId?: string;
   label: string;
   sub?: string;
   icon: string;
@@ -142,6 +144,7 @@ export function resolveActions(ctx: ActionContext): ActionOption[] {
     options.push({
       kind: 'deposit',
       targetId: machineId,
+      beltId: belt.id,
       label: 'PONER EN CINTA',
       sub:
         loadable.length > 0

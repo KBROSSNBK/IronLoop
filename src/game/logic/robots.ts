@@ -23,6 +23,8 @@ import {
   type RobotDef,
 } from '../../config/robots';
 import { getMachine } from '../../config/machines';
+import { settleMachine } from './production';
+import { settleBelts, type BeltDelivery } from './belts';
 import type { FactoryState, MachineState, RobotState } from '../../types';
 
 export interface RobotTransfer {
@@ -111,8 +113,10 @@ export function settleRobots(factory: FactoryState, now: number): RobotSettleRes
       };
       transfers.push({ robotId: id, item: def.item, amount: moved });
       changed = true;
-    } else if (available <= 0 || room <= 0) {
-      // Bloqueado: no se guarda tiempo, así no hay avalancha al desbloquear.
+    } else if (available <= 0) {
+      // Sin material en origen: no se guarda tiempo, así no hay avalancha
+      // cuando vuelva a haberlo. (El destino ya no tiene tope, así que la
+      // única razón real para parar es que no haya nada que llevar.)
       robots[id] = { ...state, lastRunAt: now };
       changed = true;
     }
@@ -120,6 +124,76 @@ export function settleRobots(factory: FactoryState, now: number): RobotSettleRes
 
   if (!changed) return { factory, transfers: [] };
   return { factory: { ...factory, machines, robots }, transfers };
+}
+
+/* ───────────────── liquidación completa de la fábrica ───────────────── */
+
+export interface FactorySettleResult {
+  factory: FactoryState;
+  transfers: RobotTransfer[];
+  /** Material que ha llegado al final de su cinta en esta liquidación. */
+  deliveries: BeltDelivery[];
+  /** robotId → si tiene trabajo ahora mismo (para la animación). */
+  working: Record<string, boolean>;
+}
+
+/**
+ * Pone al día TODA la fábrica en el orden correcto:
+ *
+ *   0. Las cintas entregan lo que ya ha llegado al final.
+ *   1. Las máquinas producen (lo que hicieron desde la última escritura).
+ *   2. Los robots reparten lo que acaba de salir.
+ *   3. Las máquinas vuelven a arrancar con lo que los robots les han dejado.
+ *
+ * El orden importa: antes los robots miraban la salida GUARDADA, que no
+ * incluía lo producido desde la última interacción. Como para ellos el
+ * origen siempre parecía vacío, no movían nada y encima reiniciaban su
+ * reloj: se quedaban clavados. Con las máquinas liquidadas primero, ven el
+ * material real y siguen trabajando aunque no haya nadie conectado.
+ */
+export function settleFactory(factory: FactoryState, now: number): FactorySettleResult {
+  // 0. Lo que las cintas han terminado de transportar entra en las máquinas.
+  const belted = settleBelts(factory, now);
+  factory = belted.factory;
+  const produce = (f: FactoryState): FactoryState => {
+    const machines: Record<string, MachineState> = {};
+    let touched = false;
+    for (const [id, state] of Object.entries(f.machines)) {
+      const next = settleMachine(state, id, f.level, now).state;
+      machines[id] = next;
+      if (next !== state) touched = true;
+    }
+    return touched ? { ...f, machines } : f;
+  };
+
+  // 1. Producción pendiente.
+  const produced = produce(factory);
+
+  // ¿Qué robots tienen material esperando ANTES de que se lo lleven?
+  const working: Record<string, boolean> = {};
+  for (const def of ROBOTS) {
+    const state = produced.robots?.[def.id];
+    if (!state || state.level <= 0) {
+      working[def.id] = false;
+      continue;
+    }
+    working[def.id] = robotHasWork(produced, def);
+  }
+
+  // 2. Reparto.
+  const hauled = settleRobots(produced, now);
+
+  // 3. Las máquinas de destino arrancan con lo recién entregado.
+  const finalFactory = hauled.transfers.length > 0 ? produce(hauled.factory) : hauled.factory;
+
+  for (const t of hauled.transfers) working[t.robotId] = true;
+
+  return {
+    factory: finalFactory,
+    transfers: hauled.transfers,
+    deliveries: belted.deliveries,
+    working,
+  };
 }
 
 /* ─────────────────────── movimiento visual del robot ─────────────────────── */

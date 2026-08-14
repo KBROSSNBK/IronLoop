@@ -328,6 +328,51 @@
 .machine-card .stat { font-size: 11.5px; color: var(--text-dim); }
 .machine-card .recipe { font-size: 12px; color: var(--text); }
 
+/* ── Armas ── */
+
+.weapon-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.14), rgba(248, 113, 113, 0.02));
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+.weapon-hero .ico { font-size: 30px; }
+.weapon-hero .nm {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+}
+.weapon-hero .stat { font-size: 12px; color: var(--text-dim); }
+
+.weapon-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.weapon-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 3px solid var(--m, var(--cyan));
+}
+.weapon-metric .l {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.weapon-metric .v {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--m, var(--cyan));
+}
+
 /* Retirar material acumulado dentro de una máquina */
 .withdraw-row {
   display: flex;

@@ -1,4 +1,7 @@
 import { Panel } from './Panel';
+import { useGameplayStore } from '../../state/useGameplayStore';
+import { ROBOT_STATE_LABEL } from '../../game/systems/robotBrain';
+import { getRobot } from '../../config/robots';
 import { useSessionStore } from '../../state/useSessionStore';
 import { useUiStore } from '../../state/useUiStore';
 import { getBackend } from '../../services/backend';
@@ -43,6 +46,8 @@ export function DebugPanel() {
         Herramientas de desarrollo. Sólo activas en entorno local o con{' '}
         <code>VITE_ENABLE_DEBUG=true</code>.
       </div>
+
+      <LiveInspector />
 
       <div className="section-title">JUGADOR</div>
       <div className="debug-grid">
@@ -132,5 +137,70 @@ export function DebugPanel() {
         Resetear jugador
       </button>
     </Panel>
+  );
+}
+
+/**
+ * Inspector en vivo de robots, enemigos y cintas. Es la herramienta para
+ * comprobar que lo que se ve en pantalla se corresponde con el estado real.
+ */
+function LiveInspector() {
+  const debug = useGameplayStore((s) => s.debug);
+
+  return (
+    <>
+      <div className="section-title">ROBOTS EN VIVO</div>
+      {debug.robots.length === 0 && (
+        <div className="empty-note">Ningún robot desplegado.</div>
+      )}
+      {debug.robots.map((r) => {
+        const def = getRobot(r.id);
+        const stuck = r.stuckMs > 400;
+        return (
+          <div className="card" key={r.id} style={{ fontSize: 11.5, display: 'grid', gap: 2 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+              <span>
+                {def?.icon} {def?.name ?? r.id}
+              </span>
+              <span style={{ color: stuck ? 'var(--red)' : 'var(--green)' }}>
+                {ROBOT_STATE_LABEL[r.state]}
+              </span>
+            </div>
+            <span style={{ color: 'var(--text-dim)' }}>Objetivo: {r.target}</span>
+            <span style={{ color: 'var(--text-dim)' }}>
+              Distancia: <b className="mono-num">{r.distance}</b> px · Velocidad:{' '}
+              <b className="mono-num">{r.speed}</b> px/s
+            </span>
+            <span style={{ color: 'var(--text-dim)' }}>
+              Transportando: <b className="mono-num">{r.carrying}</b>
+            </span>
+            <span style={{ color: stuck ? 'var(--red)' : 'var(--text-dim)' }}>
+              Bloqueado: <b className="mono-num">{r.stuckMs}</b> ms · Recuperaciones:{' '}
+              <b className="mono-num">{r.recoveries}</b>
+            </span>
+            <span style={{ color: 'var(--text-mute)' }}>Última acción: {r.lastAction}</span>
+          </div>
+        );
+      })}
+
+      <div className="section-title">CINTAS EN VIVO</div>
+      <div className="card" style={{ fontSize: 11.5, display: 'grid', gap: 2 }}>
+        {debug.belts.map((b) => (
+          <span key={b.id}>
+            {b.id}: <b className="mono-num">{b.count}</b> items en tránsito
+          </span>
+        ))}
+      </div>
+
+      <div className="section-title">COMBATE EN VIVO</div>
+      <div className="card" style={{ fontSize: 11.5, display: 'grid', gap: 2 }}>
+        <span>
+          Enemigos activos: <b className="mono-num">{debug.enemies}</b>
+        </span>
+        <span>
+          Proyectiles en vuelo: <b className="mono-num">{debug.bullets}</b>
+        </span>
+      </div>
+    </>
   );
 }

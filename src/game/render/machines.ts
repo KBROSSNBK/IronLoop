@@ -7,10 +7,10 @@
 import { MACHINE_LIST, MACHINE_UPGRADE, type MachineDef } from '../../config/machines';
 import { TILE } from '../../config/world';
 import { getItem } from '../../config/items';
-import { ROBOTS, robotCarry } from '../../config/robots';
+import { ROBOTS } from '../../config/robots';
 import type { FactoryState, MachineState } from '../../types';
 import { fillRatio, settleMachine, type SettleResult } from '../logic/production';
-import { robotHasWork, robotVisual } from '../logic/robots';
+import { ROBOT_STATE_LABEL, type RobotBrain } from '../systems/robotBrain';
 import type { Fx } from '../engine/fx';
 import { roundRect } from './world';
 
@@ -322,19 +322,25 @@ function drawGear(
 export function drawRobots(
   ctx: CanvasRenderingContext2D,
   factory: FactoryState,
+  brains: Map<string, RobotBrain>,
   time: number,
 ): void {
   for (const def of ROBOTS) {
     const state = factory.robots?.[def.id];
     if (!state || state.level <= 0) continue;
+    const brain = brains.get(def.id);
+    if (!brain) continue;
 
-    const hasWork = robotHasWork(factory, def);
-    const v = robotVisual(def, hasWork, time);
-    const { x, y } = v;
-    const facingX = v.dx !== 0 ? v.dx : 1;
-    const busy = v.phase === 'loading' || v.phase === 'unloading';
+    const x = brain.x;
+    const y = brain.y;
+    const moving =
+      brain.state === 'TRANSPORTAR' ||
+      brain.state === 'VOLVER' ||
+      brain.state === 'IR_A_ORIGEN';
+    const busy = brain.state === 'CARGAR' || brain.state === 'DEPOSITAR';
+    const facingX = brain.state === 'VOLVER' || brain.state === 'IR_A_ORIGEN' ? -1 : 1;
     // Traqueteo al rodar; quieto mientras carga o espera.
-    const bob = v.phase === 'outbound' || v.phase === 'returning' ? Math.sin(time * 18) * 0.8 : 0;
+    const bob = moving ? Math.sin(time * 18) * 0.8 : 0;
     const py = y + bob;
 
     ctx.save();
@@ -352,10 +358,10 @@ export function drawRobots(
     ctx.fill();
 
     // Carga: sólo cuando de verdad lleva algo encima.
-    if (v.carrying) {
+    if (brain.carrying > 0) {
       const lift = busy ? Math.abs(Math.sin(time * 9)) * 3 : 0;
       const item = getItem(def.item);
-      const carry = robotCarry(def, state.level);
+      const carry = brain.carrying;
       ctx.fillStyle = '#b45309';
       roundRect(ctx, x - 7, py - 15 - lift, 14, 9, 2);
       ctx.fill();
@@ -384,9 +390,11 @@ export function drawRobots(
       ctx.stroke();
     }
 
-    // Sensor: verde trabajando, ámbar esperando material.
-    ctx.fillStyle = v.phase === 'idle' ? '#fbbf24' : '#4ade80';
-    ctx.globalAlpha = 0.55 + Math.sin(time * (v.phase === 'idle' ? 2.5 : 8)) * 0.4;
+    // Sensor: ámbar esperando, rojo recalculando, verde trabajando.
+    const idle = brain.state === 'IDLE';
+    const recovering = brain.state === 'RECUPERANDO';
+    ctx.fillStyle = recovering ? '#f87171' : idle ? '#fbbf24' : '#4ade80';
+    ctx.globalAlpha = 0.55 + Math.sin(time * (idle ? 2.5 : 8)) * 0.4;
     ctx.beginPath();
     ctx.arc(x + facingX * 8, py - 2, 2.6, 0, Math.PI * 2);
     ctx.fill();
@@ -397,12 +405,15 @@ export function drawRobots(
     ctx.fillRect(x - 12, py + 8, 7, 4);
     ctx.fillRect(x + 5, py + 8, 7, 4);
 
-    if (v.phase === 'idle') {
-      ctx.fillStyle = 'rgba(251,191,36,0.85)';
-      ctx.font = '700 8px "Rajdhani", system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('SIN MATERIAL', x, py - 18);
-    }
+    // Estado actual: lo que el robot está haciendo de verdad.
+    ctx.fillStyle = recovering
+      ? 'rgba(248,113,113,0.9)'
+      : idle
+        ? 'rgba(251,191,36,0.85)'
+        : 'rgba(148,163,184,0.75)';
+    ctx.font = '700 8px "Rajdhani", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(ROBOT_STATE_LABEL[brain.state], x, py - 18);
     ctx.restore();
   }
 }

@@ -1,6 +1,7 @@
 import { BALANCE } from '../../config/balance';
 import { MACHINE_LIST } from '../../config/machines';
 import { DEFAULT_APPEARANCE, randomAppearance } from '../../config/cosmetics';
+import { DEFAULT_WEAPON } from '../../config/weapons';
 import { ACTIVE_MISSION_SLOTS, rollMissions } from '../../config/missions';
 import type {
   AuthUser,
@@ -22,6 +23,7 @@ export function emptyStats(): LifetimeStats {
     contributed: 0,
     upgradesBought: 0,
     playtime: 0,
+    kills: 0,
   };
 }
 
@@ -39,6 +41,7 @@ export function createPlayerState(user: AuthUser, now = Date.now()): PlayerState
     stamina: BALANCE.player.startingStamina,
     staminaAt: now,
     upgrades: {},
+    weapon: { ...DEFAULT_WEAPON, owned: [...DEFAULT_WEAPON.owned] },
     inventory: {},
     missions: rollMissions(1, [], ACTIVE_MISSION_SLOTS).map((id) => ({
       id,
@@ -51,6 +54,7 @@ export function createPlayerState(user: AuthUser, now = Date.now()): PlayerState
     createdAt: now,
     lastSeenAt: now,
     lastOfflineClaimAt: now,
+    lastCombatAt: now,
     onboarded: false,
     resetAckAt: 0,
   };
@@ -72,6 +76,7 @@ export function createFactoryState(id: string, index: number, now = Date.now()):
     machines,
     robots: {},
     ground: {},
+    belts: {},
     stats: { gathered: 0, produced: 0, sold: 0, contributed: 0 },
     objectives: {},
     playerCount: 0,
@@ -116,6 +121,12 @@ export function normalizePlayer(raw: Partial<PlayerState>, user?: AuthUser): Pla
     ...raw,
     appearance: { ...base.appearance, ...(raw.appearance ?? {}) },
     upgrades: { ...(raw.upgrades ?? {}) },
+    weapon: {
+      ...DEFAULT_WEAPON,
+      ...(raw.weapon ?? {}),
+      // El arma inicial siempre está disponible, aunque el documento sea viejo.
+      owned: [...new Set([...DEFAULT_WEAPON.owned, ...(raw.weapon?.owned ?? [])])],
+    },
     inventory: { ...(raw.inventory ?? {}) },
     stats: { ...base.stats, ...(raw.stats ?? {}) },
     missions:
@@ -144,6 +155,7 @@ export function normalizeFactory(raw: Partial<FactoryState>, id: string): Factor
     machines,
     robots,
     ground: { ...(raw.ground ?? {}) },
+    belts: { ...(raw.belts ?? {}) },
     stats: { ...base.stats, ...(raw.stats ?? {}) },
     objectives: { ...(raw.objectives ?? {}) },
   } as FactoryState;

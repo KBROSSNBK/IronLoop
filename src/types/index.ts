@@ -1,6 +1,7 @@
 import type { Appearance } from '../config/cosmetics';
+import type { WeaponState } from '../config/weapons';
 
-export type { Appearance };
+export type { Appearance, WeaponState };
 
 /* ─────────────────────────── JUGADOR ─────────────────────────── */
 
@@ -13,6 +14,8 @@ export interface LifetimeStats {
   contributed: number;
   upgradesBought: number;
   playtime: number; // segundos
+  /** Enemigos destruidos por las armas automáticas. */
+  kills: number;
 }
 
 export interface MissionProgress {
@@ -39,6 +42,8 @@ export interface PlayerState {
 
   /** id de mejora → nivel comprado */
   upgrades: Record<string, number>;
+  /** Arma automática equipada y sus mejoras. */
+  weapon: WeaponState;
   /** itemId → cantidad */
   inventory: Record<string, number>;
 
@@ -50,6 +55,8 @@ export interface PlayerState {
   lastSeenAt: number;
   /** Timestamp de la última liquidación de producción offline. */
   lastOfflineClaimAt: number;
+  /** Última vez que se cobró XP de combate (acota cuánta se puede reclamar). */
+  lastCombatAt: number;
   onboarded: boolean;
   /**
    * Último reinicio de fábrica que este jugador ya ha aplicado a su progreso.
@@ -71,6 +78,23 @@ export interface MachineState {
   cycleStartAt: number;
   /** Ciclos totales completados (para métricas y objetivos). */
   cycles: number;
+}
+
+/**
+ * Tanda de material viajando por una cinta. La posición de cada bulto NO se
+ * guarda: se deriva de `at` y de la velocidad de la cinta, igual que el
+ * progreso de las máquinas. Así todos los jugadores ven exactamente lo mismo
+ * sin sincronizar nada por frame.
+ */
+export interface BeltBatch {
+  item: string;
+  qty: number;
+  /** Instante en que entró en la cinta (ms epoch). */
+  at: number;
+}
+
+export interface BeltState {
+  queue: BeltBatch[];
 }
 
 /** Robot logístico comprado por la fábrica. */
@@ -119,6 +143,8 @@ export interface FactoryState {
   robots: Record<string, RobotState>;
   /** Objetos tirados en el suelo, compartidos por todos. */
   ground: Record<string, GroundItem>;
+  /** cintaId → material en tránsito. */
+  belts: Record<string, BeltState>;
   stats: FactoryStats;
   /** objetivoId → progreso; los completados se marcan con `-1`. */
   objectives: Record<string, number>;

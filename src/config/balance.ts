@@ -13,6 +13,8 @@ export const BALANCE = {
     baseInventorySlots: 10,
     baseSpeed: 132, // px/s
     sprintMultiplier: 1.62,
+    /** Penalización de velocidad al quedarse sin estamina. */
+    exhaustedSpeedMult: 0.55,
   },
 
   actions: {

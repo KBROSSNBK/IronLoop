@@ -23,7 +23,9 @@ import {
 } from '../../config/world';
 import { getFactoryLevel } from '../../config/factoryLevels';
 import { getItem } from '../../config/items';
-import type { GroundItem } from '../../types';
+import { getMachine } from '../../config/machines';
+import { beltActive, beltCount, beltItems } from '../logic/belts';
+import type { FactoryState, GroundItem } from '../../types';
 
 /* ─────────────────────────── utilidades ─────────────────────────── */
 
@@ -282,81 +284,177 @@ function paintWalls(ctx: CanvasRenderingContext2D, polish: number, accent: strin
 
 /* ─────────────────────── capa animada ─────────────────────── */
 
+/**
+ * Cintas transportadoras.
+ *
+ * Lo que se ve es el estado REAL: los bultos que circulan llevan el icono y
+ * el color del material que transporta esa cinta, su cantidad depende de lo
+ * que hay realmente en cola en la máquina de destino, y un contador en vivo
+ * muestra cuánto está esperando. Si no circula nada, la banda gira vacía.
+ */
 export function drawConveyors(
   ctx: CanvasRenderingContext2D,
-  factoryLevel: number,
+  factory: FactoryState,
   time: number,
+  now: number,
 ): void {
+  const factoryLevel = factory.level;
+
   for (const c of CONVEYORS) {
-    const active = factoryLevel >= c.fromLevel;
+    const active = beltActive(c, factoryLevel);
     const horizontal = c.dir === 'left' || c.dir === 'right';
     const w = horizontal ? c.len * TILE : TILE * 0.7;
     const h = horizontal ? TILE * 0.7 : c.len * TILE;
     const x = c.tx * TILE;
     const y = c.ty * TILE;
+    const span = horizontal ? w : h;
+    const sign = c.dir === 'left' || c.dir === 'up' ? -1 : 1;
+
+    // Material REAL que hay ahora mismo sobre la cinta.
+    const state = factory.belts?.[c.id];
+    const cargo = active ? beltItems(c.id, state, now) : [];
+    const count = active ? beltCount(state, c.id, now) : 0;
+    // Una cinta cargada se mueve un pelín más lenta: sensación de peso.
+    const load = Math.min(1, count / 60);
+    const bandSpeed = 52 * (1 - load * 0.28);
 
     ctx.save();
     ctx.globalAlpha = active ? 1 : 0.22;
 
-    // Estructura
-    ctx.fillStyle = '#111722';
-    roundRect(ctx, x - 2, y - 2, w + 4, h + 4, 5);
-    ctx.fill();
-    ctx.fillStyle = '#1e2736';
-    roundRect(ctx, x, y, w, h, 4);
+    // Bastidor
+    ctx.fillStyle = '#0d121c';
+    roundRect(ctx, x - 3, y - 3, w + 6, h + 6, 6);
     ctx.fill();
 
-    // Banda con chevrones en movimiento
     ctx.save();
     roundRect(ctx, x, y, w, h, 4);
     ctx.clip();
-    const speed = active ? 46 : 0;
-    const sign = c.dir === 'left' || c.dir === 'up' ? -1 : 1;
-    const offset = ((time * speed * sign) % 22 + 22) % 22;
-    ctx.strokeStyle = active ? 'rgba(148,163,184,0.55)' : 'rgba(148,163,184,0.25)';
-    ctx.lineWidth = 3;
-    if (horizontal) {
-      for (let i = -22; i < w + 22; i += 22) {
-        const px = x + i + offset;
-        ctx.beginPath();
-        ctx.moveTo(px, y + 4);
-        ctx.lineTo(px + 7, y + h / 2);
-        ctx.lineTo(px, y + h - 4);
-        ctx.stroke();
+    ctx.fillStyle = '#232e40';
+    ctx.fillRect(x, y, w, h);
+
+    // Rodillos girando: dan volumen y marcan la dirección.
+    const rollerGap = 9;
+    const rollerOffset = active
+      ? (((time * bandSpeed * sign) % rollerGap) + rollerGap) % rollerGap
+      : 0;
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = 1.5;
+    for (let i = -rollerGap; i < span + rollerGap; i += rollerGap) {
+      const p = i + rollerOffset;
+      ctx.beginPath();
+      if (horizontal) {
+        ctx.moveTo(x + p, y + 2);
+        ctx.lineTo(x + p, y + h - 2);
+      } else {
+        ctx.moveTo(x + 2, y + p);
+        ctx.lineTo(x + w - 2, y + p);
       }
-    } else {
-      for (let i = -22; i < h + 22; i += 22) {
-        const py = y + i + offset;
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(226,232,240,0.14)';
+    ctx.lineWidth = 1;
+    for (let i = -rollerGap; i < span + rollerGap; i += rollerGap) {
+      const p = i + rollerOffset + 2;
+      ctx.beginPath();
+      if (horizontal) {
+        ctx.moveTo(x + p, y + 3);
+        ctx.lineTo(x + p, y + h - 3);
+      } else {
+        ctx.moveTo(x + 3, y + p);
+        ctx.lineTo(x + w - 3, y + p);
+      }
+      ctx.stroke();
+    }
+
+    // Flechas de sentido, muy tenues, sólo si la cinta está viva.
+    if (active) {
+      ctx.strokeStyle = 'rgba(148,163,184,0.18)';
+      ctx.lineWidth = 2;
+      const arrowGap = 34;
+      const ao = (((time * bandSpeed * sign) % arrowGap) + arrowGap) % arrowGap;
+      for (let i = -arrowGap; i < span + arrowGap; i += arrowGap) {
+        const p = i + ao;
         ctx.beginPath();
-        ctx.moveTo(x + 4, py);
-        ctx.lineTo(x + w / 2, py + 7);
-        ctx.lineTo(x + w - 4, py);
+        if (horizontal) {
+          const ax = x + p;
+          ctx.moveTo(ax, y + 5);
+          ctx.lineTo(ax + 6 * sign, y + h / 2);
+          ctx.lineTo(ax, y + h - 5);
+        } else {
+          const ay = y + p;
+          ctx.moveTo(x + 5, ay);
+          ctx.lineTo(x + w / 2, ay + 6 * sign);
+          ctx.lineTo(x + w - 5, ay);
+        }
         ctx.stroke();
       }
     }
 
-    // Cajas viajando por la cinta
-    if (active) {
-      const boxes = 2 + Math.floor(factoryLevel / 3);
-      for (let i = 0; i < boxes; i++) {
-        const span = horizontal ? w : h;
-        const t = (((time * 46 * sign) / span + i / boxes) % 1 + 1) % 1;
-        const px = horizontal ? x + t * span : x + w / 2;
-        const py = horizontal ? y + h / 2 : y + t * span;
-        ctx.fillStyle = '#b45309';
-        roundRect(ctx, px - 6, py - 6, 12, 12, 2);
-        ctx.fill();
-        ctx.fillStyle = '#f59e0b';
-        ctx.fillRect(px - 6, py - 1.5, 12, 3);
-      }
+    // ── Los bultos: uno por unidad real que viaja por la cinta ──
+    for (const it of cargo) {
+      const def = getItem(it.item);
+      // Traqueteo al pasar por los rodillos + entrada/salida suave.
+      const jitter = Math.sin((horizontal ? it.x : it.y) * 0.6 + time * 6) * 0.8;
+      const fade = Math.min(1, it.t * 12, (1 - it.t) * 12);
+      ctx.globalAlpha = (active ? 1 : 0.22) * Math.max(0.15, fade);
+
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      roundRect(ctx, it.x - 8, it.y - 3 + jitter, 16, 12, 3);
+      ctx.fill();
+      ctx.fillStyle = '#7c4a1e';
+      roundRect(ctx, it.x - 8, it.y - 8 + jitter, 16, 15, 3);
+      ctx.fill();
+      ctx.fillStyle = def.color;
+      ctx.fillRect(it.x - 8, it.y - 3 + jitter, 16, 3.5);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      roundRect(ctx, it.x - 8, it.y - 8 + jitter, 16, 4, 3);
+      ctx.fill();
+      ctx.font = '9px "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(def.icon, it.x, it.y - 5.5 + jitter);
     }
+    ctx.globalAlpha = active ? 1 : 0.22;
     ctx.restore();
 
     // Barandillas
-    ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.lineWidth = 2;
     roundRect(ctx, x, y, w, h, 4);
     ctx.stroke();
+    ctx.strokeStyle = 'rgba(148,163,184,0.22)';
+    ctx.lineWidth = 1;
+    roundRect(ctx, x + 1.5, y + 1.5, w - 3, h - 3, 3);
+    ctx.stroke();
+
+    // Contador en vivo: cuántas unidades hay REALMENTE sobre la cinta.
+    if (active) {
+      const accepts = c.accepts?.length
+        ? c.accepts
+        : c.feeds
+          ? Object.keys(getMachine(c.feeds).input)
+          : [];
+      const icon = cargo.length > 0
+        ? getItem(cargo[0].item).icon
+        : accepts.length > 0
+          ? getItem(accepts[0]).icon
+          : '📦';
+      const label = `${icon} ${count} ITEMS`;
+      const bx = x + w / 2;
+      const by = y - 13;
+      ctx.font = '800 10px "Rajdhani", system-ui, sans-serif';
+      const tw = ctx.measureText(label).width + 14;
+      ctx.fillStyle = 'rgba(6,11,20,0.88)';
+      roundRect(ctx, bx - tw / 2, by - 8, tw, 15, 7);
+      ctx.fill();
+      ctx.strokeStyle = count > 0 ? '#38bdf8' : 'rgba(148,163,184,0.3)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = count > 0 ? '#e2e8f0' : '#64748b';
+      ctx.fillText(label, bx, by);
+    }
     ctx.restore();
   }
 }

@@ -26,7 +26,24 @@ import {
 } from '../../config/upgrades';
 import { FACTORY_OBJECTIVES } from '../../config/factoryLevels';
 import { ROBOT_CONTRIB_RATIO, getRobot, robotCost } from '../../config/robots';
-import { settleRobots } from '../../game/logic/robots';
+import { settleFactory } from '../../game/logic/robots';
+import { getBelt, pushToBelt } from '../../game/logic/belts';
+import {
+  DEFAULT_WEAPON,
+  WEAPON_MAP,
+  WEAPON_STATS,
+  weaponStatCost,
+  type WeaponStat,
+} from '../../config/weapons';
+import { COMBAT } from '../../config/enemies';
+
+/**
+ * Tope de XP de combate por segundo transcurrido. Calibrado por encima de lo
+ * que puede rendir un jugador legítimo con el arma más potente, para no
+ * penalizar a nadie, pero muy por debajo de lo que pediría un cliente
+ * manipulado que reclamase XP infinita.
+ */
+const COMBAT_XP_PER_SECOND_CAP = 45;
 import { STATIONS, TILE } from '../../config/world';
 import type {
   FactoryMember,
@@ -294,6 +311,11 @@ export interface DepositArgs {
   /** Si no se indica, deposita todo lo compatible que lleve encima. */
   item?: string;
   qty?: number;
+  /**
+   * Si se indica, el material NO entra directo en la máquina: sube a esa
+   * cinta y tarda en llegar, viajando a la vista de todos los jugadores.
+   */
+  beltId?: string;
   now: number;
 }
 
@@ -313,12 +335,19 @@ export function opDeposit(
 
   const stats = deriveStats(player.upgrades);
   const perAction = stats.gatherAmount * 5; // depositar es más rápido que extraer
-  const wanted = Object.keys(def.input);
+  const belt = args.beltId ? getBelt(args.beltId) : undefined;
+  if (args.beltId && (!belt || belt.feeds !== args.machineId)) {
+    return fail('Esa cinta no lleva a esta máquina');
+  }
+  // Una cinta con filtro propio manda sobre la receta de la máquina.
+  const wanted =
+    belt?.accepts && belt.accepts.length > 0 ? belt.accepts : Object.keys(def.input);
   const deposited: Record<string, number> = {};
   let inventory = player.inventory;
   let units = 0;
 
   for (const item of wanted) {
+    if (!(item in def.input)) continue;
     if (args.item && args.item !== item) continue;
     const have = inventory[item] ?? 0;
     if (have <= 0) continue;
@@ -326,14 +355,29 @@ export function opDeposit(
     const qty = Math.min(have, room, args.qty ?? perAction);
     if (qty <= 0) continue;
     inventory = addToInventory(inventory, item, -qty);
-    machine = { ...machine, input: { ...machine.input, [item]: (machine.input[item] ?? 0) + qty } };
+    if (!belt) {
+      // Entrega directa: el jugador está delante de la máquina.
+      machine = {
+        ...machine,
+        input: { ...machine.input, [item]: (machine.input[item] ?? 0) + qty },
+      };
+    }
     deposited[item] = qty;
     units += qty;
   }
 
   if (units === 0) {
-    const full = wanted.some((i) => inputRoom(machine, args.machineId, i) <= 0);
-    return fail(full ? 'Buffer de entrada lleno' : 'No llevas material compatible');
+    return fail(
+      belt ? 'No llevas material para esta cinta' : 'No llevas material compatible',
+    );
+  }
+
+  // Si va por cinta, el material entra en la cola y tarda en llegar.
+  let belts = factory.belts ?? {};
+  if (belt) {
+    for (const [item, qty] of Object.entries(deposited)) {
+      belts = pushToBelt(belts, belt.id, item, qty, args.now);
+    }
   }
 
   // Tras depositar, la máquina puede arrancar.
@@ -359,6 +403,7 @@ export function opDeposit(
   const f: FactoryState = {
     ...factory,
     machines: { ...factory.machines, [args.machineId]: machine },
+    belts,
     updatedAt: args.now,
   };
 
@@ -1046,6 +1091,151 @@ export function opTrashItem(
   };
 }
 
+/* ───────────────────── 12b. ARMAS Y COMBATE ───────────────────── */
+
+/** Compra o equipa un arma. Equipar algo ya comprado es gratis. */
+export function opBuyWeapon(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { weaponId: string; now: number },
+): OpOutcome<{ equipped: string; cost: number }> {
+  const def = WEAPON_MAP[args.weaponId];
+  if (!def) return fail('Arma desconocida');
+
+  const weapon = { ...DEFAULT_WEAPON, ...(player.weapon ?? {}) };
+  const owned = [...new Set([...DEFAULT_WEAPON.owned, ...(weapon.owned ?? [])])];
+
+  if (owned.includes(def.id)) {
+    // Ya es tuya: sólo se equipa.
+    return {
+      ok: true,
+      player: { ...player, weapon: { ...weapon, owned, type: def.id } },
+      factory,
+      events: [{ kind: 'info', text: `${def.name} equipada` }],
+      data: { equipped: def.id, cost: 0 },
+    };
+  }
+
+  if (player.level < def.unlockLevel) return fail(`Requiere nivel ${def.unlockLevel}`);
+  if (player.money < def.cost) return fail('Dinero insuficiente');
+
+  const events: OpEvent[] = [];
+  let p: PlayerState = {
+    ...player,
+    money: player.money - def.cost,
+    weapon: { ...weapon, owned: [...owned, def.id], type: def.id },
+  };
+  p = stat(p, { upgradesBought: 1 });
+  p = bumpMissions(p, [{ metric: 'upgrade', amount: 1 }], events);
+
+  const contrib = Math.round(def.cost * UPGRADE_CONTRIB_RATIO);
+  const f = addContribution(factory, contrib, events);
+  p = stat(p, { contributed: contrib });
+
+  events.push({ kind: 'money', amount: -def.cost });
+  events.push({ kind: 'info', text: `${def.name} desbloqueada` });
+
+  return {
+    ok: true,
+    player: p,
+    factory: f,
+    memberDelta: { contributed: contrib, money: p.money },
+    events,
+    data: { equipped: def.id, cost: def.cost },
+  };
+}
+
+/** Sube una estadística del arma: daño, cadencia o proyectiles. */
+export function opBuyWeaponStat(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { stat: WeaponStat; now: number },
+): OpOutcome<{ level: number; cost: number }> {
+  const def = WEAPON_STATS[args.stat];
+  if (!def) return fail('Mejora desconocida');
+
+  const weapon = { ...DEFAULT_WEAPON, ...(player.weapon ?? {}) };
+  const current = weapon[def.id] ?? 0;
+  if (current >= def.maxLevel) return fail('Nivel máximo alcanzado');
+
+  const cost = weaponStatCost(def, current);
+  if (player.money < cost) return fail('Dinero insuficiente');
+
+  const events: OpEvent[] = [];
+  let p: PlayerState = {
+    ...player,
+    money: player.money - cost,
+    weapon: { ...weapon, [def.id]: current + 1 },
+  };
+  p = stat(p, { upgradesBought: 1 });
+  p = bumpMissions(p, [{ metric: 'upgrade', amount: 1 }], events);
+
+  const contrib = Math.round(cost * UPGRADE_CONTRIB_RATIO);
+  const f = addContribution(factory, contrib, events);
+  p = stat(p, { contributed: contrib });
+
+  events.push({ kind: 'money', amount: -cost });
+  events.push({ kind: 'info', text: `${def.name} nivel ${current + 1}` });
+
+  return {
+    ok: true,
+    player: p,
+    factory: f,
+    memberDelta: { contributed: contrib, money: p.money },
+    events,
+    data: { level: current + 1, cost },
+  };
+}
+
+/**
+ * Recompensa por los enemigos destruidos.
+ *
+ * El combate se simula en cliente (cada jugador tiene sus propios enemigos),
+ * así que esta es la frontera de confianza: se acepta XP por tandas, pero
+ * acotada por el tiempo transcurrido y por un tope duro. Un cliente
+ * manipulado puede acelerar su progresión, no dispararla.
+ */
+export function opCombatReward(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { xp: number; kills: number; now: number },
+): OpOutcome<{ xp: number }> {
+  const kills = Math.max(0, Math.min(200, Math.floor(args.kills || 0)));
+  const asked = Math.max(0, Math.floor(args.xp || 0));
+  if (asked <= 0 || kills <= 0) {
+    return { ok: true, player, factory, events: [], data: { xp: 0 } };
+  }
+
+  // Techo por tiempo: no se puede reclamar más XP de la que cabría matando
+  // sin parar desde la última recompensa.
+  const since = Math.max(1000, args.now - (player.lastCombatAt ?? player.createdAt));
+  const byTime = Math.floor((since / 1000) * COMBAT_XP_PER_SECOND_CAP);
+  const granted = Math.min(asked, COMBAT.maxXpPerFlush, byTime);
+  if (granted <= 0) {
+    return {
+      ok: true,
+      player: { ...player, lastCombatAt: args.now },
+      factory,
+      events: [],
+      data: { xp: 0 },
+    };
+  }
+
+  const events: OpEvent[] = [];
+  let p: PlayerState = { ...player, lastCombatAt: args.now };
+  p = stat(p, { kills });
+  p = grantXp(p, granted, events, args.now);
+
+  return {
+    ok: true,
+    player: p,
+    factory,
+    memberDelta: { money: p.money },
+    events,
+    data: { xp: granted },
+  };
+}
+
 /* ───────────────────── 13. COMPRAR / MEJORAR ROBOT ───────────────────── */
 
 export function opBuyRobot(
@@ -1196,6 +1386,9 @@ export type OpName =
   | 'useItem'
   | 'setAppearance'
   | 'buyRobot'
+  | 'buyWeapon'
+  | 'buyWeaponStat'
+  | 'combatReward'
   | 'withdraw'
   | 'dropItem'
   | 'pickupGround'
@@ -1218,6 +1411,9 @@ export const OPS = {
   useItem: opUseItem,
   setAppearance: opSetAppearance,
   buyRobot: opBuyRobot,
+  buyWeapon: opBuyWeapon,
+  buyWeaponStat: opBuyWeaponStat,
+  combatReward: opCombatReward,
   withdraw: opWithdraw,
   dropItem: opDropItem,
   pickupGround: opPickupGround,
@@ -1235,14 +1431,14 @@ export function runOp(
   const op = OPS[name];
   if (!op) return fail(`Operación desconocida: ${name}`);
   try {
-    // Los robots se liquidan ANTES de cualquier operación: así el material que
-    // han movido mientras nadie miraba ya está en su sitio cuando el jugador
-    // interactúa, y se persiste en la misma transacción.
+    // La fábrica se pone al día ANTES de cualquier operación: primero producen
+    // las máquinas, luego los robots reparten, y las máquinas de destino
+    // arrancan con lo entregado. Todo se persiste en la misma transacción.
     const now =
       typeof (args as { now?: number })?.now === 'number'
         ? (args as { now: number }).now
         : Date.now();
-    const settled = settleRobots(factory, now);
+    const settled = settleFactory(factory, now);
     const out = op(player, settled.factory, args as never) as OpOutcome;
     // Aunque la operación falle, conviene guardar el trabajo de los robots.
     if (!out.ok && settled.transfers.length > 0) {

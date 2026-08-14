@@ -392,11 +392,12 @@
 
 /* ───────────────────────────── Joystick ───────────────────────────── */
 
-/* Separado del borde: pegado a la esquina resulta incómodo para el pulgar. */
+/* Separado del borde y algo elevado: pegado a la esquina resulta incómodo
+   para el pulgar y roza los gestos del sistema. */
 .joystick {
   position: absolute;
-  left: calc(var(--safe-l) + 34px);
-  bottom: calc(var(--safe-b) + 34px);
+  left: calc(var(--safe-l) + 42px);
+  bottom: calc(var(--safe-b) + 46px);
   width: 118px;
   height: 118px;
   border-radius: 50%;
@@ -426,10 +427,12 @@
   pointer-events: none;
 }
 
+/* Botón de correr: a la DERECHA, bajo el pulgar derecho, con margen para no
+   pelearse con los gestos del sistema en el borde de la pantalla. */
 .sprint-btn {
   position: absolute;
-  left: calc(var(--safe-l) + 164px);
-  bottom: calc(var(--safe-b) + 42px);
+  right: calc(var(--safe-r) + 22px);
+  bottom: calc(var(--safe-b) + 30px);
   width: 54px;
   height: 54px;
   border-radius: 50%;
@@ -457,10 +460,16 @@
   align-items: flex-start;
   gap: 8px;
 }
-/* En táctil el joystick ocupa esa esquina: el botón sube por encima. */
+/* En táctil los emotes van a la DERECHA, bajo la barra de acciones: es la
+   zona del pulgar derecho y deja libre el lado del joystick. */
 .emote-dock[data-touch='true'] {
-  left: calc(var(--safe-l) + 34px);
-  bottom: calc(var(--safe-b) + 168px);
+  left: auto;
+  right: calc(var(--safe-r) + 84px);
+  bottom: calc(var(--safe-b) + 30px);
+  align-items: flex-end;
+}
+.emote-dock[data-touch='true'] .emote-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .emote-btn {
@@ -720,20 +729,28 @@
   }
 
   .joystick {
-    width: 96px;
-    height: 96px;
-    left: calc(var(--safe-l) + 24px);
-    bottom: calc(var(--safe-b) + 24px);
+    width: 100px;
+    height: 100px;
+    left: calc(var(--safe-l) + 30px);
+    bottom: calc(var(--safe-b) + 30px);
   }
   .joystick .knob {
-    width: 40px;
-    height: 40px;
+    width: 42px;
+    height: 42px;
   }
   .sprint-btn {
-    width: 44px;
-    height: 44px;
-    left: calc(var(--safe-l) + 130px);
-    bottom: calc(var(--safe-b) + 30px);
+    width: 48px;
+    height: 48px;
+    right: calc(var(--safe-r) + 18px);
+    bottom: calc(var(--safe-b) + 22px);
+    left: auto;
+  }
+  .emote-dock[data-touch='true'] {
+    right: calc(var(--safe-r) + 76px);
+    bottom: calc(var(--safe-b) + 22px);
+  }
+  .action-bar {
+    bottom: calc(var(--safe-b) + 78px);
   }
   .hud-meter {
     width: 88px;

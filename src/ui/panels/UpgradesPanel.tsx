@@ -6,9 +6,16 @@ import { ROBOT_CONTRIB_RATIO, robotCarry, robotCost, robotRate } from '../../con
 import { getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
 import { robotStatuses } from '../../game/logic/robots';
+import {
+  DEFAULT_WEAPON,
+  WEAPONS,
+  WEAPON_STAT_LIST,
+  deriveWeapon,
+  weaponStatCost,
+} from '../../config/weapons';
 import { compact, moneyExact } from '../../utils/format';
 
-type Tab = 'mejoras' | 'robots';
+type Tab = 'mejoras' | 'armas' | 'robots';
 
 /**
  * TALLER: mejoras personales y flota de robots. Es el único sitio donde se
@@ -38,7 +45,10 @@ export function UpgradesPanel() {
     >
       <div className="rank-tabs">
         <button className="rank-tab bevel-sm" data-on={tab === 'mejoras'} onClick={() => setTab('mejoras')}>
-          🧰 Mejoras
+          🧰 Personaje
+        </button>
+        <button className="rank-tab bevel-sm" data-on={tab === 'armas'} onClick={() => setTab('armas')}>
+          🔫 Armas
         </button>
         <button className="rank-tab bevel-sm" data-on={tab === 'robots'} onClick={() => setTab('robots')}>
           🤖 Robots
@@ -90,6 +100,8 @@ export function UpgradesPanel() {
             );
           })}
         </>
+      ) : tab === 'armas' ? (
+        <WeaponsTab />
       ) : (
         <>
           <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
@@ -173,5 +185,135 @@ export function UpgradesPanel() {
         </>
       )}
     </Panel>
+  );
+}
+
+/**
+ * Armas automáticas. Disparan solas a lo que se acerque; lo que el jugador
+ * decide aquí es en qué invertir y qué arma llevar equipada.
+ */
+function WeaponsTab() {
+  const player = useSessionStore((s) => s.player)!;
+  const op = useSessionStore((s) => s.op);
+  const busy = useSessionStore((s) => s.busy);
+
+  const weapon = { ...DEFAULT_WEAPON, ...(player.weapon ?? {}) };
+  const derived = deriveWeapon(weapon);
+
+  return (
+    <>
+      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+        Tu arma dispara <b>sola</b> a lo que entre en su alcance mientras trabajas.
+        Las mejoras se aplican al arma que lleves equipada, sea cual sea.
+      </div>
+
+      <div className="weapon-hero bevel-sm">
+        <div className="ico">{derived.def.icon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="nm">{derived.def.name}</div>
+          <div className="stat">{derived.def.desc}</div>
+        </div>
+      </div>
+
+      <div className="weapon-stats">
+        <Metric label="DPS" value={derived.dps.toFixed(1)} accent="var(--red)" />
+        <Metric label="Daño" value={derived.damage.toFixed(1)} accent="var(--amber-soft)" />
+        <Metric
+          label="Cadencia"
+          value={`${(1000 / derived.fireRateMs).toFixed(1)}/s`}
+          accent="var(--blue)"
+        />
+        <Metric label="Proyectiles" value={String(derived.projectiles)} accent="var(--lime)" />
+        <Metric label="Alcance" value={`${derived.range} px`} accent="var(--violet)" />
+        <Metric label="Bajas" value={compact(player.stats.kills ?? 0)} accent="var(--cyan)" />
+      </div>
+
+      <div className="section-title">MEJORAS DEL ARMA</div>
+      {WEAPON_STAT_LIST.map((def) => {
+        const level = weapon[def.id] ?? 0;
+        const maxed = level >= def.maxLevel;
+        const cost = weaponStatCost(def, level);
+        const afford = player.money >= cost;
+        return (
+          <div
+            className="upg-card"
+            key={def.id}
+            style={{ ['--upg-color' as string]: def.accent }}
+          >
+            <div className="upg-icon">{def.icon}</div>
+            <div className="upg-main">
+              <div className="upg-name">
+                {def.name} <span style={{ color: 'var(--text-mute)' }}>Nv.{level}</span>
+              </div>
+              <div className="upg-effect">{level > 0 ? def.effect(level) : def.desc}</div>
+              <div className="upg-pips">
+                {Array.from({ length: Math.min(def.maxLevel, 15) }, (_, i) => (
+                  <i key={i} className={i < Math.min(level, 15) ? 'on' : ''} />
+                ))}
+              </div>
+            </div>
+            <button
+              className={`upg-buy${maxed ? ' max' : ''}`}
+              disabled={busy || maxed || !afford}
+              onClick={() => void op('buyWeaponStat', { stat: def.id })}
+            >
+              {maxed ? 'MÁX' : moneyExact(cost)}
+            </button>
+          </div>
+        );
+      })}
+
+      <div className="section-title">ARSENAL</div>
+      {WEAPONS.map((w) => {
+        const owned = weapon.owned.includes(w.id);
+        const equipped = weapon.type === w.id;
+        const locked = player.level < w.unlockLevel;
+        const afford = player.money >= w.cost;
+        const preview = deriveWeapon({ ...weapon, type: w.id });
+        return (
+          <div
+            className="upg-card"
+            key={w.id}
+            data-locked={locked && !owned}
+            style={{ ['--upg-color' as string]: w.color }}
+          >
+            <div className="upg-icon">{w.icon}</div>
+            <div className="upg-main">
+              <div className="upg-name">
+                {w.name}
+                {equipped && <span style={{ color: 'var(--green)' }}> · EQUIPADA</span>}
+              </div>
+              <div className="upg-effect">{w.desc}</div>
+              <div className="upg-effect" style={{ color: 'var(--text-mute)' }}>
+                {preview.dps.toFixed(0)} DPS · {preview.projectiles} proyectil
+                {preview.projectiles === 1 ? '' : 'es'} · {w.range} px
+              </div>
+            </div>
+            <button
+              className={`upg-buy${equipped ? ' max' : ''}`}
+              disabled={busy || equipped || (!owned && (locked || !afford))}
+              onClick={() => void op('buyWeapon', { weaponId: w.id })}
+            >
+              {equipped
+                ? 'EN USO'
+                : owned
+                  ? 'EQUIPAR'
+                  : locked
+                    ? `🔒 Nv.${w.unlockLevel}`
+                    : moneyExact(w.cost)}
+            </button>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function Metric({ label, value, accent }: { label: string; value: string; accent: string }) {
+  return (
+    <div className="weapon-metric" style={{ ['--m' as string]: accent }}>
+      <span className="l">{label}</span>
+      <span className="v mono-num">{value}</span>
+    </div>
   );
 }

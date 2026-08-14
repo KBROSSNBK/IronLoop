@@ -4,7 +4,7 @@ import { DEBUG_ENABLED } from '../config/env';
 import { MACHINE_LIST } from '../config/machines';
 import { SPAWN, STATIONS, TILE } from '../config/world';
 import { factoryProgress, currentStamina } from './logic/progression';
-import { settleRobots } from './logic/robots';
+import { settleFactory } from './logic/robots';
 import { Camera } from './engine/camera';
 import { Fx } from './engine/fx';
 import {
@@ -24,8 +24,15 @@ import {
   moveWithCollision,
   type Interactable,
 } from './world/geometry';
-import { conveyorLoadPoint } from '../config/world';
+import { CONVEYORS, conveyorLoadPoint } from '../config/world';
+import { beltCount } from './logic/belts';
 import { getMachine } from '../config/machines';
+import { ROBOTS as ROBOT_LIST } from '../config/robots';
+import { RobotBrain } from './systems/robotBrain';
+import { Combat } from './systems/combat';
+import { drawBullets, drawEnemies } from './render/combat';
+import { deriveWeapon } from '../config/weapons';
+import { COMBAT } from '../config/enemies';
 import {
   drawConveyors,
   drawGroundItems,
@@ -135,6 +142,13 @@ export function GameCanvas() {
     let pendingBelt = false;
     let beltCooldownUntil = 0;
 
+    /* Cerebros de los robots: comportamiento visible con recuperación. */
+    const brains = new Map<string, RobotBrain>();
+
+    /* Combate automático: enemigos y proyectiles, simulados en local. */
+    const combat = new Combat();
+    let combatFlushAt = 0;
+
     /* ── canvas / DPR ── */
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -222,7 +236,9 @@ export function GameCanvas() {
             ? { stationId: opt.targetId }
             : opt.kind === 'sell'
               ? { at: { x: me.x, y: me.y } }
-              : { machineId: opt.targetId };
+              : opt.beltId
+                ? { machineId: opt.targetId, beltId: opt.beltId }
+                : { machineId: opt.targetId };
         const out = await session.op(opt.kind, args);
         if (out.ok && target) {
           const color = opt.color;
@@ -310,8 +326,13 @@ export function GameCanvas() {
 
       const busyAction = nowMs < actionUntil;
       const canSprint = input.sprint && staminaNow > 1 && !busyAction;
+      // Sin fuelle se camina notablemente más lento: la estamina se nota.
+      const exhausted = staminaNow <= 0.5;
       const speed =
-        stats.speed * (canSprint ? BALANCE.player.sprintMultiplier : 1) * (busyAction ? 0.15 : 1);
+        stats.speed *
+        (canSprint ? BALANCE.player.sprintMultiplier : 1) *
+        (busyAction ? 0.15 : 1) *
+        (exhausted ? BALANCE.player.exhaustedSpeedMult : 1);
 
       if (input.x !== 0 || input.y !== 0) {
         const res = moveWithCollision(me.x, me.y, input.x * speed * dt, input.y * speed * dt);
@@ -442,7 +463,7 @@ export function GameCanvas() {
           );
           pendingBelt = true;
           void session
-            .op('deposit', { machineId: belt.feeds, item, qty: batch })
+            .op('deposit', { machineId: belt.feeds, beltId: belt.id, item, qty: batch })
             .then((out) => {
               if (out.ok) {
                 const p = conveyorLoadPoint(belt);
@@ -558,6 +579,70 @@ export function GameCanvas() {
       }
 
       /* — cámara y efectos — */
+      /* — la fábrica al día: cintas entregan, máquinas producen, robots reparten.
+           Es lo mismo que persiste `runOp`, así que lo que se ve coincide. — */
+      const live = factory ? settleFactory(factory, now) : null;
+
+      /* — robots: máquina de estados con detección de bloqueo — */
+      if (live) {
+        const positions: { x: number; y: number }[] = [];
+        for (const def of ROBOT_LIST) {
+          const owned = (live.factory.robots?.[def.id]?.level ?? 0) > 0;
+          if (!owned) {
+            brains.delete(def.id);
+            continue;
+          }
+          let brain = brains.get(def.id);
+          if (!brain) {
+            brain = new RobotBrain(def);
+            brains.set(def.id, brain);
+          }
+          positions.push({ x: brain.x, y: brain.y });
+        }
+        for (const [id, brain] of brains) {
+          const lvl = live.factory.robots?.[id]?.level ?? 0;
+          const others = positions.filter((p) => p.x !== brain.x || p.y !== brain.y);
+          brain.update(dt, live.working[id] ?? false, lvl, others);
+        }
+      }
+
+      /* — combate automático — */
+      let combatDrain = 0;
+      if (player) {
+        const weapon = deriveWeapon(player.weapon);
+        const ev = combat.update(
+          dt,
+          me.x,
+          me.y,
+          player.level,
+          weapon,
+          me.act === 'gather',
+          session.phase === 'ready',
+        );
+        combatDrain = ev.drain;
+        if (ev.fired) emit('sfx', { name: 'click', volume: 0.35 });
+        for (const h of ev.hits) fx.burst(h.x, h.y, h.color, 3, 55, 'spark');
+        for (const k of ev.kills) {
+          fx.burst(k.x, k.y, k.color, 14, 110, 'spark');
+          fx.ring(k.x, k.y, k.color, 5);
+          fx.float(k.x, k.y - 12, `+${k.xp} XP`, '#a78bfa', 12);
+        }
+        if (ev.kills.length > 0) emit('sfx', { name: 'pickup', volume: 0.4 });
+
+        // La XP se envía por tandas: una escritura cada 12 s como mucho.
+        // Los enemigos drenan estamina por el mismo canal que el sprint:
+        // un único acumulador local que el tick de sesión consolida.
+        if (combatDrain > 0) sprintDrain += combatDrain;
+
+        if (combat.pendingXp > 0 && nowMs >= combatFlushAt) {
+          combatFlushAt = nowMs + COMBAT.rewardFlushMs;
+          const xp = combat.takeXp();
+          const kills = combat.kills;
+          combat.kills = 0;
+          if (xp > 0) void session.op('combatReward', { xp, kills });
+        }
+      }
+
       cam.follow(me.x, me.y - 10, dt, viewW, viewH);
       fx.update(dt);
 
@@ -578,7 +663,7 @@ export function GameCanvas() {
       ctx.drawImage(staticLayer, 0, 0);
       ctx.imageSmoothingEnabled = true;
 
-      drawConveyors(ctx, level, time);
+      if (live) drawConveyors(ctx, live.factory, time, now);
 
       const ratio = factory ? factoryProgress(factory).ratio : 0;
       drawStations(ctx, time, level, ratio);
@@ -587,17 +672,17 @@ export function GameCanvas() {
       // Ordenación por profundidad: máquinas, props y personajes
       const sortables: { y: number; draw: () => void }[] = [];
 
-      if (factory) {
-        // Se liquidan los robots también para pintar: lo que ves en los
-        // buffers es exactamente lo que devolverá la próxima operación.
-        const live = settleRobots(factory, now).factory;
-        for (const v of computeMachineVisuals(live.machines, level, now)) {
+      if (live) {
+        for (const v of computeMachineVisuals(live.factory.machines, level, now)) {
           sortables.push({
             y: (v.def.ty + v.def.th - 1) * TILE,
             draw: () => drawMachine(ctx, v, time, fx),
           });
         }
-        sortables.push({ y: 1e8, draw: () => drawRobots(ctx, live, time) });
+        sortables.push({
+          y: 1e8,
+          draw: () => drawRobots(ctx, live.factory, brains, time),
+        });
       }
       sortables.push({ y: -1e9, draw: () => drawProps(ctx, time) });
 
@@ -661,6 +746,8 @@ export function GameCanvas() {
         ctx.restore();
       }
 
+      drawEnemies(ctx, combat.enemies);
+      drawBullets(ctx, combat.bullets);
       fx.draw(ctx);
 
       // Luces (incluye un foco suave sobre el jugador local)
@@ -713,6 +800,18 @@ export function GameCanvas() {
           x: me.x,
           y: me.y,
           inSellArea: isInsideSellArea(me.x, me.y),
+          // La instantánea de depuración sólo se calcula si va a mirarse.
+          debug: DEBUG_ENABLED
+            ? {
+                robots: [...brains.values()].map((b) => b.debug()),
+                enemies: combat.enemies.length,
+                bullets: combat.bullets.length,
+                belts: CONVEYORS.filter((c) => c.feeds).map((c) => ({
+                  id: c.id,
+                  count: beltCount(live?.factory.belts?.[c.id], c.id, now),
+                })),
+              }
+            : useGameplayStore.getState().debug,
         });
       }
 
