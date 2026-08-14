@@ -40,6 +40,45 @@ interface EmotePose {
 
 const NO_POSE: EmotePose = { hop: 0, tilt: 0, shakeX: 0, armL: 0, armR: 0, legSpread: 0 };
 
+/** Postura del golpe de recolección. */
+interface MiningPose {
+  active: boolean;
+  /** Ángulo del pico en radianes: negativo = levantado. */
+  swing: number;
+  /** Inclinación del torso al acompañar el golpe. */
+  lean: number;
+  /** 0..1, intensidad del destello de impacto. */
+  impact: number;
+}
+
+function miningPose(active: boolean, progress: number, t: number): MiningPose {
+  if (!active) return { active: false, swing: 0, lean: 0, impact: 0 };
+  // Si no hay progreso (acción muy corta), se usa un ciclo por tiempo.
+  const p = progress > 0 ? Math.min(1, progress) : (t * 1.4) % 1;
+
+  if (p < 0.45) {
+    // Preparación: el pico sube con desaceleración.
+    const k = p / 0.45;
+    const ease = 1 - Math.pow(1 - k, 2);
+    return { active: true, swing: -1.15 * ease, lean: -0.06 * ease, impact: 0 };
+  }
+  if (p < 0.6) {
+    // Golpe: baja rápido y acelerando.
+    const k = (p - 0.45) / 0.15;
+    const ease = k * k;
+    return { active: true, swing: -1.15 + 1.85 * ease, lean: -0.06 + 0.2 * ease, impact: ease };
+  }
+  // Recuperación: vuelve a la guardia.
+  const k = (p - 0.6) / 0.4;
+  const ease = 1 - Math.pow(1 - k, 3);
+  return {
+    active: true,
+    swing: 0.7 * (1 - ease),
+    lean: 0.14 * (1 - ease),
+    impact: Math.max(0, 1 - k * 4),
+  };
+}
+
 function emotePose(anim: string, t: number): EmotePose {
   switch (anim) {
     case 'dance': {
@@ -112,8 +151,16 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   const swing = moving ? Math.sin(c.t * speed) : 0;
   const bob = moving ? Math.abs(Math.sin(c.t * speed)) * 1.6 : Math.sin(c.t * 2) * 0.6;
   const working = c.act === 'gather' || c.act === 'work';
-  const workSwing = working ? Math.sin(c.t * 18) : 0;
   const tired = c.act === 'tired';
+
+  /**
+   * Golpe de pico en tres tiempos en lugar de un temblor continuo:
+   * levantar (0–45%), impactar (45–60%) y recuperarse (60–100%).
+   * El progreso viene de la acción real, así que el golpe cae justo cuando
+   * se obtiene el material.
+   */
+  const mine = miningPose(c.act === 'gather', c.actionProgress ?? 0, c.t);
+  const workSwing = c.act === 'work' ? Math.sin(c.t * 14) : 0;
 
   const emoteDef = getEmote(c.emote);
   const emoteT = c.emoteElapsed ?? 0;
@@ -137,6 +184,11 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   if (emoting) {
     ctx.translate(x + pose.shakeX, y - pose.hop);
     ctx.rotate(pose.tilt);
+    ctx.translate(-x, -y);
+  } else if (mine.active) {
+    // Al picar, el cuerpo acompaña el golpe en vez de deslizarse.
+    ctx.translate(x, y);
+    ctx.rotate(mine.lean);
     ctx.translate(-x, -y);
   }
 
@@ -200,8 +252,10 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   // Brazos
   const armY = bodyY + 2;
   const armSwing = working ? workSwing * 5 : swing * 3.5;
-  const armLY = armY + armSwing * 0.35 - pose.armL;
-  const armRY = armY - armSwing * 0.35 + (working ? 2 : 0) - pose.armR;
+  // Al picar, ambos brazos suben juntos siguiendo el mango del pico.
+  const mineLift = mine.active ? -mine.swing * 5 : 0;
+  const armLY = armY + armSwing * 0.35 - pose.armL - mineLift;
+  const armRY = armY - armSwing * 0.35 + (working ? 2 : 0) - pose.armR - mineLift;
   ctx.fillStyle = shade(ap.outfitColor, -28);
   roundRect(ctx, x - torsoW / 2 - 3.4, armLY, 4, 10, 2);
   ctx.fill();
@@ -250,6 +304,50 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
 
   // Casco / accesorio
   drawHelmet(ctx, x, headY, ap, c.t);
+
+  // Pico: se dibuja después del cuerpo para que quede en primer plano.
+  if (mine.active) {
+    const side = c.dir === 'left' ? -1 : 1;
+    const px = x + side * 9;
+    const py = armY + 3;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(side * (mine.swing - 0.5));
+    // Mango
+    ctx.strokeStyle = '#8a5522';
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, 15);
+    ctx.stroke();
+    // Cabeza del pico
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2.8;
+    ctx.beginPath();
+    ctx.moveTo(-5.5, 1.5);
+    ctx.quadraticCurveTo(0, -2.5, 5.5, 1.5);
+    ctx.stroke();
+    ctx.restore();
+
+    // Destello de impacto en el punto de golpe
+    if (mine.impact > 0.05) {
+      ctx.save();
+      ctx.globalAlpha = mine.impact * 0.9;
+      ctx.strokeStyle = '#fde68a';
+      ctx.lineWidth = 1.6;
+      const ix = x + side * 17;
+      const iy = y + 6;
+      for (let i = 0; i < 4; i++) {
+        const a = -0.9 + i * 0.5 + side * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(ix, iy);
+        ctx.lineTo(ix + Math.cos(a) * (6 + mine.impact * 7), iy + Math.sin(a) * (6 + mine.impact * 7));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
 
   // Indicador de actividad
   if (working && c.actionProgress !== undefined) {

@@ -198,6 +198,19 @@ export function findNearestInteractable(
   return best;
 }
 
+/** Rectángulo del muelle de venta (px de mundo). La venta sólo vale aquí. */
+export function sellAreaRect(): Rect | null {
+  const dock = STATIONS.find((s) => s.type === 'sell');
+  if (!dock) return null;
+  return { x: dock.tx * TILE, y: dock.ty * TILE, w: dock.tw * TILE, h: dock.th * TILE };
+}
+
+export function isInsideSellArea(x: number, y: number): boolean {
+  const r = sellAreaRect();
+  if (!r) return false;
+  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+}
+
 export function worldBounds() {
   return { w: WORLD_W, h: WORLD_H, cols: WORLD_COLS, rows: WORLD_ROWS, tile: TILE };
 }

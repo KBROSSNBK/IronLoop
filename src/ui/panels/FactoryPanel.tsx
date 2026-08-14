@@ -6,8 +6,9 @@ import { MACHINE_LIST, MACHINE_UPGRADE, machineUpgradeCost } from '../../config/
 import { getItem } from '../../config/items';
 import { BALANCE } from '../../config/balance';
 import { factoryProgress } from '../../game/logic/progression';
-import { pendingCycles, settleMachine } from '../../game/logic/production';
+import { machineContents, pendingCycles, settleMachine } from '../../game/logic/production';
 import { compact, moneyExact } from '../../utils/format';
+import { QuantityDialog, type QuantityRequest } from './QuantityDialog';
 
 const DONATIONS = [100, 500, 2500];
 
@@ -17,6 +18,7 @@ export function FactoryPanel() {
   const op = useSessionStore((s) => s.op);
   const busy = useSessionStore((s) => s.busy);
   const [now] = useState(() => Date.now());
+  const [withdraw, setWithdraw] = useState<(QuantityRequest & { machineId: string }) | null>(null);
   if (!player || !factory) return null;
 
   const fp = factoryProgress(factory);
@@ -126,6 +128,51 @@ export function FactoryPanel() {
                 <div className="stat">
                   Producidos en total: <b className="mono-num">{compact(settled.state.cycles)}</b> ciclos
                 </div>
+
+                {/* Extracción manual: saca material guardado, incluido el que
+                    se quedó atascado por faltar el otro ingrediente. */}
+                {(() => {
+                  const stored = machineContents(settled.state);
+                  const list = Object.entries(stored).filter(([, n]) => n > 0);
+                  if (list.length === 0) {
+                    return <div className="stat">Sin material almacenado</div>;
+                  }
+                  return (
+                    <>
+                      <div className="stat" style={{ marginTop: 2 }}>
+                        Material dentro de la máquina:
+                      </div>
+                      <div className="withdraw-row">
+                        {list.map(([id, n]) => {
+                          const it = getItem(id);
+                          const isOutput = (settled.state.output[id] ?? 0) > 0;
+                          return (
+                            <button
+                              key={id}
+                              className="withdraw-chip"
+                              data-output={isOutput}
+                              disabled={busy}
+                              title={`Retirar ${it.name}`}
+                              onClick={() =>
+                                setWithdraw({
+                                  kind: 'withdraw',
+                                  item: id,
+                                  max: n,
+                                  note: `${it.name} guardado en ${m.name}`,
+                                  machineId: m.id,
+                                })
+                              }
+                            >
+                              <span className="i">{it.icon}</span>
+                              <span className="n mono-num">{n}</span>
+                              <span className="a">Retirar</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
               </>
             )}
             <button
@@ -145,6 +192,18 @@ export function FactoryPanel() {
           </div>
         );
       })}
+
+      {withdraw && (
+        <QuantityDialog
+          request={withdraw}
+          onCancel={() => setWithdraw(null)}
+          onConfirm={(qty) => {
+            const { machineId, item } = withdraw;
+            setWithdraw(null);
+            void op('withdraw', { machineId, item, qty });
+          }}
+        />
+      )}
 
       <div className="section-title">ESTADÍSTICAS GLOBALES</div>
       <div className="card">

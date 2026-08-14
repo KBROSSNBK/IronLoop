@@ -48,14 +48,17 @@ export function resolveActions(ctx: ActionContext): ActionOption[] {
   if (target.kind === 'station' && target.station) {
     const s = target.station;
     switch (s.type) {
-      case 'oreVein': {
+      case 'oreVein':
+      case 'salvage': {
+        // Misma mecánica y mismo sistema de items; cambia lo que rinde.
         const full = inventoryFree(player) <= 0;
+        const yieldItem = s.yields?.[0]?.item ?? 'ore';
         options.push({
           kind: 'gather',
           targetId: s.id,
-          label: 'EXTRAER',
-          sub: getItem(s.yields?.[0]?.item ?? 'ore').name,
-          icon: '⛏️',
+          label: s.type === 'salvage' ? 'RECOLECTAR' : 'EXTRAER',
+          sub: getItem(yieldItem).name,
+          icon: s.type === 'salvage' ? '♻️' : '⛏️',
           color: s.accent,
           holdable: true,
           disabled: full ? 'Inventario lleno' : undefined,
@@ -63,6 +66,8 @@ export function resolveActions(ctx: ActionContext): ActionOption[] {
         break;
       }
       case 'sell': {
+        // La opción sólo existe estando junto al muelle; la operación además
+        // vuelve a comprobar la posición, así que no basta con forzar la UI.
         const items = sellableItems(player.inventory);
         const units = Object.values(items).reduce((a, b) => a + b, 0);
         options.push({
@@ -226,7 +231,7 @@ export function resolveActions(ctx: ActionContext): ActionOption[] {
 /** Texto de ayuda cuando no hay nada cerca. */
 export function idleHint(player: PlayerState): string {
   const carrying = Object.values(player.inventory).reduce((a, b) => a + b, 0);
-  if (carrying === 0) return 'Ve al YACIMIENTO y extrae mineral';
+  if (carrying === 0) return 'Ve al YACIMIENTO o a RECOLECCIÓN y consigue material';
   if (player.inventory.ore) return 'Lleva el mineral a la FUNDIDORA';
   return 'Vende en el MUELLE DE CARGA';
 }

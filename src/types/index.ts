@@ -82,6 +82,22 @@ export interface RobotState {
   moved: number;
 }
 
+/**
+ * Objeto tirado en el suelo. Vive en el documento COMPARTIDO de la fábrica,
+ * así que recogerlo es una transacción: dos jugadores no pueden llevárselo
+ * a la vez ni duplicarlo.
+ */
+export interface GroundItem {
+  id: string;
+  item: string;
+  qty: number;
+  x: number;
+  y: number;
+  /** uid de quien lo soltó (para atribución y depuración). */
+  by: string;
+  droppedAt: number;
+}
+
 export interface FactoryStats {
   gathered: number;
   produced: number;
@@ -101,6 +117,8 @@ export interface FactoryState {
   machines: Record<string, MachineState>;
   /** robotId → estado. Vacío hasta que alguien compra el primero. */
   robots: Record<string, RobotState>;
+  /** Objetos tirados en el suelo, compartidos por todos. */
+  ground: Record<string, GroundItem>;
   stats: FactoryStats;
   /** objetivoId → progreso; los completados se marcan con `-1`. */
   objectives: Record<string, number>;

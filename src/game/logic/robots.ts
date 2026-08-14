@@ -17,6 +17,7 @@
 import {
   ROBOTS,
   ROBOT_MAX_CATCHUP_MS,
+  ROBOT_TRIP,
   getRobot,
   robotRate,
   type RobotDef,
@@ -39,11 +40,9 @@ function machineUnlocked(factory: FactoryState, machineId: string): boolean {
   return factory.level >= getMachine(machineId).unlockFactoryLevel;
 }
 
-/** Cuántas unidades puede aceptar el buffer de entrada de `to`. */
-function inputRoomFor(state: MachineState, machineId: string, item: string): number {
-  const def = getMachine(machineId);
-  if (!(item in def.input)) return 0;
-  return Math.max(0, def.inputCap - (state.input[item] ?? 0));
+/** Cuántas unidades acepta la entrada de `to`. Sin tope: sólo importa la receta. */
+function inputRoomFor(_state: MachineState, machineId: string, item: string): number {
+  return item in getMachine(machineId).input ? Number.POSITIVE_INFINITY : 0;
 }
 
 function moveItems(
@@ -121,6 +120,98 @@ export function settleRobots(factory: FactoryState, now: number): RobotSettleRes
 
   if (!changed) return { factory, transfers: [] };
   return { factory: { ...factory, machines, robots }, transfers };
+}
+
+/* ─────────────────────── movimiento visual del robot ─────────────────────── */
+
+export type RobotPhase = 'idle' | 'loading' | 'outbound' | 'unloading' | 'returning';
+
+export interface RobotVisual {
+  x: number;
+  y: number;
+  /** Dirección de avance, para orientar el sensor. */
+  dx: number;
+  dy: number;
+  phase: RobotPhase;
+  /** Lleva carga encima (ida cargada, vuelta vacío). */
+  carrying: boolean;
+}
+
+function pathLength(path: { x: number; y: number }[]): number {
+  let total = 0;
+  for (let i = 1; i < path.length; i++) {
+    total += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+  }
+  return total;
+}
+
+/** Punto a distancia `d` desde el inicio del recorrido. */
+function pointAt(path: { x: number; y: number }[], d: number): RobotVisual {
+  let remaining = Math.max(0, d);
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1];
+    const b = path[i];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    if (remaining <= seg || i === path.length - 1) {
+      const t = seg === 0 ? 0 : Math.min(1, remaining / seg);
+      return {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+        dx: Math.sign(b.x - a.x),
+        dy: Math.sign(b.y - a.y),
+        phase: 'outbound',
+        carrying: true,
+      };
+    }
+    remaining -= seg;
+  }
+  const last = path[path.length - 1];
+  return { x: last.x, y: last.y, dx: 0, dy: 0, phase: 'outbound', carrying: true };
+}
+
+/**
+ * Posición del robot en su viaje de ida y vuelta.
+ *
+ * Es puramente visual, pero HONESTA: sólo se mueve si de verdad hay material
+ * que transportar (`hasWork`). Si no lo hay, espera parado en la máquina de
+ * origen, que es donde tiene sentido esperar.
+ */
+export function robotVisual(def: RobotDef, hasWork: boolean, timeSec: number): RobotVisual {
+  const origin = def.path[0];
+  if (!hasWork) {
+    return { x: origin.x, y: origin.y, dx: 0, dy: 0, phase: 'idle', carrying: false };
+  }
+
+  const len = pathLength(def.path);
+  const travelMs = (len / ROBOT_TRIP.speed) * 1000;
+  const total = ROBOT_TRIP.loadMs + travelMs * 2 + ROBOT_TRIP.unloadMs;
+  const t = ((timeSec * 1000) % total + total) % total;
+
+  if (t < ROBOT_TRIP.loadMs) {
+    return { x: origin.x, y: origin.y, dx: 0, dy: 0, phase: 'loading', carrying: false };
+  }
+  const afterLoad = t - ROBOT_TRIP.loadMs;
+  if (afterLoad < travelMs) {
+    const p = pointAt(def.path, (afterLoad / travelMs) * len);
+    return { ...p, phase: 'outbound', carrying: true };
+  }
+  const afterOut = afterLoad - travelMs;
+  if (afterOut < ROBOT_TRIP.unloadMs) {
+    const end = def.path[def.path.length - 1];
+    return { x: end.x, y: end.y, dx: 0, dy: 0, phase: 'unloading', carrying: true };
+  }
+  const back = afterOut - ROBOT_TRIP.unloadMs;
+  const p = pointAt(def.path, (1 - back / travelMs) * len);
+  return { ...p, dx: -p.dx, dy: -p.dy, phase: 'returning', carrying: false };
+}
+
+/** ¿Tiene el robot material que mover ahora mismo? */
+export function robotHasWork(factory: FactoryState, def: RobotDef): boolean {
+  const from = factory.machines[def.from];
+  const to = factory.machines[def.to];
+  if (!from || !to) return false;
+  if (!machineUnlocked(factory, def.from) || !machineUnlocked(factory, def.to)) return false;
+  return (from.output[def.item] ?? 0) > 0;
 }
 
 /** ¿Está el robot listo para comprarse o mejorarse en este nivel de fábrica? */

@@ -139,6 +139,53 @@
   align-items: center;
   gap: 10px;
 }
+
+.item-actions {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* Zonas de arrastre del inventario: suelo y basurero */
+.drop-zones {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+.drop-zone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.025);
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.drop-zone .ico {
+  font-size: 20px;
+}
+.drop-zone .t {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.drop-zone .s {
+  font-size: 10.5px;
+  color: var(--text-mute);
+}
+.drop-zone[data-armed='true'] {
+  transform: scale(1.02);
+}
+.drop-zone.ground[data-armed='true'] {
+  border-color: var(--blue);
+  background: rgba(56, 189, 248, 0.12);
+}
+.drop-zone.trash[data-armed='true'] {
+  border-color: var(--red);
+  background: rgba(248, 113, 113, 0.12);
+}
 .item-row .ico { font-size: 20px; width: 26px; text-align: center; }
 .item-row .name { flex: 1; font-weight: 700; font-size: 13.5px; }
 .item-row .meta { font-size: 11.5px; color: var(--text-dim); }
@@ -280,6 +327,36 @@
 }
 .machine-card .stat { font-size: 11.5px; color: var(--text-dim); }
 .machine-card .recipe { font-size: 12px; color: var(--text); }
+
+/* Retirar material acumulado dentro de una máquina */
+.withdraw-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.withdraw-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background 0.15s, border-color 0.15s;
+}
+.withdraw-chip:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.16);
+  border-color: var(--cyan);
+}
+.withdraw-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.withdraw-chip[data-output='true'] { border-color: rgba(74, 222, 128, 0.5); }
+.withdraw-chip .i { font-size: 15px; }
+.withdraw-chip .n { font-weight: 800; font-size: 12.5px; }
+.withdraw-chip .a {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-mute);
+  text-transform: uppercase;
+}
 
 /* ── Personaje ── */
 

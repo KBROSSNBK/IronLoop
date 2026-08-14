@@ -43,9 +43,10 @@ export const ZONES: ZoneDef[] = [
   { id: 'labzone', label: 'INVESTIGACIÓN', icon: '🔬', tx: 6, ty: 14, tw: 10, th: 7, floor: 'tech', accent: '#c084fc', liveAtLevel: 6 },
   { id: 'dock', label: 'MUELLE DE CARGA', icon: '🚚', tx: 16, ty: 20, tw: 8, th: 5, floor: 'hazard', accent: '#fbbf24' },
   { id: 'workshop', label: 'TALLER', icon: '🛠️', tx: 2, ty: 21, tw: 7, th: 4, floor: 'concrete', accent: '#f472b6' },
+  { id: 'salvage', label: 'RECOLECCIÓN', icon: '♻️', tx: 25, ty: 21, tw: 8, th: 4, floor: 'dirt', accent: '#34d399' },
 ];
 
-export type StationType = 'oreVein' | 'sell' | 'core' | 'shop';
+export type StationType = 'oreVein' | 'sell' | 'core' | 'shop' | 'salvage';
 
 export interface StationDef {
   id: string;
@@ -124,6 +125,32 @@ export const STATIONS: StationDef[] = [
     th: 2,
     accent: '#f472b6',
     desc: 'Compra mejoras personales con tu dinero.',
+  },
+  {
+    id: 'salvage_a',
+    type: 'salvage',
+    label: 'MONTÓN DE CHATARRA',
+    icon: '♻️',
+    tx: 26,
+    ty: 22,
+    tw: 3,
+    th: 2,
+    accent: '#34d399',
+    yields: [{ item: 'scrap', amount: 2 }],
+    desc: 'Rebusca chatarra aprovechable. Más lento, pero sin veta que agotar.',
+  },
+  {
+    id: 'salvage_b',
+    type: 'salvage',
+    label: 'CONTENEDOR DE DESGUACE',
+    icon: '♻️',
+    tx: 30,
+    ty: 22,
+    tw: 3,
+    th: 2,
+    accent: '#34d399',
+    yields: [{ item: 'scrap', amount: 2 }],
+    desc: 'Rebusca chatarra aprovechable. Más lento, pero sin veta que agotar.',
   },
 ];
 

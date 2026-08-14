@@ -22,6 +22,8 @@ import {
   type PropDef,
 } from '../../config/world';
 import { getFactoryLevel } from '../../config/factoryLevels';
+import { getItem } from '../../config/items';
+import type { GroundItem } from '../../types';
 
 /* ─────────────────────────── utilidades ─────────────────────────── */
 
@@ -512,6 +514,9 @@ export function drawStations(
       case 'shop':
         drawShop(ctx, x, y, w, h, time, s.accent);
         break;
+      case 'salvage':
+        drawSalvage(ctx, x, y, w, h, time, s.accent);
+        break;
     }
     ctx.restore();
   }
@@ -715,6 +720,117 @@ function drawShop(
     ctx.lineTo(hx, y + h - 4);
     ctx.stroke();
   }
+}
+
+/**
+ * Objetos tirados en el suelo. Flotan un poco y brillan para que se vean
+ * incluso sobre el suelo oscuro; al pasar por encima se recogen solos.
+ */
+export function drawGroundItems(
+  ctx: CanvasRenderingContext2D,
+  ground: Record<string, GroundItem>,
+  time: number,
+): void {
+  for (const g of Object.values(ground)) {
+    if (!g || g.qty <= 0) continue;
+    const def = getItem(g.item);
+    const float = Math.sin(time * 2.4 + g.x * 0.05) * 2.5;
+    const y = g.y + float;
+
+    ctx.save();
+    // Sombra en el suelo, fija
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(g.x, g.y + 9, 9, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Halo del color del item
+    const glow = ctx.createRadialGradient(g.x, y, 0, g.x, y, 20);
+    glow.addColorStop(0, `${def.color}55`);
+    glow.addColorStop(1, `${def.color}00`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(g.x, y, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Saco
+    ctx.fillStyle = 'rgba(10,16,28,0.9)';
+    roundRect(ctx, g.x - 10, y - 9, 20, 18, 5);
+    ctx.fill();
+    ctx.strokeStyle = def.color;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+
+    ctx.font = '12px "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(def.icon, g.x, y);
+
+    // Cantidad
+    ctx.font = '800 9px "Rajdhani", system-ui, sans-serif';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(2,6,23,0.9)';
+    ctx.strokeText(`×${g.qty}`, g.x, y + 14);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(`×${g.qty}`, g.x, y + 14);
+    ctx.restore();
+  }
+}
+
+/** Montón de chatarra de la zona de RECOLECCIÓN. */
+function drawSalvage(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  time: number,
+  accent: string,
+) {
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(x + w / 2, y + h - 6, w / 2 - 4, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Contenedor
+  ctx.fillStyle = '#1f3b32';
+  roundRect(ctx, x + 4, y + h * 0.32, w - 8, h * 0.6, 4);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  roundRect(ctx, x + 6, y + h * 0.34, w - 12, 6, 3);
+  ctx.fill();
+
+  // Chatarra asomando: planchas y tubos desordenados
+  const junk: [number, number, number, number, number][] = [
+    [0.18, 0.2, 22, 7, -0.5],
+    [0.44, 0.12, 26, 6, 0.25],
+    [0.68, 0.22, 18, 8, 0.7],
+    [0.32, 0.28, 14, 5, 1.1],
+    [0.8, 0.14, 12, 6, -0.9],
+  ];
+  for (const [px, py, jw, jh, rot] of junk) {
+    ctx.save();
+    ctx.translate(x + px * w, y + py * h + h * 0.22);
+    ctx.rotate(rot);
+    ctx.fillStyle = '#54606f';
+    roundRect(ctx, -jw / 2, -jh / 2, jw, jh, 2);
+    ctx.fill();
+    ctx.fillStyle = '#6b7787';
+    ctx.fillRect(-jw / 2, -jh / 2, jw, 1.6);
+    ctx.restore();
+  }
+
+  // Símbolo de reciclaje parpadeante
+  ctx.fillStyle = accent;
+  ctx.globalAlpha = 0.55 + Math.sin(time * 2) * 0.25;
+  ctx.font = '800 16px "Segoe UI Emoji", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('♻️', x + w / 2, y + h * 0.24);
+  ctx.globalAlpha = 1;
 }
 
 /* ─────────────────────── luces y atmósfera ─────────────────────── */

@@ -57,10 +57,12 @@ function hasInputs(state: MachineState, def: MachineDef): boolean {
   return true;
 }
 
-function hasOutputRoom(state: MachineState, def: MachineDef): boolean {
-  for (const [item, amount] of Object.entries(def.output)) {
-    if ((state.output[item] ?? 0) + (amount as number) > def.outputCap) return false;
-  }
+/**
+ * Las máquinas ya NO se atascan por salida llena: aceptan y acumulan sin tope.
+ * Se conserva la función para dejar explícito el cambio de diseño y para que
+ * el resto del código siga leyéndose igual.
+ */
+function hasOutputRoom(_state: MachineState, _def: MachineDef): boolean {
   return true;
 }
 
@@ -138,15 +140,34 @@ export function settleMachine(
   return { state, produced, cyclesDone, progress, running, blocked, cycleMs };
 }
 
-/** Cuántas unidades de `item` acepta todavía el buffer de entrada. */
+/**
+ * Cuántas unidades de `item` acepta el buffer de entrada.
+ *
+ * La capacidad es ILIMITADA por diseño: lo único que importa es que la
+ * máquina use ese material en su receta. Devuelve Infinity para que el resto
+ * del código (que compara con `Math.min`) siga funcionando sin cambios.
+ */
 export function inputRoom(
-  state: MachineState,
+  _state: MachineState,
   machineId: string,
   item: string,
 ): number {
   const def = getMachine(machineId);
-  if (!(item in def.input)) return 0;
-  return Math.max(0, def.inputCap - (state.input[item] ?? 0));
+  return item in def.input ? Number.POSITIVE_INFINITY : 0;
+}
+
+/** Ratio 0..1 de llenado, sólo para pintar barras. Nunca bloquea nada. */
+export function fillRatio(total: number, reference: number): number {
+  if (reference <= 0) return 0;
+  return Math.min(1, total / reference);
+}
+
+/** Todo lo que hay guardado en la máquina (entrada + salida). */
+export function machineContents(state: MachineState): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(state.input)) if (v > 0) out[k] = (out[k] ?? 0) + v;
+  for (const [k, v] of Object.entries(state.output)) if (v > 0) out[k] = (out[k] ?? 0) + v;
+  return out;
 }
 
 /** Items que esta máquina acepta. */

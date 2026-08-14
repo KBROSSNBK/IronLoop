@@ -22,6 +22,19 @@ export const BALANCE = {
     sell: { durationMs: 320, stamina: 0 },
     /** Radio de interacción con estaciones/máquinas, en px. */
     range: 78,
+    /** Radio en el que se recogen automáticamente los objetos del suelo. */
+    pickupRange: 42,
+    /** Radio máximo aceptado por el servidor para vender o recoger del suelo. */
+    validationSlack: 40,
+  },
+
+  ground: {
+    /** Objetos tirados como máximo por fábrica (evita saturar el documento). */
+    maxItems: 60,
+    /** Distancia a la que aparece el objeto delante del jugador. */
+    dropOffset: 26,
+    /** Los objetos muy viejos se limpian al interactuar con la fábrica. */
+    expireMs: 24 * 3600 * 1000,
   },
 
   leveling: {

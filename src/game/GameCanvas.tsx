@@ -17,18 +17,22 @@ import {
 import { getEmote } from '../config/emotes';
 import {
   findNearestInteractable,
+  isInsideSellArea,
   machineFrontPoint,
   moveWithCollision,
   type Interactable,
 } from './world/geometry';
 import {
   drawConveyors,
+  drawGroundItems,
   drawLighting,
   drawPostFx,
   drawProps,
   drawStations,
   getStaticLayer,
 } from './render/world';
+import { getItem } from '../config/items';
+import { inventoryFree } from './logic/progression';
 import { computeMachineVisuals, drawMachine, drawRobots } from './render/machines';
 import { drawCharacter, drawEmoteBubble, drawNameTag } from './render/character';
 import { resolveActions, idleHint, type ActionOption } from './systems/interaction';
@@ -118,6 +122,11 @@ export function GameCanvas() {
     /** Si lo cancelas a mano, no vuelve a engancharse hasta que te alejes. */
     let gatherSuppressed = false;
 
+    /* Recogida del suelo: una petición a la vez y sin reintentar el mismo
+       montón en bucle mientras la transacción viaja. */
+    let pendingPickup = false;
+    const recentlyPicked = new Set<string>();
+
     /* ── canvas / DPR ── */
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -204,7 +213,7 @@ export function GameCanvas() {
           opt.kind === 'gather'
             ? { stationId: opt.targetId }
             : opt.kind === 'sell'
-              ? {}
+              ? { at: { x: me.x, y: me.y } }
               : { machineId: opt.targetId };
         const out = await session.op(opt.kind, args);
         if (out.ok && target) {
@@ -382,6 +391,33 @@ export function GameCanvas() {
         e.animTime += dt;
       }
 
+      /* — recogida automática de objetos del suelo — */
+      if (factory && !pendingPickup && player) {
+        const ground = Object.values(factory.ground ?? {});
+        for (const g of ground) {
+          if (g.qty <= 0) continue;
+          if (Math.hypot(g.x - me.x, g.y - me.y) > BALANCE.actions.pickupRange) continue;
+          if (inventoryFree(player) <= 0) break; // mochila llena: se queda en el suelo
+          if (recentlyPicked.has(g.id)) continue;
+          pendingPickup = true;
+          recentlyPicked.add(g.id);
+          void session
+            .op('pickupGround', { groundId: g.id, at: { x: me.x, y: me.y } })
+            .then((out) => {
+              if (out.ok) {
+                fx.burst(g.x, g.y, getItem(g.item).color, 8, 60, 'spark');
+                emit('sfx', { name: 'pickup' });
+              }
+            })
+            .finally(() => {
+              pendingPickup = false;
+              // Se olvida enseguida: si quedó resto, se vuelve a intentar.
+              window.setTimeout(() => recentlyPicked.delete(g.id), 700);
+            });
+          break;
+        }
+      }
+
       /* — interacción — */
       target = findNearestInteractable(me.x, me.y, BALANCE.actions.range);
       if (player && factory) {
@@ -506,6 +542,7 @@ export function GameCanvas() {
 
       const ratio = factory ? factoryProgress(factory).ratio : 0;
       drawStations(ctx, time, level, ratio);
+      if (factory) drawGroundItems(ctx, factory.ground ?? {}, time);
 
       // Ordenación por profundidad: máquinas, props y personajes
       const sortables: { y: number; draw: () => void }[] = [];
@@ -520,7 +557,7 @@ export function GameCanvas() {
             draw: () => drawMachine(ctx, v, time, fx),
           });
         }
-        sortables.push({ y: 1e8, draw: () => drawRobots(ctx, live.robots, time) });
+        sortables.push({ y: 1e8, draw: () => drawRobots(ctx, live, time) });
       }
       sortables.push({ y: -1e9, draw: () => drawProps(ctx, time) });
 
@@ -633,6 +670,9 @@ export function GameCanvas() {
             : 0,
           holdProgress,
           autoAction: autoAction?.label ?? null,
+          x: me.x,
+          y: me.y,
+          inSellArea: isInsideSellArea(me.x, me.y),
         });
       }
 

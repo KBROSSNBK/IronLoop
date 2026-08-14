@@ -5,11 +5,12 @@
  */
 
 import { MACHINE_LIST, MACHINE_UPGRADE, type MachineDef } from '../../config/machines';
-import { ROBOT_ROUTES, TILE } from '../../config/world';
+import { TILE } from '../../config/world';
 import { getItem } from '../../config/items';
 import { ROBOTS } from '../../config/robots';
-import type { MachineState, RobotState } from '../../types';
-import { settleMachine, type SettleResult } from '../logic/production';
+import type { FactoryState, MachineState } from '../../types';
+import { fillRatio, settleMachine, type SettleResult } from '../logic/production';
+import { robotHasWork, robotVisual } from '../logic/robots';
 import type { Fx } from '../engine/fx';
 import { roundRect } from './world';
 
@@ -260,11 +261,12 @@ function drawBuffer(
   ctx.fillStyle = total > 0 ? '#e2e8f0' : '#475569';
   ctx.fillText(`${first ? getItem(first).icon : ''}${total}`, x + 3, y + 10);
 
-  // Barra de llenado
-  const ratio = Math.min(1, total / cap);
+  // Barra de referencia. La capacidad es ilimitada, así que al pasar de la
+  // referencia se muestra llena en color de acento, nunca en rojo de "lleno".
+  const ratio = fillRatio(total, cap);
   ctx.fillStyle = 'rgba(148,163,184,0.2)';
   ctx.fillRect(x + 3, y + 20, 38, 2.4);
-  ctx.fillStyle = ratio > 0.9 ? '#f87171' : color;
+  ctx.fillStyle = color;
   ctx.fillRect(x + 3, y + 20, 38 * ratio, 2.4);
   ctx.restore();
 }
@@ -304,25 +306,21 @@ function drawGear(
  */
 export function drawRobots(
   ctx: CanvasRenderingContext2D,
-  robots: Record<string, RobotState>,
+  factory: FactoryState,
   time: number,
 ): void {
   for (const def of ROBOTS) {
-    const state = robots?.[def.id];
+    const state = factory.robots?.[def.id];
     if (!state || state.level <= 0) continue;
-    const route = ROBOT_ROUTES.find((r) => r.id === def.routeId);
-    if (!route) continue;
-    const pts = route.points;
-    const segs = pts.length;
-    const speed = 0.16;
-    const t = (time * speed) % 1;
-    const idx = Math.floor(t * segs);
-    const local = t * segs - idx;
-    const a = pts[idx];
-    const b = pts[(idx + 1) % segs];
-    const x = (a.x + (b.x - a.x) * local) * TILE;
-    const y = (a.y + (b.y - a.y) * local) * TILE;
-    const facingX = Math.sign(b.x - a.x);
+
+    const hasWork = robotHasWork(factory, def);
+    const v = robotVisual(def, hasWork, time);
+    const { x, y } = v;
+    const facingX = v.dx !== 0 ? v.dx : 1;
+    const busy = v.phase === 'loading' || v.phase === 'unloading';
+    // Traqueteo al rodar; quieto mientras carga o espera.
+    const bob = v.phase === 'outbound' || v.phase === 'returning' ? Math.sin(time * 18) * 0.8 : 0;
+    const py = y + bob;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
@@ -332,31 +330,55 @@ export function drawRobots(
 
     // Chasis
     ctx.fillStyle = '#2b3648';
-    roundRect(ctx, x - 13, y - 8, 26, 18, 4);
+    roundRect(ctx, x - 13, py - 8, 26, 18, 4);
     ctx.fill();
     ctx.fillStyle = '#3d4a63';
-    roundRect(ctx, x - 11, y - 6, 22, 8, 3);
+    roundRect(ctx, x - 11, py - 6, 22, 8, 3);
     ctx.fill();
 
-    // Carga
-    ctx.fillStyle = '#b45309';
-    roundRect(ctx, x - 7, y - 15, 14, 9, 2);
-    ctx.fill();
-    ctx.fillStyle = '#f59e0b';
-    ctx.fillRect(x - 7, y - 11.5, 14, 2.4);
+    // Carga: sólo cuando de verdad lleva algo encima.
+    if (v.carrying) {
+      const lift = busy ? Math.abs(Math.sin(time * 9)) * 3 : 0;
+      const item = getItem(def.item);
+      ctx.fillStyle = '#b45309';
+      roundRect(ctx, x - 7, py - 15 - lift, 14, 9, 2);
+      ctx.fill();
+      ctx.fillStyle = item.color;
+      ctx.fillRect(x - 7, py - 11.5 - lift, 14, 2.4);
+      ctx.font = '8px "Segoe UI Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(item.icon, x, py - 16 - lift);
+    }
 
-    // Ojo / sensor
-    ctx.fillStyle = '#22d3ee';
-    ctx.globalAlpha = 0.6 + Math.sin(time * 8) * 0.4;
+    // Brazo elevador durante la carga/descarga
+    if (busy) {
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + facingX * 9, py - 4);
+      ctx.lineTo(x + facingX * (13 + Math.abs(Math.sin(time * 9)) * 4), py - 9);
+      ctx.stroke();
+    }
+
+    // Sensor: verde trabajando, ámbar esperando material.
+    ctx.fillStyle = v.phase === 'idle' ? '#fbbf24' : '#4ade80';
+    ctx.globalAlpha = 0.55 + Math.sin(time * (v.phase === 'idle' ? 2.5 : 8)) * 0.4;
     ctx.beginPath();
-    ctx.arc(x + facingX * 8, y - 2, 2.6, 0, Math.PI * 2);
+    ctx.arc(x + facingX * 8, py - 2, 2.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
 
     // Ruedas
     ctx.fillStyle = '#0f172a';
-    ctx.fillRect(x - 12, y + 8, 7, 4);
-    ctx.fillRect(x + 5, y + 8, 7, 4);
+    ctx.fillRect(x - 12, py + 8, 7, 4);
+    ctx.fillRect(x + 5, py + 8, 7, 4);
+
+    if (v.phase === 'idle') {
+      ctx.fillStyle = 'rgba(251,191,36,0.85)';
+      ctx.font = '700 8px "Rajdhani", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('SIN MATERIAL', x, py - 18);
+    }
     ctx.restore();
   }
 }

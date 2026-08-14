@@ -26,8 +26,15 @@ export interface RobotDef {
   baseCost: number;
   costGrowth: number;
   unlockFactoryLevel: number;
-  /** Ruta visual de config/world.ts. */
-  routeId: string;
+  /**
+   * Recorrido REAL en píxeles de mundo: el primer punto es donde carga (frente
+   * de la máquina de origen) y el último donde descarga (extremo de carga de
+   * la cinta). El robot va y vuelve por estos puntos, que están trazados para
+   * bordear las máquinas — hay un test que comprueba que no atraviesan nada.
+   */
+  path: { x: number; y: number }[];
+  /** Cinta por la que entrega, sólo para el texto de la UI. */
+  viaConveyor: string;
   accent: string;
 }
 
@@ -45,7 +52,13 @@ export const ROBOTS: RobotDef[] = [
     baseCost: 2500,
     costGrowth: 1.7,
     unlockFactoryLevel: 5,
-    routeId: 'r1',
+    // Frente de la Fundidora → extremo de carga de la cinta c2.
+    path: [
+      { x: 1060, y: 350 },
+      { x: 1176, y: 350 },
+      { x: 1176, y: 372 },
+    ],
+    viaConveyor: 'c2',
     accent: '#8ef04a',
   },
   {
@@ -61,10 +74,26 @@ export const ROBOTS: RobotDef[] = [
     baseCost: 12000,
     costGrowth: 1.75,
     unlockFactoryLevel: 7,
-    routeId: 'r2',
+    // Frente de la Ensambladora → rodea por debajo → carga de la cinta c5.
+    path: [
+      { x: 1060, y: 750 },
+      { x: 920, y: 750 },
+      { x: 920, y: 676 },
+    ],
+    viaConveyor: 'c5',
     accent: '#c084fc',
   },
 ];
+
+/** Fases del viaje de ida y vuelta del robot. */
+export const ROBOT_TRIP = {
+  /** Tiempo cargando en origen. */
+  loadMs: 900,
+  /** Tiempo descargando en la cinta. */
+  unloadMs: 700,
+  /** Velocidad de desplazamiento en px/s. */
+  speed: 78,
+};
 
 export const ROBOT_MAP: Record<string, RobotDef> = Object.fromEntries(
   ROBOTS.map((r) => [r.id, r]),

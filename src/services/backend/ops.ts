@@ -27,10 +27,11 @@ import {
 import { FACTORY_OBJECTIVES } from '../../config/factoryLevels';
 import { ROBOT_CONTRIB_RATIO, getRobot, robotCost } from '../../config/robots';
 import { settleRobots } from '../../game/logic/robots';
-import { STATIONS } from '../../config/world';
+import { STATIONS, TILE } from '../../config/world';
 import type {
   FactoryMember,
   FactoryState,
+  GroundItem,
   MachineState,
   OfflineReport,
   PlayerState,
@@ -173,6 +174,23 @@ function bumpObjectives(
   return next;
 }
 
+/** Rectángulo del muelle de venta, con un margen de tolerancia. */
+function insideSellArea(at: { x: number; y: number }): boolean {
+  const dock = STATIONS.find((s) => s.type === 'sell');
+  if (!dock) return false;
+  const slack = BALANCE.actions.validationSlack;
+  const x0 = dock.tx * TILE - slack;
+  const y0 = dock.ty * TILE - slack;
+  const x1 = (dock.tx + dock.tw) * TILE + slack;
+  const y1 = (dock.ty + dock.th) * TILE + slack;
+  return at.x >= x0 && at.x <= x1 && at.y >= y0 && at.y <= y1;
+}
+
+/** Distancia entre el jugador y un punto, para validar acciones de mundo. */
+function within(a: { x: number; y: number }, b: { x: number; y: number }, r: number): boolean {
+  return Math.hypot(a.x - b.x, a.y - b.y) <= r;
+}
+
 function stat(p: PlayerState, patch: Partial<PlayerState['stats']>): PlayerState {
   const stats = { ...p.stats };
   for (const [k, v] of Object.entries(patch)) {
@@ -196,7 +214,10 @@ export function opGather(
   args: GatherArgs,
 ): OpOutcome<{ items: Record<string, number> }> {
   const station = STATIONS.find((s) => s.id === args.stationId);
-  if (!station || station.type !== 'oreVein') return fail('Estación inválida');
+  // Yacimientos y zona de RECOLECCIÓN comparten la misma mecánica y el mismo
+  // sistema de items; sólo cambia lo que rinde cada estación.
+  if (!station || (station.type !== 'oreVein' && station.type !== 'salvage'))
+    return fail('Estación inválida');
 
   const stats = deriveStats(player.upgrades);
   const cost = BALANCE.actions.gather.stamina * stats.actionCostMult;
@@ -209,8 +230,10 @@ export function opGather(
   const events: OpEvent[] = [];
   const gained: Record<string, number> = {};
 
-  const baseItem = station.yields?.[0]?.item ?? 'ore';
-  const qty = Math.min(stats.gatherAmount, free);
+  const yieldDef = station.yields?.[0];
+  const baseItem = yieldDef?.item ?? 'ore';
+  const perAction = Math.max(1, yieldDef?.amount ?? 1) * stats.gatherAmount;
+  const qty = Math.min(perAction, free);
   gained[baseItem] = qty;
 
   // Hallazgo raro
@@ -437,6 +460,8 @@ export function opCollect(
 export interface SellArgs {
   /** Si se omite, vende todo lo vendible. */
   items?: Record<string, number>;
+  /** Posición del jugador: la venta sólo vale dentro del muelle. */
+  at?: { x: number; y: number };
   now: number;
 }
 
@@ -445,6 +470,12 @@ export function opSell(
   factory: FactoryState,
   args: SellArgs,
 ): OpOutcome<{ money: number; units: number }> {
+  // La zona de venta se valida AQUÍ, no sólo en la interfaz: sin esto,
+  // cualquiera podría vender desde el otro extremo del mapa llamando a la op.
+  if (!args.at || !insideSellArea(args.at)) {
+    return fail('Sólo puedes vender en el MUELLE DE CARGA');
+  }
+
   const wanted =
     args.items ??
     Object.fromEntries(
@@ -791,7 +822,231 @@ export function opSetAppearance(
   };
 }
 
-/* ───────────────────── 11. COMPRAR / MEJORAR ROBOT ───────────────────── */
+/* ─────────────── 11. EXTRAER MATERIAL DE UNA MÁQUINA ─────────────── */
+
+/**
+ * Saca material guardado en una máquina y lo pasa al inventario. Sirve tanto
+ * para el producto terminado como para material de entrada que se quedó
+ * atascado porque falta el otro ingrediente de la receta.
+ */
+export function opWithdraw(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { machineId: string; item: string; qty: number; now: number },
+): OpOutcome<{ taken: number }> {
+  const cur = factory.machines[args.machineId];
+  if (!cur) return fail('Máquina no encontrada');
+
+  const settled = settleMachine(cur, args.machineId, factory.level, args.now);
+  const machine = settled.state;
+
+  const inInput = machine.input[args.item] ?? 0;
+  const inOutput = machine.output[args.item] ?? 0;
+  const stored = inInput + inOutput;
+  if (stored <= 0) return fail('La máquina no tiene ese material');
+
+  const free = inventoryFree(player);
+  if (free <= 0) return fail('Inventario lleno');
+
+  const wanted = Math.floor(args.qty);
+  if (!Number.isFinite(wanted) || wanted <= 0) return fail('Cantidad inválida');
+  // Si no cabe todo, se retira sólo lo que quepa (nunca se pierde nada).
+  const taken = Math.min(wanted, stored, free);
+  if (taken <= 0) return fail('Inventario lleno');
+
+  // Se vacía primero la SALIDA: es lo que el jugador espera llevarse.
+  const fromOutput = Math.min(taken, inOutput);
+  const fromInput = taken - fromOutput;
+
+  const output = { ...machine.output };
+  if (fromOutput > 0) {
+    output[args.item] = inOutput - fromOutput;
+    if (output[args.item] <= 0) delete output[args.item];
+  }
+  const input = { ...machine.input };
+  if (fromInput > 0) {
+    input[args.item] = inInput - fromInput;
+    if (input[args.item] <= 0) delete input[args.item];
+  }
+
+  let next: MachineState = { ...machine, input, output };
+  next = settleMachine(next, args.machineId, factory.level, args.now).state;
+
+  const events: OpEvent[] = [];
+  const def = getMachine(args.machineId);
+  let p: PlayerState = {
+    ...player,
+    inventory: addToInventory(player.inventory, args.item, taken),
+  };
+
+  // Retirar producto terminado cuenta como producción recogida; retirar
+  // material de entrada es sólo logística y no da XP ni contribución.
+  let f: FactoryState = {
+    ...factory,
+    machines: { ...factory.machines, [args.machineId]: next },
+    updatedAt: args.now,
+  };
+  if (fromOutput > 0) {
+    p = stat(p, { produced: fromOutput });
+    p = grantXp(p, def.xpPerCollect * fromOutput, events, args.now);
+    p = bumpMissions(p, [{ metric: 'produce', item: args.item, amount: fromOutput }], events);
+    f = {
+      ...f,
+      stats: { ...f.stats, produced: f.stats.produced + fromOutput },
+    };
+    const contrib = fromOutput * BALANCE.factory.contribPerProduced;
+    f = addContribution(f, contrib, events);
+    f = bumpObjectives(f, 'produced', fromOutput, events);
+    p = stat(p, { contributed: contrib });
+    events.push({ kind: 'contribution', amount: contrib });
+  }
+
+  events.push({ kind: 'item', item: args.item, amount: taken });
+  if (taken < wanted) {
+    events.push({ kind: 'info', text: `Sólo cabían ${taken}` });
+  }
+
+  return {
+    ok: true,
+    player: p,
+    factory: f,
+    memberDelta: fromOutput > 0 ? { produced: fromOutput } : {},
+    events,
+    data: { taken },
+  };
+}
+
+/* ─────────────── 12. SUELO: SOLTAR, RECOGER Y TIRAR ─────────────── */
+
+/** Limpia objetos caducados. Mantiene acotado el documento de fábrica. */
+function pruneGround(ground: Record<string, GroundItem>, now: number): Record<string, GroundItem> {
+  const out: Record<string, GroundItem> = {};
+  for (const [id, g] of Object.entries(ground)) {
+    if (g && g.qty > 0 && now - g.droppedAt < BALANCE.ground.expireMs) out[id] = g;
+  }
+  return out;
+}
+
+export function opDropItem(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { item: string; qty: number; at: { x: number; y: number }; now: number },
+): OpOutcome<{ dropped: number }> {
+  const have = player.inventory[args.item] ?? 0;
+  if (have <= 0) return fail('No llevas ese objeto');
+  const qty = Math.min(Math.floor(args.qty), have);
+  if (!Number.isFinite(qty) || qty <= 0) return fail('Cantidad inválida');
+  if (!args.at) return fail('Posición desconocida');
+
+  const ground = pruneGround(factory.ground ?? {}, args.now);
+  if (Object.keys(ground).length >= BALANCE.ground.maxItems) {
+    return fail('Hay demasiadas cosas tiradas por el suelo');
+  }
+
+  const id = `g_${args.now.toString(36)}_${player.uid.slice(-4)}_${Math.floor(Math.random() * 1296).toString(36)}`;
+  ground[id] = {
+    id,
+    item: args.item,
+    qty,
+    x: Math.round(args.at.x),
+    y: Math.round(args.at.y),
+    by: player.uid,
+    droppedAt: args.now,
+  };
+
+  const p: PlayerState = {
+    ...player,
+    inventory: addToInventory(player.inventory, args.item, -qty),
+  };
+
+  return {
+    ok: true,
+    player: p,
+    factory: { ...factory, ground, updatedAt: args.now },
+    events: [
+      { kind: 'item', item: args.item, amount: -qty },
+      { kind: 'info', text: `Has soltado ${qty} × ${getItem(args.item).name}` },
+    ],
+    data: { dropped: qty },
+  };
+}
+
+/**
+ * Recoge un objeto del suelo. Es transaccional: si dos jugadores lo intentan a
+ * la vez, el segundo ve el montón ya reducido o vacío. Nunca se duplica.
+ */
+export function opPickupGround(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { groundId: string; at: { x: number; y: number }; now: number },
+): OpOutcome<{ taken: number; remaining: number }> {
+  const ground = { ...(factory.ground ?? {}) };
+  const entry = ground[args.groundId];
+  if (!entry || entry.qty <= 0) return fail('Ya no está ahí');
+
+  if (
+    !args.at ||
+    !within(args.at, entry, BALANCE.actions.pickupRange + BALANCE.actions.validationSlack)
+  ) {
+    return fail('Estás demasiado lejos');
+  }
+
+  const free = inventoryFree(player);
+  if (free <= 0) return fail('Inventario lleno');
+
+  const taken = Math.min(entry.qty, free);
+  const remaining = entry.qty - taken;
+  if (remaining > 0) ground[args.groundId] = { ...entry, qty: remaining };
+  else delete ground[args.groundId];
+
+  const p: PlayerState = {
+    ...player,
+    inventory: addToInventory(player.inventory, entry.item, taken),
+  };
+
+  const events: OpEvent[] = [{ kind: 'item', item: entry.item, amount: taken }];
+  if (remaining > 0) {
+    events.push({ kind: 'info', text: `Quedan ${remaining} en el suelo` });
+  }
+
+  return {
+    ok: true,
+    player: p,
+    factory: { ...factory, ground, updatedAt: args.now },
+    events,
+    data: { taken, remaining },
+  };
+}
+
+/** Basurero: destruye material. No da dinero ni se puede deshacer. */
+export function opTrashItem(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { item: string; qty: number; now: number },
+): OpOutcome<{ destroyed: number }> {
+  const have = player.inventory[args.item] ?? 0;
+  if (have <= 0) return fail('No llevas ese objeto');
+  const qty = Math.min(Math.floor(args.qty), have);
+  if (!Number.isFinite(qty) || qty <= 0) return fail('Cantidad inválida');
+
+  const p: PlayerState = {
+    ...player,
+    inventory: addToInventory(player.inventory, args.item, -qty),
+  };
+
+  return {
+    ok: true,
+    player: p,
+    factory,
+    events: [
+      { kind: 'item', item: args.item, amount: -qty },
+      { kind: 'info', text: `Has destruido ${qty} × ${getItem(args.item).name}` },
+    ],
+    data: { destroyed: qty },
+  };
+}
+
+/* ───────────────────── 13. COMPRAR / MEJORAR ROBOT ───────────────────── */
 
 export function opBuyRobot(
   player: PlayerState,
@@ -941,6 +1196,10 @@ export type OpName =
   | 'useItem'
   | 'setAppearance'
   | 'buyRobot'
+  | 'withdraw'
+  | 'dropItem'
+  | 'pickupGround'
+  | 'trashItem'
   | 'applyFactoryReset'
   | 'tick';
 
@@ -959,6 +1218,10 @@ export const OPS = {
   useItem: opUseItem,
   setAppearance: opSetAppearance,
   buyRobot: opBuyRobot,
+  withdraw: opWithdraw,
+  dropItem: opDropItem,
+  pickupGround: opPickupGround,
+  trashItem: opTrashItem,
   applyFactoryReset: opApplyFactoryReset,
   tick: opTick,
 } as unknown as Record<OpName, AnyOp>;

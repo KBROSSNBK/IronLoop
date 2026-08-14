@@ -21,6 +21,11 @@ function world(overrides: Partial<PlayerState> = {}) {
 /** Determinista: sin hallazgos raros. */
 const noLuck = () => 0.99;
 
+/** Centro del muelle de carga (dock_sell: tx17 ty21 tw6 th3). */
+const AT_DOCK = { x: 800, y: 900 };
+/** Punto claramente fuera de la zona de venta. */
+const FAR_AWAY = { x: 200, y: 240 };
+
 describe('opGather — recolección', () => {
   it('añade material, gasta estamina y da XP', () => {
     const { player, factory } = world();
@@ -150,7 +155,7 @@ describe('opDeposit / opCollect — cadena de producción', () => {
 describe('opSell — economía individual', () => {
   it('convierte inventario en dinero y contribución', () => {
     const { player, factory } = world({ inventory: { ingot: 4 } });
-    const out = runOp('sell', player, factory, { now: T0 });
+    const out = runOp('sell', player, factory, { at: AT_DOCK, now: T0 });
     expect(out.ok).toBe(true);
     expect(out.player!.money).toBe(player.money + 4 * 18);
     expect(out.player!.inventory.ingot).toBeUndefined();
@@ -160,13 +165,31 @@ describe('opSell — economía individual', () => {
 
   it('no permite vender lo que no se tiene', () => {
     const { player, factory } = world({ inventory: { ingot: 1 } });
-    const out = runOp('sell', player, factory, { items: { ingot: 9999 }, now: T0 });
+    const out = runOp('sell', player, factory, {
+      items: { ingot: 9999 },
+      at: AT_DOCK,
+      now: T0,
+    });
     expect(out.ok).toBe(true);
     expect(out.player!.money).toBe(player.money + 18);
   });
 
   it('rechaza vender con la mochila vacía', () => {
     const { player, factory } = world();
+    const out = runOp('sell', player, factory, { at: AT_DOCK, now: T0 });
+    expect(out.ok).toBe(false);
+  });
+
+  it('BLOQUEA la venta fuera del muelle de carga', () => {
+    const { player, factory } = world({ inventory: { ingot: 10 } });
+    const out = runOp('sell', player, factory, { at: FAR_AWAY, now: T0 });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/muelle/i);
+    expect(out.player).toBeUndefined();
+  });
+
+  it('BLOQUEA la venta si el cliente no envía posición', () => {
+    const { player, factory } = world({ inventory: { ingot: 10 } });
     const out = runOp('sell', player, factory, { now: T0 });
     expect(out.ok).toBe(false);
   });
@@ -398,7 +421,7 @@ describe('concurrencia — dos jugadores sobre la misma fábrica', () => {
     const a: PlayerState = { ...createPlayerState(user('a'), T0), inventory: { ingot: 10 } };
     const b = createPlayerState(user('b'), T0);
 
-    const sale = runOp('sell', a, factory, { now: T0 });
+    const sale = runOp('sell', a, factory, { at: AT_DOCK, now: T0 });
     expect(sale.player!.money).toBeGreaterThan(b.money);
     expect(b.money).toBe(BALANCE.player.startingMoney);
     // …pero la fábrica sí es compartida

@@ -71,6 +71,7 @@ export function createFactoryState(id: string, index: number, now = Date.now()):
     totalContribution: 0,
     machines,
     robots: {},
+    ground: {},
     stats: { gathered: 0, produced: 0, sold: 0, contributed: 0 },
     objectives: {},
     playerCount: 0,
@@ -142,6 +143,7 @@ export function normalizeFactory(raw: Partial<FactoryState>, id: string): Factor
     id,
     machines,
     robots,
+    ground: { ...(raw.ground ?? {}) },
     stats: { ...base.stats, ...(raw.stats ?? {}) },
     objectives: { ...(raw.objectives ?? {}) },
   } as FactoryState;

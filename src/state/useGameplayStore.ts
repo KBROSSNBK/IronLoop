@@ -21,6 +21,13 @@ interface GameplayState {
   /** Etiqueta de la acción en modo automático, o null. */
   autoAction: string | null;
 
+  /** Posición del jugador local. La usan los paneles que necesitan validar
+   *  dónde estás (vender sólo en el muelle, soltar objetos a tus pies…). */
+  x: number;
+  y: number;
+  /** ¿Estás dentro del muelle de carga? Sólo ahí se puede vender. */
+  inSellArea: boolean;
+
   publish: (patch: Partial<GameplayState>) => void;
 }
 
@@ -35,5 +42,8 @@ export const useGameplayStore = create<GameplayState>((set) => ({
   actionProgress: 0,
   holdProgress: 0,
   autoAction: null,
+  x: 0,
+  y: 0,
+  inSellArea: false,
   publish: (patch) => set(patch),
 }));

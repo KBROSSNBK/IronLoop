@@ -23,9 +23,12 @@ export interface MachineDef {
   output: Partial<Record<ItemId, number>>;
   /** Duración base de un ciclo en ms (antes de multiplicadores). */
   cycleMs: number;
-  /** Capacidad del buffer de entrada (por tipo de item). */
+  /**
+   * Referencia visual de "llenado" de los buffers. NO limita nada: las
+   * máquinas aceptan y acumulan material sin tope (ver `production.ts`).
+   * Sólo se usa para pintar la barrita de la tolva.
+   */
   inputCap: number;
-  /** Capacidad del buffer de salida (por tipo de item). Se atasca al llenarse. */
   outputCap: number;
   /** Nivel de fábrica necesario para que exista/funcione. */
   unlockFactoryLevel: number;

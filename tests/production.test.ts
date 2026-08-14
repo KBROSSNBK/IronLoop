@@ -50,7 +50,7 @@ describe('settleMachine — simulación determinista', () => {
     expect(r.state.cycleStartAt).toBe(0);
   });
 
-  it('se atasca cuando el buffer de salida está lleno', () => {
+  it('la salida no tiene tope: sigue produciendo por encima de la referencia', () => {
     const cap = MACHINES.smelter.outputCap;
     const state: MachineState = {
       ...createMachineState(),
@@ -59,9 +59,16 @@ describe('settleMachine — simulación determinista', () => {
       cycleStartAt: T0,
     };
     const r = settleMachine(state, 'smelter', 1, T0 + 1_000_000);
-    expect(r.blocked).toBe('output-full');
-    expect(r.state.output.ingot).toBe(cap);
-    expect(r.cyclesDone).toBe(0);
+    expect(r.blocked).toBe('no-input'); // se detiene por material, no por espacio
+    expect(r.state.output.ingot).toBe(cap + 50); // 100 mineral → 50 lingotes más
+    expect(r.cyclesDone).toBe(50);
+  });
+
+  it('acepta acumular entrada muy por encima de la referencia visual', () => {
+    const cap = MACHINES.smelter.inputCap;
+    const r = settleMachine(smelterWith(cap * 10), 'smelter', 1, T0 + 1000);
+    expect(r.blocked).toBeNull();
+    expect(r.running).toBe(true);
   });
 
   it('no produce si la máquina no está desbloqueada por nivel de fábrica', () => {
@@ -100,10 +107,8 @@ describe('settleMachine — simulación determinista', () => {
 });
 
 describe('helpers de buffers', () => {
-  it('inputRoom respeta la capacidad', () => {
-    expect(inputRoom(smelterWith(5), 'smelter', 'ore')).toBe(
-      MACHINES.smelter.inputCap - 5,
-    );
+  it('inputRoom es ilimitado para lo que la receta acepta, y cero para el resto', () => {
+    expect(inputRoom(smelterWith(9999), 'smelter', 'ore')).toBe(Number.POSITIVE_INFINITY);
     expect(inputRoom(smelterWith(5), 'smelter', 'gear')).toBe(0);
   });
 

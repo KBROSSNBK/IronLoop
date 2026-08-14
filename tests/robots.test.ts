@@ -47,7 +47,7 @@ describe('robots logísticos', () => {
     expect(factory.machines.smelter.output.ingot).toBeUndefined();
   });
 
-  it('respetan la capacidad de entrada del destino', () => {
+  it('la entrada del destino no tiene tope: acumula todo lo que llega', () => {
     const base = createFactoryState('f1', 1, T0);
     const cap = MACHINES.assembler.inputCap;
     const f: FactoryState = {
@@ -57,11 +57,12 @@ describe('robots logísticos', () => {
       machines: {
         ...base.machines,
         smelter: { ...base.machines.smelter, output: { ingot: 999 } },
-        assembler: { ...base.machines.assembler, input: { ingot: cap - 2 } },
+        assembler: { ...base.machines.assembler, input: { ingot: cap } },
       },
     };
-    const { factory } = settleRobots(f, T0 + 3600_000);
-    expect(factory.machines.assembler.input.ingot).toBe(cap);
+    const { factory } = settleRobots(f, T0 + 60_000);
+    // Lo ya acumulado + lo que el robot mueve en un minuto.
+    expect(factory.machines.assembler.input.ingot).toBe(cap + robotRate(HAULER, 5));
   });
 
   it('no crean material de la nada', () => {
