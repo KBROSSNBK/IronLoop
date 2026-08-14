@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Panel } from './Panel';
 import { useSessionStore } from '../../state/useSessionStore';
 import { UPGRADE_LIST, upgradeCost } from '../../config/upgrades';
-import { ROBOT_CONTRIB_RATIO, robotCost, robotRate } from '../../config/robots';
+import { ROBOT_CONTRIB_RATIO, robotCarry, robotCost, robotRate } from '../../config/robots';
 import { getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
 import { robotStatuses } from '../../game/logic/robots';
@@ -137,7 +137,8 @@ export function UpgradesPanel() {
                 {owned && (
                   <>
                     <div className="stat">
-                      Ritmo: <b className="mono-num">{robotRate(def, state.level)}</b> {item.name}/min
+                      Lleva <b className="mono-num">{robotCarry(def, state.level)}</b> {item.name} por
+                      viaje · <b className="mono-num">{robotRate(def, state.level)}</b>/min
                     </div>
                     <div className="stat">
                       Transportado en total: <b className="mono-num">{compact(state.moved)}</b>
@@ -160,7 +161,9 @@ export function UpgradesPanel() {
 
                 {available && !maxed && (
                   <div className="stat" style={{ marginTop: -2 }}>
-                    +{def.ratePerMin} {item.name}/min por nivel · aporta{' '}
+                    Al mejorar pasa a llevar{' '}
+                    <b className="mono-num">{robotCarry(def, state.level + 1)}</b> por viaje (
+                    {robotRate(def, state.level + 1)}/min) · aporta{' '}
                     {compact(Math.round(cost * ROBOT_CONTRIB_RATIO))} al núcleo
                   </div>
                 )}

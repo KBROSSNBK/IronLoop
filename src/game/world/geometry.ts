@@ -15,11 +15,13 @@ import {
   WORLD_ROWS,
   WORLD_W,
   conveyorLoadPoint,
+  conveyorRect,
   type ConveyorDef,
   type Rect,
   type StationDef,
 } from '../../config/world';
-import { MACHINE_LIST, type MachineDef } from '../../config/machines';
+import { MACHINE_LIST, getMachine, type MachineDef } from '../../config/machines';
+import { BALANCE } from '../../config/balance';
 
 export interface Solid extends Rect {
   kind: 'wall' | 'machine' | 'prop';
@@ -196,6 +198,40 @@ export function findNearestInteractable(
     if (!best || d < best.distance) best = { ...it, distance: d };
   }
   return best;
+}
+
+/**
+ * Cinta sobre la que está el jugador (o muy cerca). Se usa para el traspaso
+ * automático: basta con pasar por encima, sin pulsar nada.
+ */
+export function conveyorUnder(
+  x: number,
+  y: number,
+  predicate?: (c: ConveyorDef) => boolean,
+): ConveyorDef | null {
+  const r = BALANCE.conveyor.range;
+  let best: ConveyorDef | null = null;
+  let bestD = Infinity;
+  for (const c of CONVEYORS) {
+    if (!c.feeds) continue;
+    if (predicate && !predicate(c)) continue;
+    const box = conveyorRect(c);
+    const dx = Math.max(box.x - x, 0, x - (box.x + box.w));
+    const dy = Math.max(box.y - y, 0, y - (box.y + box.h));
+    const d = Math.hypot(dx, dy);
+    if (d <= r && d < bestD) {
+      best = c;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/** Items que una cinta admite: su filtro propio, o la receta de destino. */
+export function conveyorAccepts(c: ConveyorDef): string[] {
+  if (c.accepts && c.accepts.length > 0) return c.accepts;
+  if (!c.feeds) return [];
+  return Object.keys(getMachine(c.feeds).input);
 }
 
 /** Rectángulo del muelle de venta (px de mundo). La venta sólo vale aquí. */

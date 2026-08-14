@@ -28,6 +28,15 @@ export const BALANCE = {
     validationSlack: 40,
   },
 
+  conveyor: {
+    /** Unidades que se traspasan en cada tanda al pasar por encima. */
+    autoTransferBatch: 50,
+    /** Pausa entre tandas: el material se va yendo poco a poco, no de golpe. */
+    autoTransferCooldownMs: 700,
+    /** Margen alrededor de la cinta para considerar que estás encima. */
+    range: 34,
+  },
+
   ground: {
     /** Objetos tirados como máximo por fábrica (evita saturar el documento). */
     maxItems: 60,

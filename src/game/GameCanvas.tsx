@@ -16,12 +16,16 @@ import {
 } from './engine/input';
 import { getEmote } from '../config/emotes';
 import {
+  conveyorAccepts,
+  conveyorUnder,
   findNearestInteractable,
   isInsideSellArea,
   machineFrontPoint,
   moveWithCollision,
   type Interactable,
 } from './world/geometry';
+import { conveyorLoadPoint } from '../config/world';
+import { getMachine } from '../config/machines';
 import {
   drawConveyors,
   drawGroundItems,
@@ -126,6 +130,10 @@ export function GameCanvas() {
        montón en bucle mientras la transacción viaja. */
     let pendingPickup = false;
     const recentlyPicked = new Set<string>();
+
+    /* Cintas: el material se traspasa solo, en tandas y con pausa entre ellas. */
+    let pendingBelt = false;
+    let beltCooldownUntil = 0;
 
     /* ── canvas / DPR ── */
     const resize = () => {
@@ -415,6 +423,38 @@ export function GameCanvas() {
               window.setTimeout(() => recentlyPicked.delete(g.id), 700);
             });
           break;
+        }
+      }
+
+      /* — cintas: traspaso automático al pasar por encima — */
+      if (factory && player && !pendingBelt && nowMs >= beltCooldownUntil) {
+        const belt = conveyorUnder(me.x, me.y, (c) => {
+          if (factory.level < c.fromLevel) return false;
+          const def = getMachine(c.feeds!);
+          if (factory.level < def.unlockFactoryLevel) return false;
+          return conveyorAccepts(c).some((i) => (player.inventory[i] ?? 0) > 0);
+        });
+        if (belt) {
+          const item = conveyorAccepts(belt).find((i) => (player.inventory[i] ?? 0) > 0)!;
+          const batch = Math.min(
+            BALANCE.conveyor.autoTransferBatch,
+            player.inventory[item] ?? 0,
+          );
+          pendingBelt = true;
+          void session
+            .op('deposit', { machineId: belt.feeds, item, qty: batch })
+            .then((out) => {
+              if (out.ok) {
+                const p = conveyorLoadPoint(belt);
+                fx.burst(me.x, me.y - 6, getItem(item).color, 7, 55, 'spark');
+                fx.ring(p.x, p.y, '#38bdf8', 8);
+                emit('sfx', { name: 'machine', volume: 0.5 });
+              }
+            })
+            .finally(() => {
+              pendingBelt = false;
+              beltCooldownUntil = performance.now() + BALANCE.conveyor.autoTransferCooldownMs;
+            });
         }
       }
 

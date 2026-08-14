@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { settleRobots, robotStatuses } from '../src/game/logic/robots';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { runOp } from '../src/services/backend/ops';
-import { ROBOTS, robotCost, robotRate } from '../src/config/robots';
+import { ROBOTS, robotCarry, robotCost, robotRate, robotTripMs } from '../src/config/robots';
 import { MACHINES } from '../src/config/machines';
 import type { FactoryState, PlayerState } from '../src/types';
 
@@ -130,9 +130,36 @@ describe('robots logísticos', () => {
   });
 
   it('un nivel mayor transporta proporcionalmente más', () => {
-    const uno = settleRobots(factoryWithRobot(1), T0 + 60_000).transfers[0].amount;
-    const tres = settleRobots(factoryWithRobot(3), T0 + 60_000).transfers[0].amount;
+    // Stock de sobra: si no, el tope sería el material, no el nivel.
+    const conStock = (level: number) => {
+      const base = createFactoryState('f1', 1, T0);
+      return factoryWithRobot(level, {
+        machines: {
+          ...base.machines,
+          smelter: { ...base.machines.smelter, output: { ingot: 100000 } },
+        },
+      });
+    };
+    const uno = settleRobots(conStock(1), T0 + 60_000).transfers[0].amount;
+    const tres = settleRobots(conStock(3), T0 + 60_000).transfers[0].amount;
     expect(tres).toBe(uno * 3);
+  });
+
+  it('la carga por viaje sube al mejorar el robot', () => {
+    const l1 = robotCarry(HAULER, 1);
+    const l5 = robotCarry(HAULER, 5);
+    expect(l1).toBeGreaterThan(0);
+    expect(l5).toBeGreaterThan(l1);
+    expect(robotCarry(HAULER, 0)).toBe(0);
+  });
+
+  it('la carga por viaje es coherente con el caudal por minuto', () => {
+    for (const level of [1, 3, 10]) {
+      const viajesPorMin = 60000 / robotTripMs(HAULER);
+      const esperado = robotRate(HAULER, level) / viajesPorMin;
+      // Redondeo a unidades enteras, con margen de una unidad.
+      expect(Math.abs(robotCarry(HAULER, level) - esperado)).toBeLessThanOrEqual(1);
+    }
   });
 });
 

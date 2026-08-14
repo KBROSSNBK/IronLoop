@@ -132,7 +132,9 @@ export function resolveActions(ctx: ActionContext): ActionOption[] {
     }
 
     const settled = settleMachine(state, machineId, factory.level, ctx.now);
-    const loadable = Object.keys(def.input).filter(
+    // La cinta puede tener su propio filtro (p. ej. sólo cristal).
+    const allowed = belt.accepts?.length ? belt.accepts : Object.keys(def.input);
+    const loadable = allowed.filter(
       (item) => (player.inventory[item] ?? 0) > 0 && inputRoom(settled.state, machineId, item) > 0,
     );
     const carried = loadable.reduce((a, i) => a + (player.inventory[i] ?? 0), 0);
@@ -144,7 +146,7 @@ export function resolveActions(ctx: ActionContext): ActionOption[] {
       sub:
         loadable.length > 0
           ? `${loadable.map((i) => getItem(i).icon).join('')} ×${carried} → ${def.short}`
-          : `Acepta ${Object.keys(def.input).map((i) => getItem(i).name).join(', ')}`,
+          : `Acepta ${allowed.map((i) => getItem(i).name).join(', ')}`,
       icon: '🛒',
       color: '#38bdf8',
       holdable: true,

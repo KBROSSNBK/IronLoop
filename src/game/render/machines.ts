@@ -7,7 +7,7 @@
 import { MACHINE_LIST, MACHINE_UPGRADE, type MachineDef } from '../../config/machines';
 import { TILE } from '../../config/world';
 import { getItem } from '../../config/items';
-import { ROBOTS } from '../../config/robots';
+import { ROBOTS, robotCarry } from '../../config/robots';
 import type { FactoryState, MachineState } from '../../types';
 import { fillRatio, settleMachine, type SettleResult } from '../logic/production';
 import { robotHasWork, robotVisual } from '../logic/robots';
@@ -127,6 +127,21 @@ export function drawMachine(
     // Engranajes girando
     drawGear(ctx, coreX - 10, coreY, 11, running ? time * 2.4 : 0, def.accent);
     drawGear(ctx, coreX + 12, coreY + 3, 8, running ? -time * 3.2 : 0, '#e2e8f0');
+  } else if (def.kind === 'recycler') {
+    // Prensa trituradora: dos placas que se juntan y aplastan la chatarra.
+    const press = running ? Math.abs(Math.sin(time * 4)) : 0;
+    ctx.fillStyle = '#64748b';
+    roundRect(ctx, coreX - 20, coreY - 14 + press * 6, 40, 6, 2);
+    ctx.fill();
+    roundRect(ctx, coreX - 20, coreY + 8 - press * 6, 40, 6, 2);
+    ctx.fill();
+    // Chatarra aplastándose en medio
+    ctx.fillStyle = def.accent;
+    ctx.globalAlpha = running ? 0.5 + press * 0.5 : 0.25;
+    const squash = 1 - press * 0.6;
+    roundRect(ctx, coreX - 12, coreY - 5 * squash, 24, 10 * squash, 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
   } else {
     // Laboratorio: partículas orbitando
     ctx.strokeStyle = hexA(def.accent, running ? 0.9 : 0.3);
@@ -340,6 +355,7 @@ export function drawRobots(
     if (v.carrying) {
       const lift = busy ? Math.abs(Math.sin(time * 9)) * 3 : 0;
       const item = getItem(def.item);
+      const carry = robotCarry(def, state.level);
       ctx.fillStyle = '#b45309';
       roundRect(ctx, x - 7, py - 15 - lift, 14, 9, 2);
       ctx.fill();
@@ -348,6 +364,14 @@ export function drawRobots(
       ctx.font = '8px "Segoe UI Emoji", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(item.icon, x, py - 16 - lift);
+
+      // Cuántas unidades lleva en este viaje: sube al mejorar el robot.
+      ctx.font = '800 9px "Rajdhani", system-ui, sans-serif';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(2,6,23,0.9)';
+      ctx.strokeText(`×${carry}`, x + 13, py - 12 - lift);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillText(`×${carry}`, x + 13, py - 12 - lift);
     }
 
     // Brazo elevador durante la carga/descarga

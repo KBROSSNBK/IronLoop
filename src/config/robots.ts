@@ -47,7 +47,7 @@ export const ROBOTS: RobotDef[] = [
     from: 'smelter',
     to: 'assembler',
     item: 'ingot',
-    ratePerMin: 8,
+    ratePerMin: 20,
     maxLevel: 10,
     baseCost: 2500,
     costGrowth: 1.7,
@@ -69,7 +69,7 @@ export const ROBOTS: RobotDef[] = [
     from: 'assembler',
     to: 'lab',
     item: 'gear',
-    ratePerMin: 5,
+    ratePerMin: 12,
     maxLevel: 10,
     baseCost: 12000,
     costGrowth: 1.75,
@@ -82,6 +82,28 @@ export const ROBOTS: RobotDef[] = [
     ],
     viaConveyor: 'c5',
     accent: '#c084fc',
+  },
+  {
+    id: 'hauler_recycled',
+    name: 'Reciclador RX',
+    icon: '♻️',
+    desc: 'Saca el acero reciclado de la Recicladora y lo manda a la Ensambladora.',
+    from: 'recycler',
+    to: 'assembler',
+    item: 'ingot',
+    ratePerMin: 16,
+    maxLevel: 10,
+    baseCost: 6000,
+    costGrowth: 1.72,
+    unlockFactoryLevel: 4,
+    // Frente de la Recicladora → rodea por debajo → carga de la cinta c8.
+    path: [
+      { x: 1060, y: 976 },
+      { x: 1214, y: 976 },
+      { x: 1214, y: 872 },
+    ],
+    viaConveyor: 'c8',
+    accent: '#34d399',
   },
 ];
 
@@ -110,6 +132,27 @@ export function robotCost(def: RobotDef, currentLevel: number): number {
 /** Unidades por minuto que mueve el robot a un nivel dado. */
 export function robotRate(def: RobotDef, level: number): number {
   return def.ratePerMin * level;
+}
+
+/** Duración de un viaje completo (cargar, ir, descargar, volver) en ms. */
+export function robotTripMs(def: RobotDef): number {
+  let len = 0;
+  for (let i = 1; i < def.path.length; i++) {
+    len += Math.hypot(def.path[i].x - def.path[i - 1].x, def.path[i].y - def.path[i - 1].y);
+  }
+  const travel = (len / ROBOT_TRIP.speed) * 1000;
+  return ROBOT_TRIP.loadMs + travel * 2 + ROBOT_TRIP.unloadMs;
+}
+
+/**
+ * Unidades que carga el robot en CADA viaje. Es lo que sube al mejorarlo y
+ * lo que se muestra encima del chasis mientras transporta, de modo que el
+ * número que ves coincide con el caudal real (`robotRate`).
+ */
+export function robotCarry(def: RobotDef, level: number): number {
+  if (level <= 0) return 0;
+  const tripsPerMin = 60000 / robotTripMs(def);
+  return Math.max(1, Math.round(robotRate(def, level) / tripsPerMin));
 }
 
 /** Parte del coste que va al progreso compartido de la fábrica. */

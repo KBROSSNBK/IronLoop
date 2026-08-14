@@ -9,7 +9,7 @@
 
 import type { ItemId } from './items';
 
-export type MachineKind = 'smelter' | 'assembler' | 'lab';
+export type MachineKind = 'smelter' | 'assembler' | 'lab' | 'recycler';
 
 export interface MachineDef {
   id: string;
@@ -108,6 +108,28 @@ export const MACHINES = {
     th: 4,
     accent: '#c084fc',
     desc: 'Fabrica Circuitos Cuánticos con Engranajes y Cristal.',
+  },
+  recycler: {
+    id: 'recycler',
+    kind: 'recycler',
+    name: 'Recicladora R-3',
+    short: 'RECICLADORA',
+    icon: '♻️',
+    // Da salida a la chatarra: 4 restos sin valor → 1 lingote aprovechable.
+    input: { scrap: 4 },
+    output: { ingot: 1 },
+    cycleMs: 5000,
+    inputCap: 60,
+    outputCap: 40,
+    unlockFactoryLevel: 4,
+    xpPerDeposit: 2,
+    xpPerCollect: 6,
+    tx: 24,
+    ty: 21,
+    tw: 5,
+    th: 4,
+    accent: '#34d399',
+    desc: 'Convierte 4 de Chatarra en 1 Lingote de Acero.',
   },
 } as const satisfies Record<string, MachineDef>;
 

@@ -39,11 +39,11 @@ export const ZONES: ZoneDef[] = [
   { id: 'resources', label: 'YACIMIENTO', icon: '⛏️', tx: 2, ty: 4, tw: 9, th: 7, floor: 'dirt', accent: '#a78bfa' },
   { id: 'smelting', label: 'FUNDICIÓN', icon: '🔥', tx: 23, ty: 4, tw: 10, th: 7, floor: 'grate', accent: '#ff8a3d' },
   { id: 'core', label: 'NÚCLEO DE FÁBRICA', icon: '🏭', tx: 14, ty: 9, tw: 8, th: 7, floor: 'tech', accent: '#22d3ee' },
-  { id: 'assembly', label: 'ENSAMBLAJE', icon: '🤖', tx: 23, ty: 14, tw: 10, th: 7, floor: 'grate', accent: '#8ef04a', liveAtLevel: 3 },
+  { id: 'assembly', label: 'ENSAMBLAJE', icon: '🤖', tx: 23, ty: 14, tw: 10, th: 6, floor: 'grate', accent: '#8ef04a', liveAtLevel: 3 },
   { id: 'labzone', label: 'INVESTIGACIÓN', icon: '🔬', tx: 6, ty: 14, tw: 10, th: 7, floor: 'tech', accent: '#c084fc', liveAtLevel: 6 },
   { id: 'dock', label: 'MUELLE DE CARGA', icon: '🚚', tx: 16, ty: 20, tw: 8, th: 5, floor: 'hazard', accent: '#fbbf24' },
   { id: 'workshop', label: 'TALLER', icon: '🛠️', tx: 2, ty: 21, tw: 7, th: 4, floor: 'concrete', accent: '#f472b6' },
-  { id: 'salvage', label: 'RECOLECCIÓN', icon: '♻️', tx: 25, ty: 21, tw: 8, th: 4, floor: 'dirt', accent: '#34d399' },
+  { id: 'salvage', label: 'RECOLECCIÓN', icon: '♻️', tx: 23, ty: 20, tw: 12, th: 5, floor: 'dirt', accent: '#34d399' },
 ];
 
 export type StationType = 'oreVein' | 'sell' | 'core' | 'shop' | 'salvage';
@@ -131,26 +131,26 @@ export const STATIONS: StationDef[] = [
     type: 'salvage',
     label: 'MONTÓN DE CHATARRA',
     icon: '♻️',
-    tx: 26,
-    ty: 22,
-    tw: 3,
+    tx: 32,
+    ty: 21,
+    tw: 2,
     th: 2,
     accent: '#34d399',
     yields: [{ item: 'scrap', amount: 2 }],
-    desc: 'Rebusca chatarra aprovechable. Más lento, pero sin veta que agotar.',
+    desc: 'Rebusca chatarra. Aliméntala a la Recicladora y se vuelve acero.',
   },
   {
     id: 'salvage_b',
     type: 'salvage',
     label: 'CONTENEDOR DE DESGUACE',
     icon: '♻️',
-    tx: 30,
-    ty: 22,
-    tw: 3,
+    tx: 32,
+    ty: 23,
+    tw: 2,
     th: 2,
     accent: '#34d399',
     yields: [{ item: 'scrap', amount: 2 }],
-    desc: 'Rebusca chatarra aprovechable. Más lento, pero sin veta que agotar.',
+    desc: 'Rebusca chatarra. Aliméntala a la Recicladora y se vuelve acero.',
   },
 ];
 
@@ -222,6 +222,11 @@ export interface ConveyorDef {
    * viaja hasta esa máquina. Ahorra el paseo de ida y vuelta.
    */
   feeds?: string;
+  /**
+   * Filtro de material. Si está definido, la cinta SÓLO acepta estos items,
+   * aunque la máquina de destino admita más cosas en su receta.
+   */
+  accepts?: string[];
   /** Nombre corto para la UI de interacción. */
   label?: string;
 }
@@ -232,6 +237,42 @@ export const CONVEYORS: ConveyorDef[] = [
   { id: 'c3', tx: 23, ty: 16.5, len: 8, dir: 'left', fromLevel: 4 },
   { id: 'c4', tx: 18, ty: 16, len: 4, dir: 'down', fromLevel: 4 },
   { id: 'c5', tx: 16, ty: 16.5, len: 7, dir: 'left', fromLevel: 6, feeds: 'lab', label: 'CINTA A LABORATORIO' },
+  // Bajante de cristal: recorre el borde del yacimiento y entra al laboratorio.
+  // Sólo admite Cristal Resonante, que es lo escaso de esa receta.
+  {
+    id: 'c6',
+    tx: 5.65,
+    ty: 10.8,
+    len: 5.6,
+    dir: 'down',
+    fromLevel: 6,
+    feeds: 'lab',
+    accepts: ['crystal'],
+    label: 'BAJANTE DE CRISTAL',
+  },
+  {
+    id: 'c7',
+    tx: 5.65,
+    ty: 16.1,
+    // Llega justo hasta el borde del Laboratorio, sin montarse encima.
+    len: 2.35,
+    dir: 'right',
+    fromLevel: 6,
+    feeds: 'lab',
+    accepts: ['crystal'],
+    label: 'BAJANTE DE CRISTAL',
+  },
+  // Salida de la Recicladora hacia la Ensambladora.
+  {
+    id: 'c8',
+    tx: 30,
+    ty: 19.4,
+    len: 2.4,
+    dir: 'up',
+    fromLevel: 4,
+    feeds: 'assembler',
+    label: 'CINTA DE RECICLADO',
+  },
 ];
 
 /** Punto de carga de una cinta: el extremo por el que entra el material. */
@@ -286,4 +327,15 @@ export const ROBOT_ROUTES: { id: string; points: { x: number; y: number }[]; fro
 
 export function tilesToRect(tx: number, ty: number, tw: number, th: number): Rect {
   return { x: tx * TILE, y: ty * TILE, w: tw * TILE, h: th * TILE };
+}
+
+/** Rectángulo que ocupa una cinta en píxeles de mundo. */
+export function conveyorRect(c: ConveyorDef): Rect {
+  const horizontal = c.dir === 'left' || c.dir === 'right';
+  return {
+    x: c.tx * TILE,
+    y: c.ty * TILE,
+    w: (horizontal ? c.len : 0.7) * TILE,
+    h: (horizontal ? 0.7 : c.len) * TILE,
+  };
 }
