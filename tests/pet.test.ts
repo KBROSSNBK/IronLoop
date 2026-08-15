@@ -15,11 +15,13 @@ import {
 import {
   addToPet,
   dropOffFor,
+  getPetZone,
   heaviestItem,
   isPetStation,
   nearestStation,
   petAccepts,
   PET_STATIONS,
+  PET_ZONES,
   stationWorkPoint,
   stationYield,
   unloadPet,
@@ -164,6 +166,103 @@ describe('detección de zonas de extracción', () => {
   });
 });
 
+/* ──────────────── ZONA DE TRABAJO ELEGIDA ──────────────── */
+
+describe('zona de extracción asignada', () => {
+  it('las zonas salen del mapa, no de una lista escrita a mano', () => {
+    expect(PET_ZONES.length).toBeGreaterThan(2);
+    for (const z of PET_ZONES) {
+      expect(z.stations.length).toBeGreaterThan(0);
+      expect(z.items.length).toBeGreaterThan(0);
+      // Toda estación listada pertenece de verdad a esa zona del mapa.
+      for (const s of z.stations) expect(isPetStation(s.id)).toBe(true);
+    }
+  });
+
+  it('cada zona conocida aparece con su material', () => {
+    const yacimiento = PET_ZONES.find((z) => z.id === 'resources')!;
+    expect(yacimiento.items).toContain('ore');
+    const minera = PET_ZONES.find((z) => z.id === 'mine')!;
+    expect(minera.items).toEqual(expect.arrayContaining(['copper', 'titanium']));
+    const recoleccion = PET_ZONES.find((z) => z.id === 'salvage')!;
+    expect(recoleccion.items).toContain('scrap');
+  });
+
+  it('ninguna estación se asigna a dos zonas a la vez', () => {
+    const vistas = new Set<string>();
+    for (const z of PET_ZONES) {
+      for (const s of z.stations) {
+        expect(vistas.has(s.id), `${s.id} está en dos zonas`).toBe(false);
+        vistas.add(s.id);
+      }
+    }
+    // Y todas las estaciones trabajables tienen zona.
+    expect(vistas.size).toBe(PET_STATIONS.length);
+  });
+
+  it('sin zona elegida sólo mira dentro de su radio', () => {
+    const lejos = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_copper_a')!);
+    expect(nearestStation(lejos.x, lejos.y, 40, null)?.station.id).toBe('vein_copper_a');
+    // Desde el yacimiento, la zona minera queda fuera del sensor.
+    const cerca = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_a')!);
+    expect(nearestStation(cerca.x, cerca.y, 60, null)?.station.id).toBe('vein_a');
+  });
+
+  it('con zona elegida cruza el mapa, sin importar el radio', () => {
+    const cerca = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_a')!);
+    const elegida = nearestStation(cerca.x, cerca.y, 10, 'mine');
+    expect(elegida).not.toBeNull();
+    expect(PET_ZONES.find((z) => z.id === 'mine')!.stations).toContainEqual(elegida!.station);
+  });
+
+  it('una zona inventada no manda: no devuelve nada de otra parte', () => {
+    expect(getPetZone('atlantida')).toBeNull();
+    const p = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_a')!);
+    // Sin zona válida cae al comportamiento automático (por radio).
+    expect(nearestStation(p.x, p.y, 10_000, 'atlantida')?.station.id).toBe('vein_a');
+  });
+
+  it('el cerebro respeta la zona asignada aunque tenga al dueño lejos', () => {
+    const derived = derivePet(pet());
+    const b = new PetBrain();
+    const start = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_a')!);
+    b.reset(start.x, start.y);
+    b.x = start.x;
+    b.y = start.y;
+    b.update(T0, {
+      dt: 0.016,
+      ownerX: start.x,
+      ownerY: start.y,
+      derived,
+      storedUnits: 0,
+      mode: 'gather',
+      zone: 'mine',
+      ownerHasRoom: true,
+      dropOff: null,
+    });
+    // Tiene una veta debajo, pero la suya está en la Zona Minera.
+    expect(b.state).toBe('IR_A_VETA');
+    expect(b.station?.id).not.toBe('vein_a');
+  });
+
+  it('se puede asignar y volver a automática', () => {
+    const f: FactoryState = { ...factory(), level: 14 };
+    const asignada = runOp('setPetLook', player(), f, { zone: 'mine', now: T0 });
+    expect(asignada.ok).toBe(true);
+    expect(asignada.player!.pet.zone).toBe('mine');
+
+    const auto = runOp('setPetLook', asignada.player!, f, { zone: null, now: T0 });
+    expect(auto.player!.pet.zone).toBeNull();
+  });
+
+  it('rechaza zonas inventadas o aún bloqueadas por nivel', () => {
+    const f: FactoryState = { ...factory(), level: 14 };
+    expect(runOp('setPetLook', player(), f, { zone: 'atlantida', now: T0 }).ok).toBe(false);
+    // La Zona Minera abre a nivel 3: con la fábrica a 1 no se puede elegir.
+    expect(runOp('setPetLook', player(), factory(), { zone: 'mine', now: T0 }).ok).toBe(false);
+  });
+});
+
 /* ──────────────── A DÓNDE VA CADA MATERIAL ──────────────── */
 
 describe('destino del material', () => {
@@ -250,6 +349,7 @@ describe('prioridades de la mascota', () => {
       derived,
       storedUnits: 5, // lleva material, pero minar tiene prioridad
       mode: 'gather',
+      zone: null,
       ownerHasRoom: true,
       dropOff: null,
     });
@@ -266,6 +366,7 @@ describe('prioridades de la mascota', () => {
       derived,
       storedUnits: derived.capacity,
       mode: 'gather',
+      zone: null,
       ownerHasRoom: true,
       dropOff: null,
     });
@@ -281,6 +382,7 @@ describe('prioridades de la mascota', () => {
       derived: { ...derived, radius: 1 },
       storedUnits: 4,
       mode: 'gather',
+      zone: null,
       ownerHasRoom: true,
       dropOff: null,
     });
@@ -296,6 +398,7 @@ describe('prioridades de la mascota', () => {
       derived: { ...derived, radius: 1 },
       storedUnits: 0,
       mode: 'gather',
+      zone: null,
       ownerHasRoom: true,
       dropOff: null,
     });
@@ -312,6 +415,7 @@ describe('prioridades de la mascota', () => {
       derived,
       storedUnits: 0,
       mode: 'follow',
+      zone: null,
       ownerHasRoom: true,
       dropOff: null,
     });
@@ -330,6 +434,7 @@ describe('prioridades de la mascota', () => {
         derived,
         storedUnits: 0,
         mode: 'gather',
+        zone: null,
         ownerHasRoom: true,
         dropOff: null,
       });
@@ -352,6 +457,7 @@ describe('prioridades de la mascota', () => {
       derived,
       storedUnits: derived.capacity,
       mode: 'gather',
+      zone: null,
       ownerHasRoom: true,
       dropOff: bay,
     });
@@ -369,6 +475,7 @@ describe('prioridades de la mascota', () => {
       derived: { ...derived, radius: 1 },
       storedUnits: 10,
       mode: 'gather',
+      zone: null,
       ownerHasRoom: true,
       dropOff: bay,
     });
@@ -386,6 +493,7 @@ describe('prioridades de la mascota', () => {
       derived,
       storedUnits: 10,
       mode: 'follow',
+      zone: null,
       ownerHasRoom: true,
       dropOff: bay,
     });
@@ -404,6 +512,7 @@ describe('prioridades de la mascota', () => {
         derived,
         storedUnits: 0,
         mode: 'gather',
+        zone: null,
         ownerHasRoom: true,
         dropOff: null,
       });

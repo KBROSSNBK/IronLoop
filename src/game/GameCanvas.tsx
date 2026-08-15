@@ -642,6 +642,7 @@ export function GameCanvas() {
           derived: petDerived,
           storedUnits: petStored,
           mode: player.pet?.mode ?? 'gather',
+          zone: player.pet?.zone ?? null,
           ownerHasRoom: inventoryFree(player) > 0,
           dropOff,
         });

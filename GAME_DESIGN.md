@@ -168,7 +168,7 @@ propia) y tú decides qué hace, igual que con los robots:
 
 | Orden | Qué hace |
 |---|---|
-| ⛏️ Extraer | Busca la zona más cercana, pica hasta llenarse y **deja el material en la cinta o máquina que lo consume**. Nunca acumula carga muerta. |
+| ⛏️ Extraer | Trabaja la zona que le asignes (o la más cercana si la dejas en automática), pica hasta llenarse y **deja el material en la cinta o máquina que lo consume**. Nunca acumula carga muerta. |
 | 🐾 Seguir | Sólo te acompaña. Si le quedó material encima, te lo entrega y para. |
 | ⏸️ Reposo | La guardas. No aparece en el mapa. |
 

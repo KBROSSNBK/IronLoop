@@ -6,6 +6,7 @@ import {
   splitSale,
 } from '../src/game/logic/robots';
 import { runOp } from '../src/services/backend/ops';
+import { beltCount } from '../src/game/logic/belts';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { ROBOTS, getRobot, robotRate } from '../src/config/robots';
 import { getItem } from '../src/config/items';
@@ -44,11 +45,14 @@ function factory(mode: RobotState['mode'], online: string[] = [], stock = 500): 
 }
 
 describe('modos de operación del robot', () => {
-  it('por defecto reparte a la cinta', () => {
+  it('por defecto pone el material en su cinta, no lo teletransporta', () => {
     const f = factory('belt');
-    const { factory: after, transfers } = settleRobots(f, T0 + 60_000);
+    const now = T0 + 60_000;
+    const { factory: after, transfers } = settleRobots(f, now);
     expect(transfers[0].money).toBeUndefined();
-    expect(after.machines.assembler.input.ingot).toBe(robotRate(HAULER, 1));
+    const belt = HAULER.viaConveyor!;
+    expect(beltCount(after.belts?.[belt], belt, now)).toBe(robotRate(HAULER, 1));
+    expect(after.machines.assembler.input.ingot).toBeUndefined();
   });
 
   it('en modo parado no hace absolutamente nada', () => {

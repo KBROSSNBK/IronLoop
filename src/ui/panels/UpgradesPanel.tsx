@@ -12,6 +12,7 @@ import {
 import { getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
 import { robotStatuses } from '../../game/logic/robots';
+import { PET_ZONES } from '../../game/logic/pet';
 import {
   DEFAULT_PET,
   PET_ACCENTS,
@@ -238,6 +239,7 @@ export function UpgradesPanel() {
  */
 function PetTab() {
   const player = useSessionStore((s) => s.player)!;
+  const factory = useSessionStore((s) => s.factory)!;
   const op = useSessionStore((s) => s.op);
   const busy = useSessionStore((s) => s.busy);
 
@@ -282,6 +284,48 @@ function PetTab() {
       <div className="stat" style={{ fontSize: 11.5, color: 'var(--text-mute)' }}>
         {PET_MODES.find((m) => m.id === mode)?.desc}
       </div>
+
+      {/* Dónde trabaja. Automática = la que pille dentro de su radio. */}
+      <div className="section-title">ZONA DE EXTRACCIÓN</div>
+      <div className="zone-grid">
+        <button
+          className="zone-btn"
+          data-on={!pet.zone}
+          disabled={busy || mode !== 'gather'}
+          onClick={() => void op('setPetLook', { zone: null })}
+        >
+          <span className="ico">🎯</span>
+          <span className="nm">Automática</span>
+          <span className="sub">La más cercana dentro de su sensor</span>
+        </button>
+        {PET_ZONES.map((z) => {
+          const locked = factory.level < z.fromLevel;
+          return (
+            <button
+              key={z.id}
+              className="zone-btn"
+              data-on={pet.zone === z.id}
+              data-locked={locked}
+              disabled={busy || locked || mode !== 'gather'}
+              style={{ ['--z' as string]: z.accent }}
+              onClick={() => void op('setPetLook', { zone: z.id })}
+            >
+              <span className="ico">{z.icon}</span>
+              <span className="nm">{z.label}</span>
+              <span className="sub">
+                {locked
+                  ? `🔒 Fábrica nivel ${z.fromLevel}`
+                  : z.items.map((i) => `${getItem(i).icon} ${getItem(i).name}`).join(' · ')}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {pet.zone && (
+        <div className="stat" style={{ fontSize: 11.5, color: 'var(--amber-soft)' }}>
+          Con una zona fija cruza el mapa hasta ella y no se queda contigo.
+        </div>
+      )}
 
       <div className="pet-stats">
         <Metric label="Mochila" value={`${carried}/${derived.capacity}`} accent="var(--blue)" />

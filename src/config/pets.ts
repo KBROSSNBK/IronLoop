@@ -234,6 +234,11 @@ export interface PetState {
   mined: number;
   /** Qué le has mandado hacer. */
   mode: PetMode;
+  /**
+   * Zona en la que debe trabajar (id de `ZONES`). `null` = automática: la que
+   * pille más cerca dentro del radio de su sensor.
+   */
+  zone: string | null;
 }
 
 export const DEFAULT_PET: PetState = {
@@ -246,6 +251,7 @@ export const DEFAULT_PET: PetState = {
   lastAt: 0,
   mined: 0,
   mode: 'gather',
+  zone: null,
 };
 
 /**
@@ -274,6 +280,7 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
     lastAt: raw?.lastAt || now,
     mined: raw?.mined ?? 0,
     mode,
+    zone: typeof raw?.zone === 'string' ? raw.zone : null,
   };
 }
 

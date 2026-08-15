@@ -26,8 +26,8 @@ import { getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
 import { settleMachine } from './production';
 import type { RobotMode } from '../../config/robots';
-import { settleBelts, type BeltDelivery } from './belts';
-import type { FactoryState, MachineState, RobotState } from '../../types';
+import { getBelt, pushToBelt, settleBelts, type BeltDelivery } from './belts';
+import type { BeltState, FactoryState, MachineState, RobotState } from '../../types';
 
 export interface RobotTransfer {
   robotId: string;
@@ -84,19 +84,29 @@ function inputRoomFor(_state: MachineState, machineId: string, item: string): nu
   return item in getMachine(machineId).input ? Number.POSITIVE_INFINITY : 0;
 }
 
-function moveItems(
-  from: MachineState,
-  to: MachineState,
-  item: string,
-  amount: number,
-): { from: MachineState; to: MachineState } {
+/** Saca material del buffer de salida de una máquina. */
+function takeFromOutput(from: MachineState, item: string, amount: number): MachineState {
   const out = { ...from.output };
   out[item] = (out[item] ?? 0) - amount;
   if (out[item] <= 0) delete out[item];
-  return {
-    from: { ...from, output: out },
-    to: { ...to, input: { ...to.input, [item]: (to.input[item] ?? 0) + amount } },
-  };
+  return { ...from, output: out };
+}
+
+/**
+ * ¿Puede este robot entregar de verdad por su cinta?
+ *
+ * Es lo que promete su ficha ("lleva X a Y por la cinta"), así que si la cinta
+ * existe, está encendida y admite el material, el material tiene que viajar
+ * por ella y verse. Sólo si la cinta no está disponible se entrega a mano
+ * directamente en la máquina, para no bloquear la cadena.
+ */
+function beltFor(factory: FactoryState, def: RobotDef): string | null {
+  if (!def.viaConveyor || !def.to) return null;
+  const belt = getBelt(def.viaConveyor);
+  if (!belt || belt.feeds !== def.to) return null;
+  if (factory.level < belt.fromLevel) return null;
+  if (belt.accepts?.length && !belt.accepts.includes(def.item)) return null;
+  return belt.id;
 }
 
 /** Trabajo que un robot puede hacer con el tiempo acumulado. */
@@ -115,6 +125,7 @@ export function settleRobots(factory: FactoryState, now: number): RobotSettleRes
 
   const machines: Record<string, MachineState> = { ...factory.machines };
   const robots: Record<string, RobotState> = { ...factory.robots };
+  let belts: Record<string, BeltState> = factory.belts ?? {};
   const transfers: RobotTransfer[] = [];
   let changed = false;
 
@@ -181,9 +192,18 @@ export function settleRobots(factory: FactoryState, now: number): RobotSettleRes
         };
         transfers.push({ robotId: id, item: def.item, amount: moved, money });
       } else {
-        const res = moveItems(from!, to!, def.item, moved);
-        machines[def.from] = res.from;
-        machines[def.to!] = res.to;
+        machines[def.from] = takeFromOutput(from!, def.item, moved);
+        const beltId = beltFor(factory, def);
+        if (beltId) {
+          // Sube a la cinta y tarda en llegar, a la vista de todos.
+          belts = pushToBelt(belts, beltId, def.item, moved, now);
+        } else {
+          // Sin cinta disponible, entrega a mano en la máquina.
+          machines[def.to!] = {
+            ...to!,
+            input: { ...to!.input, [def.item]: (to!.input[def.item] ?? 0) + moved },
+          };
+        }
         robots[id] = {
           ...state,
           lastRunAt: Math.min(now, state.lastRunAt + usedMs),
@@ -203,7 +223,7 @@ export function settleRobots(factory: FactoryState, now: number): RobotSettleRes
 
   if (!changed) return { factory, transfers: [] };
 
-  let next: FactoryState = { ...factory, machines, robots, saleLedger: ledger };
+  let next: FactoryState = { ...factory, machines, robots, belts, saleLedger: ledger };
   if (soldTotal > 0) {
     // Vender por robot también empuja el progreso compartido, igual que
     // cuando vende un jugador.

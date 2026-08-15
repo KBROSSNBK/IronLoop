@@ -74,6 +74,8 @@ export interface PetTickInput {
   storedUnits: number;
   /** Qué le has mandado hacer. */
   mode: PetMode;
+  /** Zona asignada, o null para que elija la más cercana ella sola. */
+  zone: string | null;
   /** ¿Cabe algo en el inventario del dueño? Si no, no tiene sentido entregárselo. */
   ownerHasRoom: boolean;
   /**
@@ -146,7 +148,7 @@ export class PetBrain {
   }
 
   update(now: number, input: PetTickInput): PetTickResult {
-    const { dt, ownerX, ownerY, derived, storedUnits, mode, ownerHasRoom, dropOff } = input;
+    const { dt, ownerX, ownerY, derived, storedUnits, mode, zone, ownerHasRoom, dropOff } = input;
     if (!this.spawned) this.reset(ownerX, ownerY);
 
     const carried = this.carried(storedUnits);
@@ -155,9 +157,12 @@ export class PetBrain {
     let result: PetTickResult = { ...NOTHING };
 
     /* ── 1. Decisión: minar manda; soltar la carga es el plan B ── */
-    const leashed = Math.hypot(ownerX - this.x, ownerY - this.y) > LEASH;
+    // Con zona asignada no hay correa: se lo has mandado tú y cruza el mapa.
+    const leashed = !zone && Math.hypot(ownerX - this.x, ownerY - this.y) > LEASH;
     const found =
-      working && !full && !leashed ? nearestStation(this.x, this.y, derived.radius) : null;
+      working && !full && !leashed
+        ? nearestStation(this.x, this.y, derived.radius, zone)
+        : null;
 
     // Sitio al que llevar lo que carga. En modo SEGUIR no reparte por la
     // fábrica: te lo da a ti y se acabó.
@@ -189,7 +194,7 @@ export class PetBrain {
     let stopAt = FOLLOW_GAP;
 
     if (this.state === 'IR_A_VETA' || this.state === 'MINAR') {
-      const p = found ?? nearestStation(this.x, this.y, derived.radius);
+      const p = found ?? nearestStation(this.x, this.y, derived.radius, zone);
       if (p) {
         goalX = p.point.x;
         goalY = p.point.y;

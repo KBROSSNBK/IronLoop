@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { settleRobots, robotStatuses } from '../src/game/logic/robots';
+import { settleFactory, settleRobots, robotStatuses } from '../src/game/logic/robots';
+import { beltCount, beltTravelMs, getBelt } from '../src/game/logic/belts';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { runOp } from '../src/services/backend/ops';
 import { ROBOTS, robotCarry, robotCost, robotRate, robotTripMs } from '../src/config/robots';
@@ -8,6 +9,15 @@ import type { FactoryState, PlayerState } from '../src/types';
 
 const T0 = 1_700_000_000_000;
 const HAULER = ROBOTS[0]; // smelter → assembler, lingotes
+/** Cinta por la que entrega: el material viaja por ella, no se teletransporta. */
+const BELT = HAULER.viaConveyor!;
+
+/** Unidades que este robot ha puesto a viajar por su cinta. */
+const enCinta = (f: FactoryState, now: number) => beltCount(f.belts?.[BELT], BELT, now);
+
+/** Adelanta hasta que la cinta ha terminado de entregar. */
+const trasLaCinta = (f: FactoryState, now: number) =>
+  settleFactory(f, now + beltTravelMs(getBelt(BELT)!) + 500);
 
 function factoryWithRobot(level = 1, opts: Partial<FactoryState> = {}): FactoryState {
   const f = createFactoryState('f1', 1, T0);
@@ -24,15 +34,26 @@ function factoryWithRobot(level = 1, opts: Partial<FactoryState> = {}): FactoryS
 }
 
 describe('robots logísticos', () => {
-  it('mueven producto de la salida de origen a la entrada de destino', () => {
+  it('sacan el producto de la máquina y lo suben a SU cinta', () => {
     const f = factoryWithRobot();
     const oneMinute = T0 + 60_000;
     const { factory, transfers } = settleRobots(f, oneMinute);
 
     expect(transfers).toHaveLength(1);
     expect(transfers[0].amount).toBe(robotRate(HAULER, 1));
-    expect(factory.machines.assembler.input.ingot).toBe(robotRate(HAULER, 1));
     expect(factory.machines.smelter.output.ingot).toBe(50 - robotRate(HAULER, 1));
+    // El material está viajando, no ha aparecido por arte de magia al final.
+    expect(enCinta(factory, oneMinute)).toBe(robotRate(HAULER, 1));
+    expect(factory.machines.assembler.input.ingot).toBeUndefined();
+  });
+
+  it('la cinta acaba entregándolo en la máquina de destino', () => {
+    const oneMinute = T0 + 60_000;
+    const { factory } = settleRobots(factoryWithRobot(), oneMinute);
+    const llegada = trasLaCinta(factory, oneMinute);
+    expect(
+      llegada.deliveries.some((d) => d.beltId === BELT && d.qty === robotRate(HAULER, 1)),
+    ).toBe(true);
   });
 
   it('nunca mueven más de lo que hay disponible', () => {
@@ -43,11 +64,11 @@ describe('robots logísticos', () => {
       },
     });
     const { factory } = settleRobots(f, T0 + 3600_000);
-    expect(factory.machines.assembler.input.ingot).toBe(3);
+    expect(enCinta(factory, T0 + 3600_000)).toBe(3);
     expect(factory.machines.smelter.output.ingot).toBeUndefined();
   });
 
-  it('la entrada del destino no tiene tope: acumula todo lo que llega', () => {
+  it('la cinta no tiene tope: se lleva todo lo que el robot saque', () => {
     const base = createFactoryState('f1', 1, T0);
     const cap = MACHINES.assembler.inputCap;
     const f: FactoryState = {
@@ -61,18 +82,23 @@ describe('robots logísticos', () => {
       },
     };
     const { factory } = settleRobots(f, T0 + 60_000);
-    // Lo ya acumulado + lo que el robot mueve en un minuto.
-    expect(factory.machines.assembler.input.ingot).toBe(cap + robotRate(HAULER, 5));
+    // Lo que ya había en la máquina se queda donde estaba…
+    expect(factory.machines.assembler.input.ingot).toBe(cap);
+    // …y lo del robot viaja por la cinta sin límite alguno.
+    expect(enCinta(factory, T0 + 60_000)).toBe(robotRate(HAULER, 5));
   });
 
   it('no crean material de la nada', () => {
     const f = factoryWithRobot();
     const before =
       (f.machines.smelter.output.ingot ?? 0) + (f.machines.assembler.input.ingot ?? 0);
-    const { factory } = settleRobots(f, T0 + 600_000);
+    const now = T0 + 600_000;
+    const { factory } = settleRobots(f, now);
+    // Cuenta también lo que va por la cinta: ahí es donde está el material.
     const after =
       (factory.machines.smelter.output.ingot ?? 0) +
-      (factory.machines.assembler.input.ingot ?? 0);
+      (factory.machines.assembler.input.ingot ?? 0) +
+      enCinta(factory, now);
     expect(after).toBe(before);
   });
 
@@ -95,8 +121,9 @@ describe('robots logísticos', () => {
         smelter: { ...blocked.machines.smelter, output: { ingot: 999 } },
       },
     };
-    const after = settleRobots(withStock, T0 + 3600_000 + 60_000).factory;
-    expect(after.machines.assembler.input.ingot).toBe(robotRate(HAULER, 1));
+    const cuando = T0 + 3600_000 + 60_000;
+    const after = settleRobots(withStock, cuando).factory;
+    expect(enCinta(after, cuando)).toBe(robotRate(HAULER, 1));
   });
 
   it('el tiempo recuperable está limitado (tope anti-inflación)', () => {
@@ -109,11 +136,11 @@ describe('robots logísticos', () => {
         },
       },
     });
-    const unMes = settleRobots(f, T0 + 30 * 24 * 3600_000).factory;
-    const ochoHoras = settleRobots(f, T0 + 8 * 3600_000).factory;
-    expect(unMes.machines.assembler.input.ingot).toBe(
-      ochoHoras.machines.assembler.input.ingot,
-    );
+    const mes = T0 + 30 * 24 * 3600_000;
+    const ocho = T0 + 8 * 3600_000;
+    const unMes = settleRobots(f, mes).factory;
+    const ochoHoras = settleRobots(f, ocho).factory;
+    expect(enCinta(unMes, mes)).toBe(enCinta(ochoHoras, ocho));
   });
 
   it('un robot de nivel 0 no hace nada', () => {
@@ -127,6 +154,7 @@ describe('robots logísticos', () => {
     const { factory, transfers } = settleRobots(f, T0 + 3600_000);
     expect(transfers).toHaveLength(0);
     expect(factory.machines.assembler.input.ingot).toBeUndefined();
+    expect(enCinta(factory, T0 + 3600_000)).toBe(0);
   });
 
   it('un nivel mayor transporta proporcionalmente más', () => {
@@ -231,13 +259,14 @@ describe('estado para el Taller', () => {
 });
 
 describe('integración: los robots se liquidan en cada operación', () => {
-  it('el material movido ya está colocado cuando el jugador interactúa', () => {
+  it('el robot ya ha trabajado cuando el jugador interactúa', () => {
     const f = factoryWithRobot();
     const p = createPlayerState({ uid: 'u1', displayName: 'T', photoURL: null, email: null }, T0);
-    // El jugador recoge de la ensambladora un minuto después: el robot ya
-    // habrá llenado su entrada aunque nadie estuviera conectado.
-    const out = runOp('collect', p, f, { machineId: 'smelter', now: T0 + 60_000 });
+    // El jugador recoge de la fundidora un minuto después: el robot ya habrá
+    // puesto material en la cinta aunque nadie estuviera conectado.
+    const now = T0 + 60_000;
+    const out = runOp('collect', p, f, { machineId: 'smelter', now });
     expect(out.ok).toBe(true);
-    expect(out.factory!.machines.assembler.input.ingot).toBe(robotRate(HAULER, 1));
+    expect(enCinta(out.factory!, now)).toBe(robotRate(HAULER, 1));
   });
 });

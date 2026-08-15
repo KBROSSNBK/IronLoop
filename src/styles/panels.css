@@ -549,3 +549,37 @@
   background: var(--green);
   box-shadow: 0 0 8px var(--green);
 }
+
+/* Selector de zona de la mascota */
+.zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 6px;
+}
+.zone-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 8px 10px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid var(--z, var(--cyan));
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.zone-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); }
+.zone-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.zone-btn[data-on='true'] {
+  background: rgba(34, 211, 238, 0.16);
+  border-color: var(--cyan);
+}
+.zone-btn .ico { font-size: 16px; }
+.zone-btn .nm {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.zone-btn .sub { font-size: 10.5px; color: var(--text-mute); line-height: 1.3; }

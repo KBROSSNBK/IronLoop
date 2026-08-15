@@ -47,6 +47,7 @@ import {
 } from '../../config/pets';
 import {
   addToPet,
+  getPetZone,
   isPetStation,
   petAccepts,
   petFree,
@@ -1273,7 +1274,7 @@ export function opBuyPetStat(
 export function opSetPetLook(
   player: PlayerState,
   factory: FactoryState,
-  args: { color?: string; accent?: string; mode?: string; now: number },
+  args: { color?: string; accent?: string; mode?: string; zone?: string | null; now: number },
 ): OpOutcome<{ ok: true }> {
   const pet = normalizePet(player.pet, args.now);
   const color =
@@ -1284,11 +1285,29 @@ export function opSetPetLook(
   if (args.mode && !modeDef) return fail('Modo desconocido');
   const mode = modeDef?.id ?? pet.mode;
 
+  // Zona de trabajo: null = automática. Sólo se acepta una zona que exista y
+  // que ya esté abierta a este nivel de fábrica.
+  let zone = pet.zone;
+  const events: OpEvent[] = [];
+  if (args.zone !== undefined) {
+    if (args.zone === null) {
+      zone = null;
+      events.push({ kind: 'info', text: 'Mascota: zona automática' });
+    } else {
+      const def = getPetZone(args.zone);
+      if (!def) return fail('Zona desconocida');
+      if (factory.level < def.fromLevel) return fail(`Requiere fábrica nivel ${def.fromLevel}`);
+      zone = def.id;
+      events.push({ kind: 'info', text: `Mascota → ${def.label}` });
+    }
+  }
+  if (modeDef) events.push({ kind: 'info', text: `Mascota: ${modeDef.label}` });
+
   return {
     ok: true,
-    player: { ...player, pet: { ...pet, color, accent, mode } },
+    player: { ...player, pet: { ...pet, color, accent, mode, zone } },
     factory,
-    events: modeDef ? [{ kind: 'info', text: `Mascota: ${modeDef.label}` }] : [],
+    events,
     data: { ok: true },
   };
 }

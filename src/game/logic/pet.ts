@@ -8,9 +8,11 @@ import {
   CONVEYORS,
   STATIONS,
   TILE,
+  ZONES,
   conveyorLoadPoint,
   type ConveyorDef,
   type StationDef,
+  type ZoneDef,
 } from '../../config/world';
 import { MACHINE_LIST, getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
@@ -31,21 +33,78 @@ export function stationWorkPoint(s: StationDef): { x: number; y: number } {
   return { x: (s.tx + s.tw / 2) * TILE, y: (s.ty + s.th + 0.35) * TILE };
 }
 
+/** ¿Cae esta estación dentro de esta zona del mapa? */
+function stationInZone(s: StationDef, z: ZoneDef): boolean {
+  const cx = s.tx + s.tw / 2;
+  const cy = s.ty + s.th / 2;
+  return cx >= z.tx && cx <= z.tx + z.tw && cy >= z.ty && cy <= z.ty + z.th;
+}
+
+export interface PetZone {
+  id: string;
+  label: string;
+  icon: string;
+  accent: string;
+  /** Nivel de fábrica en el que la zona se abre. */
+  fromLevel: number;
+  /** Estaciones que la mascota puede trabajar ahí. */
+  stations: StationDef[];
+  /** Materiales que rinde, sin repetir. */
+  items: string[];
+}
+
 /**
- * Zona de extracción más cercana dentro del radio del sensor.
- * Devuelve null si no hay ninguna: entonces la mascota deja de ser autónoma y
- * vuelve contigo (o va a descargar, si lleva algo).
+ * Zonas del mapa en las que hay algo que extraer. Se derivan del layout: no
+ * hay lista escrita a mano, así que una zona nueva con vetas aparece sola en
+ * el selector del Taller.
+ */
+export const PET_ZONES: PetZone[] = ZONES.map((z) => {
+  const stations = PET_STATIONS.filter((s) => stationInZone(s, z));
+  return {
+    id: z.id,
+    label: z.label,
+    icon: z.icon,
+    accent: z.accent,
+    fromLevel: z.liveAtLevel ?? 1,
+    stations,
+    items: [...new Set(stations.map((s) => stationYield(s).item))],
+  };
+}).filter((z) => z.stations.length > 0);
+
+export function getPetZone(id: string | null | undefined): PetZone | null {
+  if (!id) return null;
+  return PET_ZONES.find((z) => z.id === id) ?? null;
+}
+
+export interface StationChoice {
+  station: StationDef;
+  point: { x: number; y: number };
+  dist: number;
+}
+
+/**
+ * A qué veta va la mascota.
+ *
+ * · Sin zona elegida: la más cercana DENTRO del radio de su sensor. Es el
+ *   comportamiento automático: trabaja con lo que pilla al lado.
+ * · Con zona elegida: la más cercana DE ESA ZONA, sin importar el radio. Se
+ *   lo has mandado tú, así que cruza el mapa si hace falta.
+ *
+ * Devuelve null si no hay nada que trabajar.
  */
 export function nearestStation(
   x: number,
   y: number,
   radius: number,
-): { station: StationDef; point: { x: number; y: number }; dist: number } | null {
-  let best: { station: StationDef; point: { x: number; y: number }; dist: number } | null = null;
-  for (const s of PET_STATIONS) {
+  zoneId: string | null = null,
+): StationChoice | null {
+  const zone = getPetZone(zoneId);
+  const pool = zone ? zone.stations : PET_STATIONS;
+  let best: StationChoice | null = null;
+  for (const s of pool) {
     const point = stationWorkPoint(s);
     const dist = Math.hypot(point.x - x, point.y - y);
-    if (dist > radius) continue;
+    if (!zone && dist > radius) continue;
     if (!best || dist < best.dist) best = { station: s, point, dist };
   }
   return best;
