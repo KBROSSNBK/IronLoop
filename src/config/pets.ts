@@ -1,0 +1,295 @@
+/**
+ * MASCOTAS CUADRÚPEDAS — ayudantes de extracción.
+ *
+ * Cada jugador tiene la suya: es individual, como el dinero y el inventario.
+ * No transporta material de la fábrica (de eso van los robots logísticos):
+ * mina por su cuenta en las vetas cercanas, guarda lo que saca en su propia
+ * mochila y te lo entrega cuando se llena.
+ *
+ * Todo es data-driven: añadir un chasis nuevo es añadir una entrada aquí más
+ * un caso en `render/pet.ts`.
+ */
+
+export type PetChassis = 'spot' | 'go2' | 'hound';
+export type PetStat = 'capacity' | 'mining' | 'speed' | 'radius';
+
+export interface PetChassisDef {
+  id: PetChassis;
+  name: string;
+  desc: string;
+  icon: string;
+  /** Colores con los que llega de fábrica. */
+  color: string;
+  accent: string;
+  cost: number;
+  unlockLevel: number;
+  /** Multiplicadores propios del chasis. */
+  bonus: { mining: number; capacity: number; speed: number };
+  /** Proporciones de la silueta (las usa el renderer). */
+  build: {
+    /** Largo del cuerpo en px. */
+    body: number;
+    /** Alto del cuerpo en px. */
+    height: number;
+    /** Largo de cada segmento de pata. */
+    leg: number;
+    /** Redondeo del chasis: 0 = angular, 1 = cápsula. */
+    round: number;
+  };
+}
+
+export const PET_CHASSIS: PetChassisDef[] = [
+  {
+    id: 'spot',
+    name: 'K9 «PERRO»',
+    desc: 'El de serie. Patas de obra, chasis amarillo y un brazo sensor.',
+    icon: '🐕',
+    color: '#f2c015',
+    accent: '#1e2430',
+    cost: 0,
+    unlockLevel: 1,
+    bonus: { mining: 1, capacity: 1, speed: 1 },
+    build: { body: 26, height: 12, leg: 9, round: 0.35 },
+  },
+  {
+    id: 'go2',
+    name: 'GO-2 «GALGO»',
+    desc: 'Chasis ligero de aleación. Más rápido y más fino perforando.',
+    icon: '🦿',
+    color: '#c7ced8',
+    accent: '#5b6675',
+    cost: 24_000,
+    unlockLevel: 8,
+    bonus: { mining: 1.12, capacity: 1, speed: 1.16 },
+    build: { body: 28, height: 11, leg: 10.5, round: 0.85 },
+  },
+  {
+    id: 'hound',
+    name: 'HOUND-X',
+    desc: 'Prototipo de la Zona Avanzada. Carga más, corre más, mina más.',
+    icon: '🐺',
+    color: '#2b3346',
+    accent: '#22d3ee',
+    cost: 220_000,
+    unlockLevel: 18,
+    bonus: { mining: 1.32, capacity: 1.25, speed: 1.26 },
+    build: { body: 31, height: 13.5, leg: 11.5, round: 0.55 },
+  },
+];
+
+export const PET_CHASSIS_MAP: Record<string, PetChassisDef> = Object.fromEntries(
+  PET_CHASSIS.map((c) => [c.id, c]),
+);
+
+export function getChassis(id: string | undefined): PetChassisDef {
+  return PET_CHASSIS_MAP[id ?? 'spot'] ?? PET_CHASSIS[0];
+}
+
+/** Colores de carrocería. Personalizar es gratis: es sólo estética. */
+export const PET_COLORS: { id: string; name: string }[] = [
+  { id: '#f2c015', name: 'Obra' },
+  { id: '#c7ced8', name: 'Aluminio' },
+  { id: '#2b3346', name: 'Carbono' },
+  { id: '#ef4444', name: 'Rojo' },
+  { id: '#22c55e', name: 'Verde' },
+  { id: '#0ea5e9', name: 'Azul' },
+  { id: '#a855f7', name: 'Violeta' },
+  { id: '#f472b6', name: 'Rosa' },
+  { id: '#e2e8f0', name: 'Hueso' },
+];
+
+/** Color de los detalles: LED, juntas y placa del sensor. */
+export const PET_ACCENTS: { id: string; name: string }[] = [
+  { id: '#22d3ee', name: 'Cian' },
+  { id: '#fbbf24', name: 'Ámbar' },
+  { id: '#4ade80', name: 'Lima' },
+  { id: '#f472b6', name: 'Magenta' },
+  { id: '#1e2430', name: 'Negro' },
+  { id: '#ffffff', name: 'Blanco' },
+];
+
+export interface PetStatDef {
+  id: PetStat;
+  name: string;
+  icon: string;
+  accent: string;
+  desc: string;
+  maxLevel: number;
+  baseCost: number;
+  costGrowth: number;
+  /** Texto del efecto en el nivel dado. */
+  effect: (level: number) => string;
+}
+
+/** Valores base, sin mejoras ni chasis. */
+export const PET_BASE = {
+  capacity: 24,
+  capacityPerLevel: 14,
+  /** Unidades por segundo. */
+  mining: 0.55,
+  miningPerLevel: 0.2,
+  /** px/s. */
+  speed: 152,
+  speedPerLevel: 12,
+  /** Radio en el que detecta vetas, en px. */
+  radius: 210,
+  radiusPerLevel: 30,
+} as const;
+
+export const PET_STATS: PetStatDef[] = [
+  {
+    id: 'capacity',
+    name: 'Mochila',
+    icon: '🎒',
+    accent: '#38bdf8',
+    desc: 'Cuánto material aguanta antes de tener que descargar.',
+    maxLevel: 12,
+    baseCost: 900,
+    costGrowth: 1.55,
+    effect: (l) => `${PET_BASE.capacity + PET_BASE.capacityPerLevel * l} unidades de carga`,
+  },
+  {
+    id: 'mining',
+    name: 'Perforadora',
+    icon: '⛏️',
+    accent: '#fbbf24',
+    desc: 'Velocidad a la que saca material de una veta.',
+    maxLevel: 12,
+    baseCost: 1_200,
+    costGrowth: 1.6,
+    effect: (l) => `${((PET_BASE.mining + PET_BASE.miningPerLevel * l) * 60).toFixed(0)} unidades/min`,
+  },
+  {
+    id: 'speed',
+    name: 'Servos',
+    icon: '🦿',
+    accent: '#4ade80',
+    desc: 'Lo rápido que trota entre la veta y tú.',
+    maxLevel: 10,
+    baseCost: 750,
+    costGrowth: 1.5,
+    effect: (l) => `${PET_BASE.speed + PET_BASE.speedPerLevel * l} px/s`,
+  },
+  {
+    id: 'radius',
+    name: 'Sensor',
+    icon: '📡',
+    accent: '#c084fc',
+    desc: 'Distancia a la que detecta una zona de extracción y se lanza sola.',
+    maxLevel: 8,
+    baseCost: 1_000,
+    costGrowth: 1.58,
+    effect: (l) => `${PET_BASE.radius + PET_BASE.radiusPerLevel * l} px de detección`,
+  },
+];
+
+export const PET_STAT_MAP: Record<string, PetStatDef> = Object.fromEntries(
+  PET_STATS.map((s) => [s.id, s]),
+);
+
+export function petStatCost(def: PetStatDef, level: number): number {
+  return Math.round(def.baseCost * Math.pow(def.costGrowth, level));
+}
+
+/** Estado persistente de la mascota (vive dentro de PlayerState). */
+export interface PetState {
+  /** Chasis equipado. */
+  chassis: PetChassis;
+  /** Chasis comprados. El de serie siempre está. */
+  owned: PetChassis[];
+  color: string;
+  accent: string;
+  /** statId → nivel comprado. */
+  stats: Record<string, number>;
+  /** Mochila propia de la mascota: itemId → unidades. */
+  inventory: Record<string, number>;
+  /** Última liquidación de su trabajo (acota cuánto puede reclamar). */
+  lastAt: number;
+  /** Unidades extraídas en total. */
+  mined: number;
+  /** ¿Está desplegada? Se puede mandar a descansar. */
+  active: boolean;
+}
+
+export const DEFAULT_PET: PetState = {
+  chassis: 'spot',
+  owned: ['spot'],
+  color: '#f2c015',
+  accent: '#22d3ee',
+  stats: {},
+  inventory: {},
+  lastAt: 0,
+  mined: 0,
+  active: true,
+};
+
+/**
+ * Repara una mascota leída de un documento antiguo o incompleto: garantiza
+ * que existen todos los campos y que el chasis de serie nunca se pierde.
+ */
+export function normalizePet(raw: Partial<PetState> | undefined, now: number): PetState {
+  const owned = [...new Set([...DEFAULT_PET.owned, ...(raw?.owned ?? [])])].filter(
+    (id) => !!PET_CHASSIS_MAP[id],
+  ) as PetChassis[];
+  const chassis = owned.includes(raw?.chassis as PetChassis)
+    ? (raw!.chassis as PetChassis)
+    : DEFAULT_PET.chassis;
+  return {
+    chassis,
+    owned,
+    color: raw?.color ?? DEFAULT_PET.color,
+    accent: raw?.accent ?? DEFAULT_PET.accent,
+    stats: { ...(raw?.stats ?? {}) },
+    inventory: { ...(raw?.inventory ?? {}) },
+    lastAt: raw?.lastAt || now,
+    mined: raw?.mined ?? 0,
+    active: raw?.active ?? true,
+  };
+}
+
+export interface DerivedPet {
+  def: PetChassisDef;
+  /** Unidades que caben en su mochila. */
+  capacity: number;
+  /** Unidades por segundo que extrae. */
+  minePerSec: number;
+  /** Velocidad de desplazamiento en px/s. */
+  speed: number;
+  /** Radio de detección de vetas en px. */
+  radius: number;
+}
+
+export function derivePet(pet: PetState | undefined): DerivedPet {
+  const p = { ...DEFAULT_PET, ...(pet ?? {}) };
+  const def = getChassis(p.chassis);
+  const lvl = (id: PetStat) => Math.max(0, Math.floor(p.stats?.[id] ?? 0));
+  return {
+    def,
+    capacity: Math.round(
+      (PET_BASE.capacity + PET_BASE.capacityPerLevel * lvl('capacity')) * def.bonus.capacity,
+    ),
+    minePerSec:
+      (PET_BASE.mining + PET_BASE.miningPerLevel * lvl('mining')) * def.bonus.mining,
+    speed: Math.round((PET_BASE.speed + PET_BASE.speedPerLevel * lvl('speed')) * def.bonus.speed),
+    radius: PET_BASE.radius + PET_BASE.radiusPerLevel * lvl('radius'),
+  };
+}
+
+/** Unidades que la mascota lleva encima ahora mismo. */
+export function petUsed(pet: PetState | undefined): number {
+  return Object.values(pet?.inventory ?? {}).reduce((a, b) => a + Math.max(0, b), 0);
+}
+
+/** Hueco libre en su mochila. */
+export function petFree(pet: PetState | undefined): number {
+  return Math.max(0, derivePet(pet).capacity - petUsed(pet));
+}
+
+/**
+ * Margen anti-trampas: cuánto puede haber minado como mucho en un intervalo.
+ * Se aplica en el servidor, que no ve la simulación del cliente.
+ */
+export const PET_RATE_TOLERANCE = 1.8;
+
+/** Cada cuánto liquida el cliente lo que ha minado la mascota. */
+export const PET_FLUSH_MS = 5_000;

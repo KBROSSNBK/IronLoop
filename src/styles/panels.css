@@ -352,30 +352,30 @@
   color: var(--cyan-soft);
 }
 
-/* ── Armas ── */
+/* ── Mascota ── */
 
-.weapon-hero {
+.pet-hero {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px;
-  background: linear-gradient(135deg, rgba(248, 113, 113, 0.14), rgba(248, 113, 113, 0.02));
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  background: linear-gradient(135deg, rgba(242, 192, 21, 0.14), rgba(242, 192, 21, 0.02));
+  border: 1px solid rgba(242, 192, 21, 0.3);
 }
-.weapon-hero .ico { font-size: 30px; }
-.weapon-hero .nm {
+.pet-hero .ico { font-size: 30px; }
+.pet-hero .nm {
   font-family: var(--font-display);
   font-size: 15px;
   font-weight: 800;
 }
-.weapon-hero .stat { font-size: 12px; color: var(--text-dim); }
+.pet-hero .stat { font-size: 12px; color: var(--text-dim); }
 
-.weapon-stats {
+.pet-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
 }
-.weapon-metric {
+.pet-metric {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -384,17 +384,39 @@
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-left: 3px solid var(--m, var(--cyan));
 }
-.weapon-metric .l {
+.pet-metric .l {
   font-size: 9.5px;
   letter-spacing: 0.1em;
   color: var(--text-mute);
   text-transform: uppercase;
   font-weight: 700;
 }
-.weapon-metric .v {
+.pet-metric .v {
   font-size: 15px;
   font-weight: 800;
   color: var(--m, var(--cyan));
+}
+
+/* Paleta de colores de la mascota */
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s, border-color 0.12s;
+}
+.swatch:hover:not(:disabled) { transform: translateY(-2px); }
+.swatch:disabled { opacity: 0.5; cursor: not-allowed; }
+.swatch[data-on='true'] {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.35);
 }
 
 /* Retirar material acumulado dentro de una máquina */

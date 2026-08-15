@@ -34,21 +34,30 @@ import {
 import { ONLINE_WINDOW_MS, settleFactory } from '../../game/logic/robots';
 import { getBelt, pushToBelt } from '../../game/logic/belts';
 import {
-  DEFAULT_WEAPON,
-  WEAPON_MAP,
-  WEAPON_STATS,
-  weaponStatCost,
-  type WeaponStat,
-} from '../../config/weapons';
-import { COMBAT } from '../../config/enemies';
+  DEFAULT_PET,
+  PET_ACCENTS,
+  PET_CHASSIS_MAP,
+  PET_COLORS,
+  PET_RATE_TOLERANCE,
+  PET_STAT_MAP,
+  normalizePet,
+  petStatCost,
+} from '../../config/pets';
+import {
+  addToPet,
+  isPetStation,
+  petFree,
+  petMineCap,
+  petUsed,
+  stationYield,
+  unloadPet,
+} from '../../game/logic/pet';
 
 /**
- * Tope de XP de combate por segundo transcurrido. Calibrado por encima de lo
- * que puede rendir un jugador legítimo con el arma más potente, para no
- * penalizar a nadie, pero muy por debajo de lo que pediría un cliente
- * manipulado que reclamase XP infinita.
+ * La mascota rinde menos XP por unidad que picar tú mismo: automatizar da
+ * material y tiempo libre, no progresión gratis.
  */
-const COMBAT_XP_PER_SECOND_CAP = 45;
+const PET_XP_RATIO = 0.4;
 import { STATIONS, TILE } from '../../config/world';
 import type {
   FactoryMember,
@@ -1162,27 +1171,26 @@ export function opSetRobotMode(
   };
 }
 
-/* ───────────────────── 12b. ARMAS Y COMBATE ───────────────────── */
+/* ───────────────────── 12b. MASCOTA CUADRÚPEDA ───────────────────── */
 
-/** Compra o equipa un arma. Equipar algo ya comprado es gratis. */
-export function opBuyWeapon(
+/** Compra o equipa un chasis de mascota. Equipar algo ya comprado es gratis. */
+export function opBuyPetChassis(
   player: PlayerState,
   factory: FactoryState,
-  args: { weaponId: string; now: number },
+  args: { chassis: string; now: number },
 ): OpOutcome<{ equipped: string; cost: number }> {
-  const def = WEAPON_MAP[args.weaponId];
-  if (!def) return fail('Arma desconocida');
+  const def = PET_CHASSIS_MAP[args.chassis];
+  if (!def) return fail('Chasis desconocido');
 
-  const weapon = { ...DEFAULT_WEAPON, ...(player.weapon ?? {}) };
-  const owned = [...new Set([...DEFAULT_WEAPON.owned, ...(weapon.owned ?? [])])];
+  const pet = normalizePet(player.pet, args.now);
+  const owned = [...new Set([...DEFAULT_PET.owned, ...pet.owned])];
 
   if (owned.includes(def.id)) {
-    // Ya es tuya: sólo se equipa.
     return {
       ok: true,
-      player: { ...player, weapon: { ...weapon, owned, type: def.id } },
+      player: { ...player, pet: { ...pet, owned, chassis: def.id } },
       factory,
-      events: [{ kind: 'info', text: `${def.name} equipada` }],
+      events: [{ kind: 'info', text: `${def.name} equipado` }],
       data: { equipped: def.id, cost: 0 },
     };
   }
@@ -1194,7 +1202,7 @@ export function opBuyWeapon(
   let p: PlayerState = {
     ...player,
     money: player.money - def.cost,
-    weapon: { ...weapon, owned: [...owned, def.id], type: def.id },
+    pet: { ...pet, owned: [...owned, def.id], chassis: def.id },
   };
   p = stat(p, { upgradesBought: 1 });
   p = bumpMissions(p, [{ metric: 'upgrade', amount: 1 }], events);
@@ -1204,7 +1212,7 @@ export function opBuyWeapon(
   p = stat(p, { contributed: contrib });
 
   events.push({ kind: 'money', amount: -def.cost });
-  events.push({ kind: 'info', text: `${def.name} desbloqueada` });
+  events.push({ kind: 'info', text: `${def.name} desbloqueado` });
 
   return {
     ok: true,
@@ -1216,27 +1224,27 @@ export function opBuyWeapon(
   };
 }
 
-/** Sube una estadística del arma: daño, cadencia o proyectiles. */
-export function opBuyWeaponStat(
+/** Sube una mejora de la mascota: mochila, perforadora, servos o sensor. */
+export function opBuyPetStat(
   player: PlayerState,
   factory: FactoryState,
-  args: { stat: WeaponStat; now: number },
+  args: { stat: string; now: number },
 ): OpOutcome<{ level: number; cost: number }> {
-  const def = WEAPON_STATS[args.stat];
+  const def = PET_STAT_MAP[args.stat];
   if (!def) return fail('Mejora desconocida');
 
-  const weapon = { ...DEFAULT_WEAPON, ...(player.weapon ?? {}) };
-  const current = weapon[def.id] ?? 0;
+  const pet = normalizePet(player.pet, args.now);
+  const current = Math.max(0, Math.floor(pet.stats[def.id] ?? 0));
   if (current >= def.maxLevel) return fail('Nivel máximo alcanzado');
 
-  const cost = weaponStatCost(def, current);
+  const cost = petStatCost(def, current);
   if (player.money < cost) return fail('Dinero insuficiente');
 
   const events: OpEvent[] = [];
   let p: PlayerState = {
     ...player,
     money: player.money - cost,
-    weapon: { ...weapon, [def.id]: current + 1 },
+    pet: { ...pet, stats: { ...pet.stats, [def.id]: current + 1 } },
   };
   p = stat(p, { upgradesBought: 1 });
   p = bumpMissions(p, [{ metric: 'upgrade', amount: 1 }], events);
@@ -1258,52 +1266,125 @@ export function opBuyWeaponStat(
   };
 }
 
-/**
- * Recompensa por los enemigos destruidos.
- *
- * El combate se simula en cliente (cada jugador tiene sus propios enemigos),
- * así que esta es la frontera de confianza: se acepta XP por tandas, pero
- * acotada por el tiempo transcurrido y por un tope duro. Un cliente
- * manipulado puede acelerar su progresión, no dispararla.
- */
-export function opCombatReward(
+/** Color, detalles y encendido/apagado. Es estética: no cuesta nada. */
+export function opSetPetLook(
   player: PlayerState,
   factory: FactoryState,
-  args: { xp: number; kills: number; now: number },
-): OpOutcome<{ xp: number }> {
-  const kills = Math.max(0, Math.min(200, Math.floor(args.kills || 0)));
-  const asked = Math.max(0, Math.floor(args.xp || 0));
-  if (asked <= 0 || kills <= 0) {
-    return { ok: true, player, factory, events: [], data: { xp: 0 } };
-  }
-
-  // Techo por tiempo: no se puede reclamar más XP de la que cabría matando
-  // sin parar desde la última recompensa.
-  const since = Math.max(1000, args.now - (player.lastCombatAt ?? player.createdAt));
-  const byTime = Math.floor((since / 1000) * COMBAT_XP_PER_SECOND_CAP);
-  const granted = Math.min(asked, COMBAT.maxXpPerFlush, byTime);
-  if (granted <= 0) {
-    return {
-      ok: true,
-      player: { ...player, lastCombatAt: args.now },
-      factory,
-      events: [],
-      data: { xp: 0 },
-    };
-  }
-
-  const events: OpEvent[] = [];
-  let p: PlayerState = { ...player, lastCombatAt: args.now };
-  p = stat(p, { kills });
-  p = grantXp(p, granted, events, args.now);
+  args: { color?: string; accent?: string; active?: boolean; now: number },
+): OpOutcome<{ ok: true }> {
+  const pet = normalizePet(player.pet, args.now);
+  const color =
+    args.color && PET_COLORS.some((c) => c.id === args.color) ? args.color : pet.color;
+  const accent =
+    args.accent && PET_ACCENTS.some((c) => c.id === args.accent) ? args.accent : pet.accent;
+  const active = typeof args.active === 'boolean' ? args.active : pet.active;
 
   return {
     ok: true,
-    player: p,
+    player: { ...player, pet: { ...pet, color, accent, active } },
     factory,
-    memberDelta: { money: p.money },
+    events:
+      typeof args.active === 'boolean'
+        ? [{ kind: 'info', text: active ? 'Mascota desplegada' : 'Mascota en reposo' }]
+        : [],
+    data: { ok: true },
+  };
+}
+
+/**
+ * Liquida lo que la mascota ha extraído.
+ *
+ * La extracción se simula en el cliente (cada jugador tiene la suya y no
+ * merece la pena sincronizar su posición). Ésta es la frontera de confianza:
+ * se acepta material por tandas, pero acotado por el ritmo que de verdad
+ * tiene la mascota y por el tiempo transcurrido desde la última liquidación.
+ * Un cliente manipulado puede adelantar unos segundos, no fabricar material.
+ */
+export function opPetMine(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { stationId: string; qty: number; now: number },
+): OpOutcome<{ item: string; qty: number }> {
+  const station = STATIONS.find((s) => s.id === args.stationId);
+  if (!station || !isPetStation(station.id)) return fail('Estación inválida');
+
+  const pet = normalizePet(player.pet, args.now);
+  if (!pet.active) return fail('Mascota en reposo');
+
+  // El item lo decide el servidor a partir de la estación: el cliente no elige
+  // qué material saca.
+  const { item, amount } = stationYield(station);
+  const asked = Math.max(0, Math.floor(args.qty || 0));
+  if (asked <= 0) return fail('Nada que liquidar');
+
+  const elapsed = args.now - (pet.lastAt || player.createdAt);
+  const byTime = petMineCap(pet, elapsed, PET_RATE_TOLERANCE) * amount;
+  const qty = Math.min(asked, byTime, petFree(pet));
+  if (qty <= 0) {
+    return {
+      ok: true,
+      player: { ...player, pet: { ...pet, lastAt: args.now } },
+      factory,
+      events: [],
+      data: { item, qty: 0 },
+    };
+  }
+
+  const { inventory, added } = addToPet(pet, item, qty);
+  const events: OpEvent[] = [];
+  let p: PlayerState = {
+    ...player,
+    pet: { ...pet, inventory, lastAt: args.now, mined: (pet.mined ?? 0) + added },
+  };
+  p = stat(p, { gathered: added, petMined: added });
+  // La mascota trabaja por ti, así que rinde menos XP que picar tú mismo.
+  p = grantXp(p, Math.round(BALANCE.actions.gather.xp * PET_XP_RATIO * added), events, args.now);
+  p = bumpMissions(p, [{ metric: 'gather', item, amount: added }], events);
+
+  let f: FactoryState = {
+    ...factory,
+    stats: { ...factory.stats, gathered: factory.stats.gathered + added },
+    updatedAt: args.now,
+  };
+  f = bumpObjectives(f, 'gathered', added, events);
+
+  return { ok: true, player: p, factory: f, events, data: { item, qty: added } };
+}
+
+/**
+ * La mascota te entrega su mochila. Lo que no te quepa se lo queda: nunca se
+ * destruye material por descargar con el inventario lleno.
+ */
+export function opPetUnload(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { now: number },
+): OpOutcome<{ moved: Record<string, number>; units: number }> {
+  const pet = normalizePet(player.pet, args.now);
+  if (petUsed(pet) <= 0) return fail('La mascota no lleva nada');
+
+  const free = inventoryFree(player);
+  if (free <= 0) return fail('Inventario lleno');
+
+  const out = unloadPet(pet.inventory, player.inventory, free);
+  if (out.units <= 0) return fail('Inventario lleno');
+
+  const events: OpEvent[] = Object.entries(out.moved).map(([item, amount]) => ({
+    kind: 'item' as const,
+    item,
+    amount,
+  }));
+
+  return {
+    ok: true,
+    player: {
+      ...player,
+      inventory: out.player,
+      pet: { ...pet, inventory: out.pet },
+    },
+    factory,
     events,
-    data: { xp: granted },
+    data: { moved: out.moved, units: out.units },
   };
 }
 
@@ -1471,9 +1552,11 @@ export type OpName =
   | 'setAppearance'
   | 'buyRobot'
   | 'setRobotMode'
-  | 'buyWeapon'
-  | 'buyWeaponStat'
-  | 'combatReward'
+  | 'buyPetChassis'
+  | 'buyPetStat'
+  | 'setPetLook'
+  | 'petMine'
+  | 'petUnload'
   | 'withdraw'
   | 'dropItem'
   | 'pickupGround'
@@ -1497,9 +1580,11 @@ export const OPS = {
   setAppearance: opSetAppearance,
   buyRobot: opBuyRobot,
   setRobotMode: opSetRobotMode,
-  buyWeapon: opBuyWeapon,
-  buyWeaponStat: opBuyWeaponStat,
-  combatReward: opCombatReward,
+  buyPetChassis: opBuyPetChassis,
+  buyPetStat: opBuyPetStat,
+  setPetLook: opSetPetLook,
+  petMine: opPetMine,
+  petUnload: opPetUnload,
   withdraw: opWithdraw,
   dropItem: opDropItem,
   pickupGround: opPickupGround,

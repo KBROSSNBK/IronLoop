@@ -192,14 +192,25 @@ function LiveInspector() {
         ))}
       </div>
 
-      <div className="section-title">COMBATE EN VIVO</div>
+      <div className="section-title">MASCOTA EN VIVO</div>
       <div className="card" style={{ fontSize: 11.5, display: 'grid', gap: 2 }}>
-        <span>
-          Enemigos activos: <b className="mono-num">{debug.enemies}</b>
-        </span>
-        <span>
-          Proyectiles en vuelo: <b className="mono-num">{debug.bullets}</b>
-        </span>
+        {debug.pet ? (
+          <>
+            <span style={{ fontWeight: 700 }}>Estado: {debug.pet.state}</span>
+            <span style={{ color: 'var(--text-dim)' }}>Objetivo: {debug.pet.target}</span>
+            <span style={{ color: 'var(--text-dim)' }}>
+              Mochila: <b className="mono-num">{debug.pet.carried}</b>/
+              <b className="mono-num">{debug.pet.capacity}</b> · Sin liquidar:{' '}
+              <b className="mono-num">{debug.pet.pending}</b>
+            </span>
+            <span style={{ color: debug.pet.stuckMs > 600 ? 'var(--red)' : 'var(--text-dim)' }}>
+              Velocidad: <b className="mono-num">{debug.pet.distance}</b> px/s · Bloqueada:{' '}
+              <b className="mono-num">{debug.pet.stuckMs}</b> ms
+            </span>
+          </>
+        ) : (
+          <span style={{ color: 'var(--text-mute)' }}>Sin mascota desplegada</span>
+        )}
       </div>
     </>
   );

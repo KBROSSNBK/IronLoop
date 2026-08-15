@@ -202,7 +202,7 @@ export const STATIONS: StationDef[] = [
     desc: 'Titanio. Escaso, pesado y necesario para los Núcleos.',
   },
 
-  // ── Zona Peligrosa: mejor material, más enemigos ──
+  // ── Zona Peligrosa: mejor material, terreno inestable ──
   {
     id: 'vein_danger',
     type: 'oreVein',
@@ -214,7 +214,7 @@ export const STATIONS: StationDef[] = [
     th: 2,
     accent: '#f87171',
     yields: [{ item: 'titanium', amount: 2 }],
-    desc: 'Rinde el doble, pero aquí los drones no perdonan.',
+    desc: 'Rinde el doble. El filón es inestable: gasta más estamina.',
   },
   {
     id: 'salvage_danger',
@@ -227,7 +227,7 @@ export const STATIONS: StationDef[] = [
     th: 2,
     accent: '#f87171',
     yields: [{ item: 'crystal', amount: 1 }],
-    desc: 'Cristal resonante entre los escombros. Zona hostil.',
+    desc: 'Cristal resonante entre los escombros radiactivos.',
   },
 ];
 

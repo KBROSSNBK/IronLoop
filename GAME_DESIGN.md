@@ -159,6 +159,22 @@ La regla es: **la automatización nunca elimina al jugador, lo asciende.**
 | Llevar mineral a mano | Cintas transportadoras | Decidir qué máquina alimentar |
 | Vigilar una máquina | Producción offline | Equilibrar buffers de entrada/salida |
 | Transportar producto | Robots de transporte | Mejorar máquinas, coordinar el nivel de fábrica |
+| Picar en la veta | Mascota cuadrúpeda | Elegir dónde plantarse y qué mejorar |
+
+### La mascota
+
+Cada jugador tiene una. Es **individual** (chasis, color, mejoras y mochila
+propia) y su regla de decisión es deliberadamente simple, para que se entienda
+mirándola dos segundos:
+
+1. ¿Hay una zona de extracción dentro del radio de su sensor y le cabe algo?
+   → va y mina. La minería gana siempre.
+2. ¿Está llena, o no hay nada que minar cerca? → vuelve y te entrega el material.
+3. ¿Ni una cosa ni la otra? → te sigue.
+
+Su extracción se simula en cliente y se liquida por tandas contra el servidor,
+acotada por el ritmo real de la mascota: automatiza el paseo, no la progresión
+(rinde un 40% de la XP de picar tú mismo).
 
 Los buffers son la herramienta de diseño clave: una máquina con la salida llena
 **se atasca** (`blocked: 'output-full'`). Eso obliga a volver, aunque todo lo

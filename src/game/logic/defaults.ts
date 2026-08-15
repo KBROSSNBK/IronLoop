@@ -1,7 +1,7 @@
 import { BALANCE } from '../../config/balance';
 import { MACHINE_LIST } from '../../config/machines';
 import { DEFAULT_APPEARANCE, randomAppearance } from '../../config/cosmetics';
-import { DEFAULT_WEAPON } from '../../config/weapons';
+import { DEFAULT_PET, normalizePet } from '../../config/pets';
 import { ACTIVE_MISSION_SLOTS, rollMissions } from '../../config/missions';
 import type {
   AuthUser,
@@ -23,7 +23,7 @@ export function emptyStats(): LifetimeStats {
     contributed: 0,
     upgradesBought: 0,
     playtime: 0,
-    kills: 0,
+    petMined: 0,
   };
 }
 
@@ -41,7 +41,7 @@ export function createPlayerState(user: AuthUser, now = Date.now()): PlayerState
     stamina: BALANCE.player.startingStamina,
     staminaAt: now,
     upgrades: {},
-    weapon: { ...DEFAULT_WEAPON, owned: [...DEFAULT_WEAPON.owned] },
+    pet: { ...DEFAULT_PET, owned: [...DEFAULT_PET.owned], stats: {}, inventory: {}, lastAt: now },
     inventory: {},
     missions: rollMissions(1, [], ACTIVE_MISSION_SLOTS).map((id) => ({
       id,
@@ -54,7 +54,6 @@ export function createPlayerState(user: AuthUser, now = Date.now()): PlayerState
     createdAt: now,
     lastSeenAt: now,
     lastOfflineClaimAt: now,
-    lastCombatAt: now,
     onboarded: false,
     resetAckAt: 0,
   };
@@ -123,12 +122,8 @@ export function normalizePlayer(raw: Partial<PlayerState>, user?: AuthUser): Pla
     ...raw,
     appearance: { ...base.appearance, ...(raw.appearance ?? {}) },
     upgrades: { ...(raw.upgrades ?? {}) },
-    weapon: {
-      ...DEFAULT_WEAPON,
-      ...(raw.weapon ?? {}),
-      // El arma inicial siempre está disponible, aunque el documento sea viejo.
-      owned: [...new Set([...DEFAULT_WEAPON.owned, ...(raw.weapon?.owned ?? [])])],
-    },
+    // El chasis de serie siempre está disponible, aunque el documento sea viejo.
+    pet: normalizePet(raw.pet, raw.createdAt ?? Date.now()),
     inventory: { ...(raw.inventory ?? {}) },
     stats: { ...base.stats, ...(raw.stats ?? {}) },
     missions:

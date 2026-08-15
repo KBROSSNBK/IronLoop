@@ -159,7 +159,9 @@ ironloop/
 │  │  ├─ factoryLevels.ts  progresión compartida y objetivos cooperativos
 │  │  ├─ upgrades.ts       árbol de mejoras personales
 │  │  ├─ missions.ts       pool de misiones
-│  │  ├─ cosmetics.ts      slots de personalización
+│  │  ├─ cosmetics.ts      slots de personalización del personaje
+│  │  ├─ pets.ts           mascotas cuadrúpedas: chasis, colores y mejoras
+│  │  ├─ robots.ts         flota logística: rutas, modos y costes
 │  │  ├─ balance.ts        constantes de economía en un único sitio
 │  │  └─ env.ts            selección de backend y flags
 │  │
@@ -351,6 +353,9 @@ interactuable, mejorable y con su panel, sin tocar el renderer.
 **Un nivel de fábrica más** → una entrada en `FACTORY_LEVELS`; más allá de la
 tabla se generan procedimentalmente.
 **Una misión** → una entrada en `MISSION_POOL`.
+**Un chasis de mascota** → una entrada en `PET_CHASSIS` de `src/config/pets.ts`
++ un caso en `drawShell` de `src/game/render/pet.ts`.
+
 **Una skin** → una opción en `src/config/cosmetics.ts` + un caso en
 `src/game/render/character.ts`.
 

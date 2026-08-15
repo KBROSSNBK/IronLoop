@@ -29,10 +29,9 @@ import { beltCount } from './logic/belts';
 import { getMachine } from '../config/machines';
 import { ROBOTS as ROBOT_LIST } from '../config/robots';
 import { RobotBrain } from './systems/robotBrain';
-import { Combat } from './systems/combat';
-import { drawBullets, drawEnemies } from './render/combat';
-import { deriveWeapon } from '../config/weapons';
-import { COMBAT } from '../config/enemies';
+import { PetBrain, RemotePet } from './systems/petBrain';
+import { drawPet } from './render/pet';
+import { derivePet, petUsed, PET_FLUSH_MS } from '../config/pets';
 import {
   drawConveyors,
   drawGroundItems,
@@ -71,6 +70,7 @@ interface RemoteEntity {
   lastAt: number;
   emote: string | null;
   emoteAt: number;
+  pet: PresenceState['pet'];
 }
 
 export function GameCanvas() {
@@ -145,9 +145,11 @@ export function GameCanvas() {
     /* Cerebros de los robots: comportamiento visible con recuperación. */
     const brains = new Map<string, RobotBrain>();
 
-    /* Combate automático: enemigos y proyectiles, simulados en local. */
-    const combat = new Combat();
-    let combatFlushAt = 0;
+    /* Mascota: simulada en local, liquidada por tandas contra el servidor. */
+    const pet = new PetBrain();
+    const remotePets = new Map<string, RemotePet>();
+    let petFlushAt = 0;
+    let petBusy = false;
 
     /* ── canvas / DPR ── */
     const resize = () => {
@@ -275,6 +277,7 @@ export function GameCanvas() {
             lastAt: now,
             emote: p.emote ?? null,
             emoteAt: p.emoteAt ?? 0,
+            pet: p.pet ?? null,
           });
         } else {
           e.fromX = e.x;
@@ -287,6 +290,7 @@ export function GameCanvas() {
           e.name = p.name;
           e.level = p.level;
           e.appearance = p.appearance;
+          e.pet = p.pet ?? null;
           e.lastAt = now;
           // Un emote nuevo dispara sus partículas también en remoto.
           if (p.emote && (p.emoteAt ?? 0) > e.emoteAt) {
@@ -300,6 +304,7 @@ export function GameCanvas() {
       for (const [uid, e] of remotes) {
         if (!seen.has(uid) && now - e.lastAt > BALANCE.net.staleAfterMs) {
           remotes.delete(uid);
+          remotePets.delete(uid);
         }
       }
     };
@@ -402,6 +407,15 @@ export function GameCanvas() {
           dir: me.dir,
           act: me.act,
           appearance: player.appearance,
+          // Sólo el aspecto: la posición de la mascota la simula cada cliente.
+          pet:
+            player.pet?.active === false
+              ? null
+              : {
+                  chassis: player.pet?.chassis ?? 'spot',
+                  color: player.pet?.color ?? '#f2c015',
+                  accent: player.pet?.accent ?? '#22d3ee',
+                },
           emote: me.emote,
           emoteAt: me.emoteAt,
           t: now,
@@ -606,41 +620,74 @@ export function GameCanvas() {
         }
       }
 
-      /* — combate automático — */
-      let combatDrain = 0;
-      if (player) {
-        const weapon = deriveWeapon(player.weapon);
-        const ev = combat.update(
+      /* — mascota: minería autónoma y entrega al dueño — */
+      let petDerived = derivePet(undefined);
+      let petStored = 0;
+      if (player && session.phase === 'ready') {
+        petDerived = derivePet(player.pet);
+        petStored = petUsed(player.pet);
+        const ev = pet.update(now, {
           dt,
-          me.x,
-          me.y,
-          player.level,
-          weapon,
-          me.act === 'gather',
-          session.phase === 'ready',
-        );
-        combatDrain = ev.drain;
-        if (ev.fired) emit('sfx', { name: 'click', volume: 0.35 });
-        for (const h of ev.hits) fx.burst(h.x, h.y, h.color, 3, 55, 'spark');
-        for (const k of ev.kills) {
-          fx.burst(k.x, k.y, k.color, 14, 110, 'spark');
-          fx.ring(k.x, k.y, k.color, 5);
-          fx.float(k.x, k.y - 12, `+${k.xp} XP`, '#a78bfa', 12);
-        }
-        if (ev.kills.length > 0) emit('sfx', { name: 'pickup', volume: 0.4 });
+          ownerX: me.x,
+          ownerY: me.y,
+          derived: petDerived,
+          storedUnits: petStored,
+          active: player.pet?.active !== false,
+          ownerHasRoom: inventoryFree(player) > 0,
+        });
 
-        // La XP se envía por tandas: una escritura cada 12 s como mucho.
-        // Los enemigos drenan estamina por el mismo canal que el sprint:
-        // un único acumulador local que el tick de sesión consolida.
-        if (combatDrain > 0) sprintDrain += combatDrain;
-
-        if (combat.pendingXp > 0 && nowMs >= combatFlushAt) {
-          combatFlushAt = nowMs + COMBAT.rewardFlushMs;
-          const xp = combat.takeXp();
-          const kills = combat.kills;
-          combat.kills = 0;
-          if (xp > 0) void session.op('combatReward', { xp, kills });
+        if (ev.strike) {
+          fx.burst(ev.strike.x, ev.strike.y, ev.strike.color, 2, 45, 'spark');
         }
+
+        // Lo minado se liquida por tandas: una escritura cada 5 s como mucho,
+        // o antes si ya tiene la mochila llena y va a dejar de trabajar.
+        if (ev.mined && !petBusy && (nowMs >= petFlushAt || petStored + ev.mined.qty >= petDerived.capacity)) {
+          petFlushAt = nowMs + PET_FLUSH_MS;
+          petBusy = true;
+          const qty = ev.mined.qty;
+          void session
+            .op('petMine', { stationId: ev.mined.stationId, qty })
+            .then((out) => {
+              // Confirmado o rechazado, deja de contarse como pendiente: el
+              // servidor es quien manda sobre lo que hay en la mochila.
+              if (out.ok) pet.confirmMined(qty);
+              else pet.dropPending();
+            })
+            .finally(() => {
+              petBusy = false;
+            });
+        }
+
+        if (ev.unload && !petBusy) {
+          petBusy = true;
+          void session
+            .op('petUnload', {})
+            .then((out) => {
+              if (out.ok) {
+                fx.burst(pet.x, pet.y - 12, '#a78bfa', 10, 70, 'spark');
+                fx.ring(me.x, me.y, '#a78bfa', 7);
+                emit('sfx', { name: 'pickup', volume: 0.5 });
+              }
+            })
+            .finally(() => {
+              petBusy = false;
+            });
+        }
+      }
+
+      /* Mascotas ajenas: sólo siguen a su dueño, no se sincroniza su posición. */
+      for (const e of remotes.values()) {
+        if (!e.pet) {
+          remotePets.delete(e.uid);
+          continue;
+        }
+        let rp = remotePets.get(e.uid);
+        if (!rp) {
+          rp = new RemotePet();
+          remotePets.set(e.uid, rp);
+        }
+        rp.update(dt, e.x, e.y);
       }
 
       cam.follow(me.x, me.y - 10, dt, viewW, viewH);
@@ -687,6 +734,28 @@ export function GameCanvas() {
       sortables.push({ y: -1e9, draw: () => drawProps(ctx, time) });
 
       for (const e of remotes.values()) {
+        const rp = remotePets.get(e.uid);
+        if (rp && e.pet) {
+          const look = e.pet;
+          sortables.push({
+            y: rp.y,
+            draw: () =>
+              drawPet(ctx, {
+                x: rp.x,
+                y: rp.y,
+                facing: rp.facing,
+                gait: rp.gait,
+                t: time,
+                state: 'SEGUIR',
+                chassis: look.chassis,
+                color: look.color,
+                accent: look.accent,
+                carried: 0,
+                capacity: 1,
+                alpha: 0.96,
+              }),
+          });
+        }
         sortables.push({
           y: e.y,
           draw: () =>
@@ -703,6 +772,37 @@ export function GameCanvas() {
               alpha: 0.98,
               emote: e.emote,
               emoteElapsed: e.emote ? (now - e.emoteAt) / 1000 : 0,
+            }),
+        });
+      }
+      if (player && player.pet?.active !== false) {
+        // Material predominante en su mochila: lo que enseña en la espalda.
+        let topItem: string | null = null;
+        let topQty = 0;
+        for (const [id, n] of Object.entries(player.pet?.inventory ?? {})) {
+          if (n > topQty) {
+            topQty = n;
+            topItem = id;
+          }
+        }
+        const carried = pet.carried(petStored);
+        sortables.push({
+          y: pet.y,
+          draw: () =>
+            drawPet(ctx, {
+              x: pet.x,
+              y: pet.y,
+              facing: pet.facing,
+              gait: pet.gait,
+              t: time,
+              state: pet.state,
+              chassis: player.pet?.chassis ?? 'spot',
+              color: player.pet?.color ?? '#f2c015',
+              accent: player.pet?.accent ?? '#22d3ee',
+              carried,
+              capacity: petDerived.capacity,
+              carryIcon: topItem ? getItem(topItem).icon : null,
+              carryColor: topItem ? getItem(topItem).color : null,
             }),
         });
       }
@@ -746,8 +846,6 @@ export function GameCanvas() {
         ctx.restore();
       }
 
-      drawEnemies(ctx, combat.enemies);
-      drawBullets(ctx, combat.bullets);
       fx.draw(ctx);
 
       // Luces (incluye un foco suave sobre el jugador local)
@@ -804,8 +902,7 @@ export function GameCanvas() {
           debug: DEBUG_ENABLED
             ? {
                 robots: [...brains.values()].map((b) => b.debug()),
-                enemies: combat.enemies.length,
-                bullets: combat.bullets.length,
+                pet: pet.debug(petDerived.capacity, petStored),
                 belts: CONVEYORS.filter((c) => c.feeds).map((c) => ({
                   id: c.id,
                   count: beltCount(live?.factory.belts?.[c.id], c.id, now),
@@ -845,6 +942,13 @@ export function GameCanvas() {
           return false;
         },
         where: () => ({ x: Math.round(me.x), y: Math.round(me.y) }),
+        petState: () => ({
+          x: Math.round(pet.x),
+          y: Math.round(pet.y),
+          state: pet.state,
+          pending: pet.pending,
+          station: pet.station?.id ?? null,
+        }),
         emoteState: () => ({
           id: me.emote,
           elapsed: me.emote ? (Date.now() - me.emoteAt) / 1000 : 0,

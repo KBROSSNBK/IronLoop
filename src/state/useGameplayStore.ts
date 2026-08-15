@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { ActionOption } from '../game/systems/interaction';
 import type { RobotDebug } from '../game/systems/robotBrain';
+import type { PetDebug } from '../game/systems/petBrain';
 
 /**
  * Estado ligero que el bucle de juego publica hacia la UI (~8 veces/segundo).
@@ -32,8 +33,7 @@ interface GameplayState {
   /** Instantánea para el panel de depuración. Sólo se rellena con DEBUG. */
   debug: {
     robots: RobotDebug[];
-    enemies: number;
-    bullets: number;
+    pet: PetDebug | null;
     belts: { id: string; count: number }[];
   };
 
@@ -54,6 +54,6 @@ export const useGameplayStore = create<GameplayState>((set) => ({
   x: 0,
   y: 0,
   inSellArea: false,
-  debug: { robots: [], enemies: 0, bullets: 0, belts: [] },
+  debug: { robots: [], pet: null, belts: [] },
   publish: (patch) => set(patch),
 }));

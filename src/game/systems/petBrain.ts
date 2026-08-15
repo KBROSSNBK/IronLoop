@@ -1,0 +1,351 @@
+/**
+ * CEREBRO DE LA MASCOTA CUADRÚPEDA.
+ *
+ * Prioridades, en este orden y sin excepciones:
+ *   1. Si detecta una zona de minería/extracción en su radio Y le queda hueco
+ *      en la mochila → va y mina. La minería siempre gana.
+ *   2. Si no hay zona en el radio, o ya está llena → prioriza descargar:
+ *      trota hasta su dueño y le entrega lo que lleva.
+ *   3. Si no lleva nada y no hay nada que minar → te sigue.
+ *
+ * El movimiento es autónomo: la mascota decide su propio camino. Lo único que
+ * pide al servidor son dos operaciones acotadas (`petMine` y `petUnload`), que
+ * se validan allí contra el tiempo transcurrido.
+ */
+
+import { moveWithCollision } from '../world/geometry';
+import { findPath, hasLineOfSight, type Point } from '../world/pathfinding';
+import { nearestStation, stationYield } from '../logic/pet';
+import type { StationDef } from '../../config/world';
+import type { DerivedPet } from '../../config/pets';
+
+export type PetStateName = 'SEGUIR' | 'IR_A_VETA' | 'MINAR' | 'VOLVER' | 'DESCARGAR';
+
+/** Distancia a la que se considera que ha llegado a un punto. */
+const ARRIVE = 12;
+/** Distancia a la que se planta a tu lado en modo seguimiento. */
+const FOLLOW_GAP = 46;
+/** A partir de aquí corre para alcanzarte. */
+const SPRINT_GAP = 210;
+/**
+ * Correa: por muy buena que sea la veta, si te alejas más de esto lo deja y
+ * viene. Sin esto la mascota se queda picando al otro lado del mapa y parece
+ * que te ha abandonado.
+ */
+const LEASH = 560;
+/** Sin avanzar durante esto, se recalcula el camino desde cero. */
+const STUCK_MS = 700;
+/** Duración de la animación de descarga. */
+const UNLOAD_MS = 620;
+/** Distancia a la que se da por alcanzado un punto del camino. */
+const WAYPOINT_REACHED = 10;
+/** Pausa mínima entre cálculos de ruta. */
+const REPATH_MS = 380;
+/** Si el destino se mueve más que esto, el camino ya no sirve. */
+const GOAL_DRIFT = 46;
+
+export interface PetDebug {
+  state: PetStateName;
+  target: string;
+  carried: number;
+  capacity: number;
+  pending: number;
+  distance: number;
+  stuckMs: number;
+}
+
+export interface PetTickInput {
+  dt: number;
+  /** Posición del dueño. */
+  ownerX: number;
+  ownerY: number;
+  /** Stats derivadas (capacidad, velocidad, ritmo de minado, radio). */
+  derived: DerivedPet;
+  /** Unidades ya confirmadas por el servidor en su mochila. */
+  storedUnits: number;
+  /** ¿Está desplegada? Si no, sólo sigue al dueño. */
+  active: boolean;
+  /** ¿Cabe algo en el inventario del dueño? Si no, no tiene sentido descargar. */
+  ownerHasRoom: boolean;
+}
+
+export interface PetTickResult {
+  /** Ha acumulado unidades minadas que conviene liquidar. */
+  mined: { stationId: string; item: string; qty: number } | null;
+  /** Está pegada al dueño con carga: toca entregarla. */
+  unload: boolean;
+  /** Un golpe de perforadora, para chispas y sonido. */
+  strike: { x: number; y: number; color: string } | null;
+}
+
+const NOTHING: PetTickResult = { mined: null, unload: false, strike: null };
+
+export class PetBrain {
+  x = 0;
+  y = 0;
+  /** Dirección a la que mira: 1 derecha, -1 izquierda. */
+  facing = 1;
+  /** Fase del paso, en vueltas completas. La usa el renderer para el trote. */
+  gait = 0;
+  /** Velocidad real del último frame, para escalar la animación. */
+  speed = 0;
+  state: PetStateName = 'SEGUIR';
+  /** Unidades minadas aún no confirmadas por el servidor. */
+  pending = 0;
+  /** Estación en la que está trabajando. */
+  station: StationDef | null = null;
+
+  private fraction = 0;
+  private unloadUntil = 0;
+  private strikeAt = 0;
+  private stuckMs = 0;
+  private lastX = 0;
+  private lastY = 0;
+  private spawned = false;
+  /** Camino calculado hasta el objetivo actual. */
+  private path: Point[] = [];
+  private pathGoal: Point | null = null;
+  private repathAt = 0;
+
+  /** Coloca la mascota junto a su dueño sin animación (al entrar al juego). */
+  reset(x: number, y: number): void {
+    this.x = x - 34;
+    this.y = y + 8;
+    this.lastX = this.x;
+    this.lastY = this.y;
+    this.state = 'SEGUIR';
+    this.pending = 0;
+    this.fraction = 0;
+    this.station = null;
+    this.spawned = true;
+    this.path = [];
+    this.pathGoal = null;
+  }
+
+  /** Unidades que se le ven encima (confirmadas + pendientes de liquidar). */
+  carried(stored: number): number {
+    return stored + Math.floor(this.pending);
+  }
+
+  update(now: number, input: PetTickInput): PetTickResult {
+    const { dt, ownerX, ownerY, derived, storedUnits, active, ownerHasRoom } = input;
+    if (!this.spawned) this.reset(ownerX, ownerY);
+
+    const carried = this.carried(storedUnits);
+    const full = carried >= derived.capacity;
+    let result: PetTickResult = { ...NOTHING };
+
+    /* ── 1. Decisión: minar manda, descargar es el plan B ── */
+    const leashed = Math.hypot(ownerX - this.x, ownerY - this.y) > LEASH;
+    const found =
+      active && !full && !leashed ? nearestStation(this.x, this.y, derived.radius) : null;
+
+    if (this.state === 'DESCARGAR') {
+      if (now >= this.unloadUntil) this.state = 'SEGUIR';
+    } else if (found) {
+      // Hay veta y hay hueco: la minería siempre tiene prioridad.
+      this.station = found.station;
+      this.state = found.dist <= ARRIVE + 6 ? 'MINAR' : 'IR_A_VETA';
+    } else if (carried > 0 && ownerHasRoom) {
+      // Sin veta a la vista (o llena): toca entregar el material.
+      this.station = null;
+      this.state = 'VOLVER';
+    } else {
+      this.station = null;
+      this.state = 'SEGUIR';
+    }
+
+    /* ── 2. A dónde va ── */
+    let goalX = ownerX;
+    let goalY = ownerY;
+    let stopAt = FOLLOW_GAP;
+
+    if (this.state === 'IR_A_VETA' || this.state === 'MINAR') {
+      const p = found ?? nearestStation(this.x, this.y, derived.radius);
+      if (p) {
+        goalX = p.point.x;
+        goalY = p.point.y;
+        stopAt = ARRIVE;
+      }
+    } else if (this.state === 'VOLVER') {
+      stopAt = 26;
+    }
+
+    /* ── 3. Movimiento siguiendo un camino calculado ── */
+    const dist = Math.hypot(goalX - this.x, goalY - this.y);
+    let moving = false;
+
+    if (this.state !== 'MINAR' && this.state !== 'DESCARGAR' && dist > stopAt) {
+      this.ensurePath(now, goalX, goalY);
+
+      // Se descartan los puntos ya alcanzados (o que ya se ven superados).
+      while (
+        this.path.length > 1 &&
+        Math.hypot(this.path[0].x - this.x, this.path[0].y - this.y) < WAYPOINT_REACHED
+      ) {
+        this.path.shift();
+      }
+      const aim = this.path[0] ?? { x: goalX, y: goalY };
+
+      // Al quedarse muy atrás aprieta el paso: nunca se pierde de vista.
+      const urgency = dist > SPRINT_GAP ? 1.55 : dist > FOLLOW_GAP * 2 ? 1.18 : 1;
+      const step = derived.speed * urgency * dt;
+      const ax = aim.x - this.x;
+      const ay = aim.y - this.y;
+      const len = Math.hypot(ax, ay) || 1;
+      const res = moveWithCollision(this.x, this.y, (ax / len) * step, (ay / len) * step);
+      this.x = res.x;
+      this.y = res.y;
+      moving = true;
+      if (Math.abs(ax) > 3) this.facing = ax > 0 ? 1 : -1;
+
+      const progress = Math.hypot(this.x - this.lastX, this.y - this.lastY);
+      this.speed = progress / Math.max(dt, 0.001);
+      // Si el camino no la lleva a ninguna parte, se tira y se calcula otro.
+      if (progress < step * 0.35) this.stuckMs += dt * 1000;
+      else this.stuckMs = 0;
+      if (this.stuckMs > STUCK_MS) {
+        this.stuckMs = 0;
+        this.path = [];
+        this.pathGoal = null;
+        this.repathAt = 0;
+      }
+    } else {
+      this.speed = 0;
+      this.stuckMs = 0;
+      this.path = [];
+      this.pathGoal = null;
+      // Mirando a lo que hace: la veta o su dueño.
+      const look = (this.state === 'MINAR' ? goalX : ownerX) - this.x;
+      if (Math.abs(look) > 4) this.facing = look > 0 ? 1 : -1;
+    }
+    this.lastX = this.x;
+    this.lastY = this.y;
+
+    // El trote se anima con la velocidad real, así el paso "agarra" el suelo.
+    this.gait += (moving ? this.speed / 34 : 0) * dt;
+
+    /* ── 4. Trabajo ── */
+    if (this.state === 'MINAR' && this.station) {
+      const y = stationYield(this.station);
+      const room = derived.capacity - carried;
+      if (room > 0) {
+        this.fraction += derived.minePerSec * y.amount * dt;
+        // Un golpe de perforadora cada media unidad, para que se vea el esfuerzo.
+        if (now - this.strikeAt > 420) {
+          this.strikeAt = now;
+          result = { ...result, strike: { x: this.x + this.facing * 15, y: this.y - 2, color: this.station.accent } };
+        }
+        while (this.fraction >= 1 && this.pending + carried < derived.capacity) {
+          this.fraction -= 1;
+          this.pending += 1;
+        }
+        if (this.fraction >= 1) this.fraction = 0; // llena: no acumula deuda
+      }
+      if (this.pending >= 1) {
+        result = {
+          ...result,
+          mined: {
+            stationId: this.station.id,
+            item: y.item,
+            qty: Math.floor(this.pending),
+          },
+        };
+      }
+    }
+
+    if (this.state === 'VOLVER' && dist <= stopAt && storedUnits > 0 && ownerHasRoom) {
+      this.state = 'DESCARGAR';
+      this.unloadUntil = now + UNLOAD_MS;
+      result = { ...result, unload: true };
+    }
+
+    return result;
+  }
+
+  /**
+   * Recalcula la ruta sólo cuando hace falta: si el destino se ha movido, si
+   * el camino se ha agotado, o si toca refrescarlo. En campo abierto ni
+   * siquiera se llama a A*, basta con ver el objetivo.
+   */
+  private ensurePath(now: number, goalX: number, goalY: number): void {
+    const drifted =
+      !this.pathGoal || Math.hypot(this.pathGoal.x - goalX, this.pathGoal.y - goalY) > GOAL_DRIFT;
+    if (!drifted && this.path.length > 0 && now < this.repathAt) return;
+
+    // Atajo barato para el caso habitual: si se ve el objetivo, línea recta.
+    if (hasLineOfSight(this.x, this.y, goalX, goalY)) {
+      this.path = [{ x: goalX, y: goalY }];
+      this.pathGoal = { x: goalX, y: goalY };
+      this.repathAt = now + REPATH_MS;
+      return;
+    }
+
+    const route = findPath(this.x, this.y, goalX, goalY);
+    this.path = route.length > 0 ? route : [{ x: goalX, y: goalY }];
+    this.pathGoal = { x: goalX, y: goalY };
+    this.repathAt = now + REPATH_MS;
+  }
+
+  /** El servidor ha confirmado `qty` unidades: dejan de estar pendientes. */
+  confirmMined(qty: number): void {
+    this.pending = Math.max(0, this.pending - qty);
+  }
+
+  /** La liquidación ha fallado (mochila llena, por ejemplo): se descarta. */
+  dropPending(): void {
+    this.pending = 0;
+    this.fraction = 0;
+  }
+
+  debug(capacity: number, stored: number): PetDebug {
+    return {
+      state: this.state,
+      target: this.station?.label ?? 'dueño',
+      carried: this.carried(stored),
+      capacity,
+      pending: Math.floor(this.pending),
+      distance: Math.round(this.speed),
+      stuckMs: Math.round(this.stuckMs),
+    };
+  }
+}
+
+/**
+ * Mascota de otro jugador: sólo sigue a su dueño. No mina ni sincroniza
+ * posición — es puramente decorativa, así que no cuesta ancho de banda.
+ */
+export class RemotePet {
+  x = 0;
+  y = 0;
+  facing = 1;
+  gait = 0;
+  private spawned = false;
+
+  update(dt: number, ownerX: number, ownerY: number, speed = 160): void {
+    if (!this.spawned) {
+      this.x = ownerX - 34;
+      this.y = ownerY + 8;
+      this.spawned = true;
+      return;
+    }
+    const dx = ownerX - 34 - this.x;
+    const dy = ownerY + 8 - this.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= 6) return;
+    // Se teletransporta si su dueño se ha ido lejísimos (cambio de zona):
+    // perseguirlo por medio mapa no aporta nada y sí cuesta CPU.
+    if (d > 900) {
+      this.x = ownerX - 34;
+      this.y = ownerY + 8;
+      return;
+    }
+    const v = speed * (d > SPRINT_GAP ? 1.55 : 1);
+    const step = Math.min(d, v * dt);
+    const res = moveWithCollision(this.x, this.y, (dx / d) * step, (dy / d) * step);
+    this.x = res.x;
+    this.y = res.y;
+    if (Math.abs(dx) > 3) this.facing = dx > 0 ? 1 : -1;
+    this.gait += step / 34;
+  }
+}

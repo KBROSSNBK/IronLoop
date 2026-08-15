@@ -1,8 +1,8 @@
 import type { Appearance } from '../config/cosmetics';
-import type { WeaponState } from '../config/weapons';
+import type { PetState } from '../config/pets';
 import type { RobotMode } from '../config/robots';
 
-export type { Appearance, WeaponState, RobotMode };
+export type { Appearance, PetState, RobotMode };
 
 /* ─────────────────────────── JUGADOR ─────────────────────────── */
 
@@ -15,8 +15,8 @@ export interface LifetimeStats {
   contributed: number;
   upgradesBought: number;
   playtime: number; // segundos
-  /** Enemigos destruidos por las armas automáticas. */
-  kills: number;
+  /** Unidades extraídas por tu mascota. */
+  petMined: number;
 }
 
 export interface MissionProgress {
@@ -43,8 +43,8 @@ export interface PlayerState {
 
   /** id de mejora → nivel comprado */
   upgrades: Record<string, number>;
-  /** Arma automática equipada y sus mejoras. */
-  weapon: WeaponState;
+  /** Mascota cuadrúpeda: chasis, color, mejoras y su propia mochila. */
+  pet: PetState;
   /** itemId → cantidad */
   inventory: Record<string, number>;
 
@@ -56,8 +56,6 @@ export interface PlayerState {
   lastSeenAt: number;
   /** Timestamp de la última liquidación de producción offline. */
   lastOfflineClaimAt: number;
-  /** Última vez que se cobró XP de combate (acota cuánta se puede reclamar). */
-  lastCombatAt: number;
   onboarded: boolean;
   /**
    * Último reinicio de fábrica que este jugador ya ha aplicado a su progreso.
@@ -209,6 +207,12 @@ export interface PresenceState {
   dir: FacingDir;
   act: ActivityKind;
   appearance: Appearance;
+  /**
+   * Aspecto de su mascota, para que los demás la vean como su dueño la ha
+   * pintado. La POSICIÓN no se envía: cada cliente la simula siguiendo a su
+   * dueño, así que no cuesta ni un byte por frame.
+   */
+  pet?: { chassis: string; color: string; accent: string } | null;
   /** Emote en curso (id de config/emotes) o null. */
   emote?: string | null;
   /** Instante en que empezó el emote (ms). */

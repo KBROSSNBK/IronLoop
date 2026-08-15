@@ -13,15 +13,19 @@ import { getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
 import { robotStatuses } from '../../game/logic/robots';
 import {
-  DEFAULT_WEAPON,
-  WEAPONS,
-  WEAPON_STAT_LIST,
-  deriveWeapon,
-  weaponStatCost,
-} from '../../config/weapons';
+  DEFAULT_PET,
+  PET_ACCENTS,
+  PET_CHASSIS,
+  PET_COLORS,
+  PET_STATS,
+  derivePet,
+  getChassis,
+  petStatCost,
+  petUsed,
+} from '../../config/pets';
 import { compact, moneyExact } from '../../utils/format';
 
-type Tab = 'mejoras' | 'armas' | 'robots';
+type Tab = 'mejoras' | 'mascota' | 'robots';
 
 /**
  * TALLER: mejoras personales y flota de robots. Es el único sitio donde se
@@ -53,8 +57,8 @@ export function UpgradesPanel() {
         <button className="rank-tab bevel-sm" data-on={tab === 'mejoras'} onClick={() => setTab('mejoras')}>
           🧰 Personaje
         </button>
-        <button className="rank-tab bevel-sm" data-on={tab === 'armas'} onClick={() => setTab('armas')}>
-          🔫 Armas
+        <button className="rank-tab bevel-sm" data-on={tab === 'mascota'} onClick={() => setTab('mascota')}>
+          🐕 Mascota
         </button>
         <button className="rank-tab bevel-sm" data-on={tab === 'robots'} onClick={() => setTab('robots')}>
           🤖 Robots
@@ -106,8 +110,8 @@ export function UpgradesPanel() {
             );
           })}
         </>
-      ) : tab === 'armas' ? (
-        <WeaponsTab />
+      ) : tab === 'mascota' ? (
+        <PetTab />
       ) : (
         <>
           <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
@@ -228,57 +232,97 @@ export function UpgradesPanel() {
 }
 
 /**
- * Armas automáticas. Disparan solas a lo que se acerque; lo que el jugador
- * decide aquí es en qué invertir y qué arma llevar equipada.
+ * MASCOTA: chasis, color y mejoras. Es individual —el chucho es tuyo— y todo
+ * se compra aquí, igual que el resto de la progresión personal.
  */
-function WeaponsTab() {
+function PetTab() {
   const player = useSessionStore((s) => s.player)!;
   const op = useSessionStore((s) => s.op);
   const busy = useSessionStore((s) => s.busy);
 
-  const weapon = { ...DEFAULT_WEAPON, ...(player.weapon ?? {}) };
-  const derived = deriveWeapon(weapon);
+  const pet = { ...DEFAULT_PET, ...(player.pet ?? {}) };
+  const derived = derivePet(pet);
+  const carried = petUsed(pet);
+  const owned = new Set([...DEFAULT_PET.owned, ...(pet.owned ?? [])]);
+  const active = pet.active !== false;
 
   return (
     <>
       <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-        Tu arma dispara <b>sola</b> a lo que entre en su alcance mientras trabajas.
-        Las mejoras se aplican al arma que lleves equipada, sea cual sea.
+        Tu mascota <b>mina sola</b>: si detecta una zona de extracción en su radio va y
+        pica hasta llenar su mochila; cuando se llena, o cuando no hay ninguna cerca,
+        vuelve y <b>te entrega el material</b>. Es tuya: ni el material ni las mejoras se
+        comparten.
       </div>
 
-      <div className="weapon-hero bevel-sm">
-        <div className="ico">{derived.def.icon}</div>
+      <div className="pet-hero bevel-sm">
+        <div className="ico">{getChassis(pet.chassis).icon}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="nm">{derived.def.name}</div>
-          <div className="stat">{derived.def.desc}</div>
+          <div className="nm">{getChassis(pet.chassis).name}</div>
+          <div className="stat">{getChassis(pet.chassis).desc}</div>
         </div>
+        <button
+          className="mode-btn"
+          data-on={active}
+          disabled={busy}
+          title={active ? 'Mandarla a reposo' : 'Desplegarla'}
+          onClick={() => void op('setPetLook', { active: !active })}
+        >
+          {active ? '🟢 Activa' : '⏸️ Reposo'}
+        </button>
       </div>
 
-      <div className="weapon-stats">
-        <Metric label="DPS" value={derived.dps.toFixed(1)} accent="var(--red)" />
-        <Metric label="Daño" value={derived.damage.toFixed(1)} accent="var(--amber-soft)" />
+      <div className="pet-stats">
+        <Metric label="Mochila" value={`${carried}/${derived.capacity}`} accent="var(--blue)" />
         <Metric
-          label="Cadencia"
-          value={`${(1000 / derived.fireRateMs).toFixed(1)}/s`}
-          accent="var(--blue)"
+          label="Extracción"
+          value={`${(derived.minePerSec * 60).toFixed(0)}/min`}
+          accent="var(--amber-soft)"
         />
-        <Metric label="Proyectiles" value={String(derived.projectiles)} accent="var(--lime)" />
-        <Metric label="Alcance" value={`${derived.range} px`} accent="var(--violet)" />
-        <Metric label="Bajas" value={compact(player.stats.kills ?? 0)} accent="var(--cyan)" />
+        <Metric label="Velocidad" value={`${derived.speed} px/s`} accent="var(--green)" />
+        <Metric label="Sensor" value={`${derived.radius} px`} accent="var(--violet)" />
+        <Metric label="Extraído" value={compact(pet.mined ?? 0)} accent="var(--cyan)" />
+        <Metric label="Chasis" value={String(owned.size)} accent="var(--pink)" />
       </div>
 
-      <div className="section-title">MEJORAS DEL ARMA</div>
-      {WEAPON_STAT_LIST.map((def) => {
-        const level = weapon[def.id] ?? 0;
+      <div className="section-title">COLOR</div>
+      <div className="swatch-row">
+        {PET_COLORS.map((c) => (
+          <button
+            key={c.id}
+            className="swatch"
+            data-on={pet.color === c.id}
+            style={{ background: c.id }}
+            title={c.name}
+            disabled={busy}
+            onClick={() => void op('setPetLook', { color: c.id })}
+          />
+        ))}
+      </div>
+
+      <div className="section-title">DETALLES</div>
+      <div className="swatch-row">
+        {PET_ACCENTS.map((c) => (
+          <button
+            key={c.id}
+            className="swatch"
+            data-on={pet.accent === c.id}
+            style={{ background: c.id }}
+            title={c.name}
+            disabled={busy}
+            onClick={() => void op('setPetLook', { accent: c.id })}
+          />
+        ))}
+      </div>
+
+      <div className="section-title">MEJORAS DE LA MASCOTA</div>
+      {PET_STATS.map((def) => {
+        const level = pet.stats?.[def.id] ?? 0;
         const maxed = level >= def.maxLevel;
-        const cost = weaponStatCost(def, level);
+        const cost = petStatCost(def, level);
         const afford = player.money >= cost;
         return (
-          <div
-            className="upg-card"
-            key={def.id}
-            style={{ ['--upg-color' as string]: def.accent }}
-          >
+          <div className="upg-card" key={def.id} style={{ ['--upg-color' as string]: def.accent }}>
             <div className="upg-icon">{def.icon}</div>
             <div className="upg-main">
               <div className="upg-name">
@@ -294,7 +338,7 @@ function WeaponsTab() {
             <button
               className={`upg-buy${maxed ? ' max' : ''}`}
               disabled={busy || maxed || !afford}
-              onClick={() => void op('buyWeaponStat', { stat: def.id })}
+              onClick={() => void op('buyPetStat', { stat: def.id })}
             >
               {maxed ? 'MÁX' : moneyExact(cost)}
             </button>
@@ -302,44 +346,43 @@ function WeaponsTab() {
         );
       })}
 
-      <div className="section-title">ARSENAL</div>
-      {WEAPONS.map((w) => {
-        const owned = weapon.owned.includes(w.id);
-        const equipped = weapon.type === w.id;
-        const locked = player.level < w.unlockLevel;
-        const afford = player.money >= w.cost;
-        const preview = deriveWeapon({ ...weapon, type: w.id });
+      <div className="section-title">CHASIS</div>
+      {PET_CHASSIS.map((c) => {
+        const has = owned.has(c.id);
+        const equipped = pet.chassis === c.id;
+        const locked = player.level < c.unlockLevel;
+        const afford = player.money >= c.cost;
         return (
           <div
             className="upg-card"
-            key={w.id}
-            data-locked={locked && !owned}
-            style={{ ['--upg-color' as string]: w.color }}
+            key={c.id}
+            data-locked={locked && !has}
+            style={{ ['--upg-color' as string]: c.color }}
           >
-            <div className="upg-icon">{w.icon}</div>
+            <div className="upg-icon">{c.icon}</div>
             <div className="upg-main">
               <div className="upg-name">
-                {w.name}
-                {equipped && <span style={{ color: 'var(--green)' }}> · EQUIPADA</span>}
+                {c.name}
+                {equipped && <span style={{ color: 'var(--green)' }}> · EQUIPADO</span>}
               </div>
-              <div className="upg-effect">{w.desc}</div>
+              <div className="upg-effect">{c.desc}</div>
               <div className="upg-effect" style={{ color: 'var(--text-mute)' }}>
-                {preview.dps.toFixed(0)} DPS · {preview.projectiles} proyectil
-                {preview.projectiles === 1 ? '' : 'es'} · {w.range} px
+                ×{c.bonus.mining.toFixed(2)} extracción · ×{c.bonus.speed.toFixed(2)} velocidad
+                · ×{c.bonus.capacity.toFixed(2)} carga
               </div>
             </div>
             <button
               className={`upg-buy${equipped ? ' max' : ''}`}
-              disabled={busy || equipped || (!owned && (locked || !afford))}
-              onClick={() => void op('buyWeapon', { weaponId: w.id })}
+              disabled={busy || equipped || (!has && (locked || !afford))}
+              onClick={() => void op('buyPetChassis', { chassis: c.id })}
             >
               {equipped
                 ? 'EN USO'
-                : owned
+                : has
                   ? 'EQUIPAR'
                   : locked
-                    ? `🔒 Nv.${w.unlockLevel}`
-                    : moneyExact(w.cost)}
+                    ? `🔒 Nv.${c.unlockLevel}`
+                    : moneyExact(c.cost)}
             </button>
           </div>
         );
@@ -350,7 +393,7 @@ function WeaponsTab() {
 
 function Metric({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
-    <div className="weapon-metric" style={{ ['--m' as string]: accent }}>
+    <div className="pet-metric" style={{ ['--m' as string]: accent }}>
       <span className="l">{label}</span>
       <span className="v mono-num">{value}</span>
     </div>

@@ -31,6 +31,13 @@
             "$slot": { ".validate": "newData.isString() && newData.val().length <= 12" }
           },
 
+          "pet": {
+            "chassis": { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "color":   { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "accent":  { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "$other": { ".validate": false }
+          },
+
           "$other": { ".validate": false }
         }
       }
