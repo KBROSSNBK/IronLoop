@@ -32,6 +32,7 @@ import { RobotBrain } from './systems/robotBrain';
 import { PetBrain, RemotePet } from './systems/petBrain';
 import { drawPet } from './render/pet';
 import { derivePet, petUsed, PET_FLUSH_MS } from '../config/pets';
+import { dropOffFor, heaviestItem } from './logic/pet';
 import {
   drawConveyors,
   drawGroundItems,
@@ -409,7 +410,7 @@ export function GameCanvas() {
           appearance: player.appearance,
           // Sólo el aspecto: la posición de la mascota la simula cada cliente.
           pet:
-            player.pet?.active === false
+            player.pet?.mode === 'off'
               ? null
               : {
                   chassis: player.pet?.chassis ?? 'spot',
@@ -620,20 +621,29 @@ export function GameCanvas() {
         }
       }
 
-      /* — mascota: minería autónoma y entrega al dueño — */
+      /* — mascota: extrae sola y deja el material donde sirve — */
       let petDerived = derivePet(undefined);
       let petStored = 0;
+      let petTop: string | null = null;
       if (player && session.phase === 'ready') {
         petDerived = derivePet(player.pet);
         petStored = petUsed(player.pet);
+        petTop = heaviestItem(player.pet?.inventory ?? {});
+        // A dónde llevar lo que carga: se decide con el material del que más
+        // lleve y con el nivel de fábrica, que es lo que abre cintas y máquinas.
+        const dropOff =
+          petTop && factory
+            ? dropOffFor(petTop, factory.level, { x: pet.x, y: pet.y })
+            : null;
         const ev = pet.update(now, {
           dt,
           ownerX: me.x,
           ownerY: me.y,
           derived: petDerived,
           storedUnits: petStored,
-          active: player.pet?.active !== false,
+          mode: player.pet?.mode ?? 'gather',
           ownerHasRoom: inventoryFree(player) > 0,
+          dropOff,
         });
 
         if (ev.strike) {
@@ -653,6 +663,23 @@ export function GameCanvas() {
               // servidor es quien manda sobre lo que hay en la mochila.
               if (out.ok) pet.confirmMined(qty);
               else pet.dropPending();
+            })
+            .finally(() => {
+              petBusy = false;
+            });
+        }
+
+        if (ev.deposit && !petBusy) {
+          petBusy = true;
+          const bay = ev.deposit;
+          void session
+            .op('petDeposit', { machineId: bay.machineId, beltId: bay.beltId })
+            .then((out) => {
+              if (out.ok) {
+                fx.burst(pet.x, pet.y - 12, '#38bdf8', 10, 70, 'spark');
+                fx.ring(bay.x, bay.y, '#38bdf8', 8);
+                emit('sfx', { name: 'machine', volume: 0.5 });
+              }
             })
             .finally(() => {
               petBusy = false;
@@ -775,16 +802,9 @@ export function GameCanvas() {
             }),
         });
       }
-      if (player && player.pet?.active !== false) {
+      if (player && player.pet?.mode !== 'off') {
         // Material predominante en su mochila: lo que enseña en la espalda.
-        let topItem: string | null = null;
-        let topQty = 0;
-        for (const [id, n] of Object.entries(player.pet?.inventory ?? {})) {
-          if (n > topQty) {
-            topQty = n;
-            topItem = id;
-          }
-        }
+        const topItem = petTop;
         const carried = pet.carried(petStored);
         sortables.push({
           y: pet.y,

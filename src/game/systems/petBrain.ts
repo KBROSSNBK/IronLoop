@@ -1,25 +1,34 @@
 /**
  * CEREBRO DE LA MASCOTA CUADRÚPEDA.
  *
- * Prioridades, en este orden y sin excepciones:
- *   1. Si detecta una zona de minería/extracción en su radio Y le queda hueco
- *      en la mochila → va y mina. La minería siempre gana.
- *   2. Si no hay zona en el radio, o ya está llena → prioriza descargar:
- *      trota hasta su dueño y le entrega lo que lleva.
- *   3. Si no lleva nada y no hay nada que minar → te sigue.
+ * En modo EXTRAER, sus prioridades son estas y en este orden:
+ *   1. Si detecta una zona de extracción en su radio Y le queda hueco en la
+ *      mochila → va y pica. La minería siempre gana.
+ *   2. Si está llena, o no hay zona en el radio → lleva lo que tiene a la
+ *      cinta o máquina que le corresponde. Nunca se queda con carga muerta.
+ *   3. Si no hay dónde dejarlo, te lo entrega a ti.
+ *
+ * En modo SEGUIR sólo te acompaña; si le quedó material encima, te lo da y
+ * deja de trabajar.
  *
  * El movimiento es autónomo: la mascota decide su propio camino. Lo único que
- * pide al servidor son dos operaciones acotadas (`petMine` y `petUnload`), que
- * se validan allí contra el tiempo transcurrido.
+ * pide al servidor son operaciones acotadas (`petMine`, `petDeposit`,
+ * `petUnload`), que se validan allí contra el tiempo transcurrido.
  */
 
 import { moveWithCollision } from '../world/geometry';
 import { findPath, hasLineOfSight, type Point } from '../world/pathfinding';
-import { nearestStation, stationYield } from '../logic/pet';
+import { nearestStation, stationYield, type DropOff } from '../logic/pet';
 import type { StationDef } from '../../config/world';
-import type { DerivedPet } from '../../config/pets';
+import type { DerivedPet, PetMode } from '../../config/pets';
 
-export type PetStateName = 'SEGUIR' | 'IR_A_VETA' | 'MINAR' | 'VOLVER' | 'DESCARGAR';
+export type PetStateName =
+  | 'SEGUIR'
+  | 'IR_A_VETA'
+  | 'MINAR'
+  | 'IR_A_CINTA'
+  | 'VOLVER'
+  | 'DESCARGAR';
 
 /** Distancia a la que se considera que ha llegado a un punto. */
 const ARRIVE = 12;
@@ -63,22 +72,29 @@ export interface PetTickInput {
   derived: DerivedPet;
   /** Unidades ya confirmadas por el servidor en su mochila. */
   storedUnits: number;
-  /** ¿Está desplegada? Si no, sólo sigue al dueño. */
-  active: boolean;
-  /** ¿Cabe algo en el inventario del dueño? Si no, no tiene sentido descargar. */
+  /** Qué le has mandado hacer. */
+  mode: PetMode;
+  /** ¿Cabe algo en el inventario del dueño? Si no, no tiene sentido entregárselo. */
   ownerHasRoom: boolean;
+  /**
+   * Dónde dejar lo que lleva: la cinta o máquina que consume ese material.
+   * Lo calcula quien la actualiza, que es quien conoce el nivel de fábrica.
+   */
+  dropOff: DropOff | null;
 }
 
 export interface PetTickResult {
   /** Ha acumulado unidades minadas que conviene liquidar. */
   mined: { stationId: string; item: string; qty: number } | null;
-  /** Está pegada al dueño con carga: toca entregarla. */
+  /** Ha llegado a la cinta/máquina: toca soltar la carga ahí. */
+  deposit: DropOff | null;
+  /** Está pegada al dueño con carga: toca entregársela. */
   unload: boolean;
   /** Un golpe de perforadora, para chispas y sonido. */
   strike: { x: number; y: number; color: string } | null;
 }
 
-const NOTHING: PetTickResult = { mined: null, unload: false, strike: null };
+const NOTHING: PetTickResult = { mined: null, deposit: null, unload: false, strike: null };
 
 export class PetBrain {
   x = 0;
@@ -94,6 +110,8 @@ export class PetBrain {
   pending = 0;
   /** Estación en la que está trabajando. */
   station: StationDef | null = null;
+  /** Punto de descarga elegido para lo que lleva encima. */
+  bay: DropOff | null = null;
 
   private fraction = 0;
   private unloadUntil = 0;
@@ -128,17 +146,23 @@ export class PetBrain {
   }
 
   update(now: number, input: PetTickInput): PetTickResult {
-    const { dt, ownerX, ownerY, derived, storedUnits, active, ownerHasRoom } = input;
+    const { dt, ownerX, ownerY, derived, storedUnits, mode, ownerHasRoom, dropOff } = input;
     if (!this.spawned) this.reset(ownerX, ownerY);
 
     const carried = this.carried(storedUnits);
     const full = carried >= derived.capacity;
+    const working = mode === 'gather';
     let result: PetTickResult = { ...NOTHING };
 
-    /* ── 1. Decisión: minar manda, descargar es el plan B ── */
+    /* ── 1. Decisión: minar manda; soltar la carga es el plan B ── */
     const leashed = Math.hypot(ownerX - this.x, ownerY - this.y) > LEASH;
     const found =
-      active && !full && !leashed ? nearestStation(this.x, this.y, derived.radius) : null;
+      working && !full && !leashed ? nearestStation(this.x, this.y, derived.radius) : null;
+
+    // Sitio al que llevar lo que carga. En modo SEGUIR no reparte por la
+    // fábrica: te lo da a ti y se acabó.
+    const bay = working && storedUnits > 0 ? dropOff : null;
+    this.bay = bay;
 
     if (this.state === 'DESCARGAR') {
       if (now >= this.unloadUntil) this.state = 'SEGUIR';
@@ -146,8 +170,12 @@ export class PetBrain {
       // Hay veta y hay hueco: la minería siempre tiene prioridad.
       this.station = found.station;
       this.state = found.dist <= ARRIVE + 6 ? 'MINAR' : 'IR_A_VETA';
+    } else if (bay) {
+      // Llena, o sin veta cerca: el material va a su cinta o máquina.
+      this.station = null;
+      this.state = 'IR_A_CINTA';
     } else if (carried > 0 && ownerHasRoom) {
-      // Sin veta a la vista (o llena): toca entregar el material.
+      // No hay dónde dejarlo (o no está trabajando): te lo entrega.
       this.station = null;
       this.state = 'VOLVER';
     } else {
@@ -167,6 +195,10 @@ export class PetBrain {
         goalY = p.point.y;
         stopAt = ARRIVE;
       }
+    } else if (this.state === 'IR_A_CINTA' && bay) {
+      goalX = bay.x;
+      goalY = bay.y;
+      stopAt = ARRIVE + 8;
     } else if (this.state === 'VOLVER') {
       stopAt = 26;
     }
@@ -215,8 +247,9 @@ export class PetBrain {
       this.stuckMs = 0;
       this.path = [];
       this.pathGoal = null;
-      // Mirando a lo que hace: la veta o su dueño.
-      const look = (this.state === 'MINAR' ? goalX : ownerX) - this.x;
+      // Mirando a lo que hace: la veta, la cinta o su dueño.
+      const look =
+        (this.state === 'MINAR' || this.state === 'IR_A_CINTA' ? goalX : ownerX) - this.x;
       if (Math.abs(look) > 4) this.facing = look > 0 ? 1 : -1;
     }
     this.lastX = this.x;
@@ -252,6 +285,12 @@ export class PetBrain {
           },
         };
       }
+    }
+
+    if (this.state === 'IR_A_CINTA' && bay && dist <= stopAt) {
+      this.state = 'DESCARGAR';
+      this.unloadUntil = now + UNLOAD_MS;
+      result = { ...result, deposit: bay };
     }
 
     if (this.state === 'VOLVER' && dist <= stopAt && storedUnits > 0 && ownerHasRoom) {
@@ -301,7 +340,7 @@ export class PetBrain {
   debug(capacity: number, stored: number): PetDebug {
     return {
       state: this.state,
-      target: this.station?.label ?? 'dueño',
+      target: this.station?.label ?? this.bay?.label ?? 'dueño',
       carried: this.carried(stored),
       capacity,
       pending: Math.floor(this.pending),

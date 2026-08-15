@@ -308,6 +308,7 @@ const LED_BY_STATE: Record<PetStateName, string> = {
   SEGUIR: '#4ade80',
   IR_A_VETA: '#38bdf8',
   MINAR: '#fbbf24',
+  IR_A_CINTA: '#f472b6',
   VOLVER: '#22d3ee',
   DESCARGAR: '#a78bfa',
 };
@@ -320,7 +321,11 @@ export function drawPet(ctx: CanvasRenderingContext2D, a: PetDrawArgs): void {
   const H = def.build.height;
   const L = def.build.body;
 
-  const moving = a.state === 'IR_A_VETA' || a.state === 'VOLVER' || a.state === 'SEGUIR';
+  const moving =
+    a.state === 'IR_A_VETA' ||
+    a.state === 'IR_A_CINTA' ||
+    a.state === 'VOLVER' ||
+    a.state === 'SEGUIR';
   const mining = a.state === 'MINAR';
   const gait = a.gait;
 

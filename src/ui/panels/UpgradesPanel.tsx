@@ -17,6 +17,7 @@ import {
   PET_ACCENTS,
   PET_CHASSIS,
   PET_COLORS,
+  PET_MODES,
   PET_STATS,
   derivePet,
   getChassis,
@@ -244,15 +245,15 @@ function PetTab() {
   const derived = derivePet(pet);
   const carried = petUsed(pet);
   const owned = new Set([...DEFAULT_PET.owned, ...(pet.owned ?? [])]);
-  const active = pet.active !== false;
+  const mode = pet.mode ?? 'gather';
 
   return (
     <>
       <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-        Tu mascota <b>mina sola</b>: si detecta una zona de extracción en su radio va y
-        pica hasta llenar su mochila; cuando se llena, o cuando no hay ninguna cerca,
-        vuelve y <b>te entrega el material</b>. Es tuya: ni el material ni las mejoras se
-        comparten.
+        En <b>Extraer</b> busca la zona más cercana, pica hasta llenar su mochila y deja
+        el material en <b>su cinta o su máquina</b>, así que nunca se queda con carga
+        muerta. En <b>Seguir</b> sólo te acompaña y te entrega lo que llevara encima. Es
+        tuya: ni el material ni las mejoras se comparten.
       </div>
 
       <div className="pet-hero bevel-sm">
@@ -261,15 +262,25 @@ function PetTab() {
           <div className="nm">{getChassis(pet.chassis).name}</div>
           <div className="stat">{getChassis(pet.chassis).desc}</div>
         </div>
-        <button
-          className="mode-btn"
-          data-on={active}
-          disabled={busy}
-          title={active ? 'Mandarla a reposo' : 'Desplegarla'}
-          onClick={() => void op('setPetLook', { active: !active })}
-        >
-          {active ? '🟢 Activa' : '⏸️ Reposo'}
-        </button>
+      </div>
+
+      {/* Orden de trabajo: es lo que más se toca, así que va lo primero. */}
+      <div className="robot-modes">
+        {PET_MODES.map((m) => (
+          <button
+            key={m.id}
+            className="mode-btn"
+            data-on={mode === m.id}
+            disabled={busy}
+            title={m.desc}
+            onClick={() => void op('setPetLook', { mode: m.id })}
+          >
+            {m.icon} {m.label}
+          </button>
+        ))}
+      </div>
+      <div className="stat" style={{ fontSize: 11.5, color: 'var(--text-mute)' }}>
+        {PET_MODES.find((m) => m.id === mode)?.desc}
       </div>
 
       <div className="pet-stats">

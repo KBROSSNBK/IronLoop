@@ -4,7 +4,17 @@
  * que el servidor use exactamente las mismas reglas que el cliente.
  */
 
-import { STATIONS, TILE, type StationDef } from '../../config/world';
+import {
+  CONVEYORS,
+  STATIONS,
+  TILE,
+  conveyorLoadPoint,
+  type ConveyorDef,
+  type StationDef,
+} from '../../config/world';
+import { MACHINE_LIST, getMachine } from '../../config/machines';
+import { getItem } from '../../config/items';
+import { machineFrontPoint } from '../world/geometry';
 import { derivePet, petFree, petUsed, type PetState } from '../../config/pets';
 
 /** Estaciones de las que una mascota puede sacar material. */
@@ -41,6 +51,94 @@ export function nearestStation(
   return best;
 }
 
+/**
+ * La mascota no toca consumibles: no bebe, no come y no le hacen falta. Si
+ * alguna vez una veta rindiese uno, se queda donde está.
+ */
+export function petAccepts(item: string): boolean {
+  return getItem(item).category !== 'consumable';
+}
+
+/**
+ * Punto de descarga de un material: la cinta o la máquina donde de verdad
+ * sirve para algo.
+ *
+ * Se deriva de las recetas, no de una tabla escrita a mano: si mañana añades
+ * una máquina que consuma titanio, la mascota empieza a llevárselo sola.
+ * Se prefiere lo más cercano, y las cintas ganan a igualdad de distancia
+ * porque el material entra a la vista de todos.
+ */
+export interface DropOff {
+  machineId: string;
+  beltId?: string;
+  x: number;
+  y: number;
+  label: string;
+}
+
+/** ¿Admite esta cinta este material, contando su filtro propio? */
+function beltTakes(belt: ConveyorDef, item: string): boolean {
+  if (!belt.feeds) return false;
+  if (belt.accepts?.length) return belt.accepts.includes(item);
+  return item in getMachine(belt.feeds).input;
+}
+
+export function dropOffFor(
+  item: string,
+  factoryLevel: number,
+  from: { x: number; y: number },
+): DropOff | null {
+  if (!petAccepts(item)) return null;
+  let best: (DropOff & { dist: number }) | null = null;
+
+  const consider = (candidate: DropOff, bonus: number) => {
+    const dist = Math.hypot(candidate.x - from.x, candidate.y - from.y) - bonus;
+    if (!best || dist < best.dist) best = { ...candidate, dist };
+  };
+
+  for (const belt of CONVEYORS) {
+    if (!belt.feeds || factoryLevel < belt.fromLevel) continue;
+    if (factoryLevel < getMachine(belt.feeds).unlockFactoryLevel) continue;
+    if (!beltTakes(belt, item)) continue;
+    const p = conveyorLoadPoint(belt);
+    consider(
+      {
+        machineId: belt.feeds,
+        beltId: belt.id,
+        x: p.x,
+        y: p.y,
+        label: belt.label ?? getMachine(belt.feeds).short,
+      },
+      // Empate técnico: la cinta gana, que para eso está.
+      40,
+    );
+  }
+
+  for (const m of MACHINE_LIST) {
+    if (factoryLevel < m.unlockFactoryLevel) continue;
+    if (!(item in m.input)) continue;
+    const p = machineFrontPoint(m);
+    consider({ machineId: m.id, x: p.x, y: p.y + 6, label: m.short }, 0);
+  }
+
+  if (!best) return null;
+  const { dist: _dist, ...out } = best as DropOff & { dist: number };
+  return out;
+}
+
+/** El material del que más lleva encima: es el que decide a dónde va. */
+export function heaviestItem(inventory: Record<string, number>): string | null {
+  let top: string | null = null;
+  let qty = 0;
+  for (const [id, n] of Object.entries(inventory)) {
+    if (n > qty && petAccepts(id)) {
+      qty = n;
+      top = id;
+    }
+  }
+  return top;
+}
+
 /** Lo que rinde una estación por unidad extraída. */
 export function stationYield(s: StationDef): { item: string; amount: number } {
   const y = s.yields?.[0];
@@ -56,6 +154,7 @@ export function addToPet(
   item: string,
   qty: number,
 ): { inventory: Record<string, number>; added: number } {
+  if (!petAccepts(item)) return { inventory: pet.inventory ?? {}, added: 0 };
   const room = petFree(pet);
   const added = Math.max(0, Math.min(Math.floor(qty), room));
   if (added <= 0) return { inventory: pet.inventory ?? {}, added: 0 };

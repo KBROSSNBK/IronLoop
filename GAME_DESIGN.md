@@ -164,13 +164,25 @@ La regla es: **la automatización nunca elimina al jugador, lo asciende.**
 ### La mascota
 
 Cada jugador tiene una. Es **individual** (chasis, color, mejoras y mochila
-propia) y su regla de decisión es deliberadamente simple, para que se entienda
-mirándola dos segundos:
+propia) y tú decides qué hace, igual que con los robots:
+
+| Orden | Qué hace |
+|---|---|
+| ⛏️ Extraer | Busca la zona más cercana, pica hasta llenarse y **deja el material en la cinta o máquina que lo consume**. Nunca acumula carga muerta. |
+| 🐾 Seguir | Sólo te acompaña. Si le quedó material encima, te lo entrega y para. |
+| ⏸️ Reposo | La guardas. No aparece en el mapa. |
+
+En modo Extraer su regla de decisión es deliberadamente simple, para que se
+entienda mirándola dos segundos:
 
 1. ¿Hay una zona de extracción dentro del radio de su sensor y le cabe algo?
-   → va y mina. La minería gana siempre.
-2. ¿Está llena, o no hay nada que minar cerca? → vuelve y te entrega el material.
-3. ¿Ni una cosa ni la otra? → te sigue.
+   → va y pica. La minería gana siempre.
+2. ¿Está llena, o no hay nada que picar cerca? → lleva la carga a su destino.
+3. ¿No hay destino desbloqueado? → te la entrega a ti.
+
+El destino se deriva de las recetas, no de una tabla escrita a mano: añadir una
+máquina que consuma titanio hace que la mascota empiece a llevárselo sola.
+No toca consumibles: no le hacen falta.
 
 Su extracción se simula en cliente y se liquida por tandas contra el servidor,
 acotada por el ritmo real de la mascota: automatiza el paseo, no la progresión

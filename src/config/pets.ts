@@ -13,6 +13,31 @@
 export type PetChassis = 'spot' | 'go2' | 'hound';
 export type PetStat = 'capacity' | 'mining' | 'speed' | 'radius';
 
+/**
+ * Qué está haciendo la mascota. Lo decides tú, igual que con los robots:
+ *  · `gather` — autónoma: busca la zona más cercana, pica y lleva el material
+ *    a la cinta o máquina que le corresponde. Nunca se queda con carga muerta.
+ *  · `follow` — sólo te acompaña. Si le queda material encima, te lo entrega.
+ *  · `off` — recogida. Ni se dibuja ni consume nada.
+ */
+export type PetMode = 'gather' | 'follow' | 'off';
+
+export const PET_MODES: { id: PetMode; label: string; icon: string; desc: string }[] = [
+  {
+    id: 'gather',
+    label: 'Extraer',
+    icon: '⛏️',
+    desc: 'Busca la zona más cercana, pica y deja el material en su cinta o máquina.',
+  },
+  {
+    id: 'follow',
+    label: 'Seguir',
+    icon: '🐾',
+    desc: 'Sólo te acompaña. Si lleva material encima, te lo entrega y deja de trabajar.',
+  },
+  { id: 'off', label: 'Reposo', icon: '⏸️', desc: 'La guardas. No aparece en el mapa.' },
+];
+
 export interface PetChassisDef {
   id: PetChassis;
   name: string;
@@ -207,8 +232,8 @@ export interface PetState {
   lastAt: number;
   /** Unidades extraídas en total. */
   mined: number;
-  /** ¿Está desplegada? Se puede mandar a descansar. */
-  active: boolean;
+  /** Qué le has mandado hacer. */
+  mode: PetMode;
 }
 
 export const DEFAULT_PET: PetState = {
@@ -220,7 +245,7 @@ export const DEFAULT_PET: PetState = {
   inventory: {},
   lastAt: 0,
   mined: 0,
-  active: true,
+  mode: 'gather',
 };
 
 /**
@@ -234,6 +259,11 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
   const chassis = owned.includes(raw?.chassis as PetChassis)
     ? (raw!.chassis as PetChassis)
     : DEFAULT_PET.chassis;
+  // Documentos anteriores a los modos guardaban un simple `active`.
+  const legacyActive = (raw as { active?: boolean } | undefined)?.active;
+  const mode: PetMode =
+    PET_MODES.find((m) => m.id === raw?.mode)?.id ??
+    (legacyActive === false ? 'off' : DEFAULT_PET.mode);
   return {
     chassis,
     owned,
@@ -243,7 +273,7 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
     inventory: { ...(raw?.inventory ?? {}) },
     lastAt: raw?.lastAt || now,
     mined: raw?.mined ?? 0,
-    active: raw?.active ?? true,
+    mode,
   };
 }
 

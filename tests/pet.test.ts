@@ -14,13 +14,19 @@ import {
 } from '../src/config/pets';
 import {
   addToPet,
+  dropOffFor,
+  heaviestItem,
   isPetStation,
   nearestStation,
+  petAccepts,
   PET_STATIONS,
   stationWorkPoint,
   stationYield,
   unloadPet,
 } from '../src/game/logic/pet';
+import { beltCount } from '../src/game/logic/belts';
+import { MACHINE_LIST } from '../src/config/machines';
+import { ITEM_LIST } from '../src/config/items';
 import { PetBrain } from '../src/game/systems/petBrain';
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
@@ -54,7 +60,7 @@ describe('configuración de la mascota', () => {
     const p = createPlayerState({ uid: 'x', displayName: 'X', photoURL: null, email: null }, T0);
     expect(p.pet.owned).toContain('spot');
     expect(p.pet.chassis).toBe('spot');
-    expect(p.pet.active).toBe(true);
+    expect(p.pet.mode).toBe('gather');
   });
 
   it('el chasis de serie es gratis y el resto se desbloquea por nivel', () => {
@@ -158,6 +164,68 @@ describe('detección de zonas de extracción', () => {
   });
 });
 
+/* ──────────────── A DÓNDE VA CADA MATERIAL ──────────────── */
+
+describe('destino del material', () => {
+  const origen = { x: 800, y: 600 };
+
+  it('cada material que la mascota puede extraer tiene destino', () => {
+    for (const s of PET_STATIONS) {
+      const { item } = stationYield(s);
+      // Nivel 12: fábrica madura, todo desbloqueado.
+      expect(dropOffFor(item, 12, origen), `${item} no tiene dónde ir`).not.toBeNull();
+    }
+  });
+
+  it('el destino es una máquina que de verdad consume ese material', () => {
+    for (const item of ['ore', 'copper', 'scrap', 'titanium', 'crystal']) {
+      const bay = dropOffFor(item, 12, origen)!;
+      const def = MACHINE_LIST.find((m) => m.id === bay.machineId)!;
+      expect(Object.keys(def.input), `${item} → ${bay.machineId}`).toContain(item);
+    }
+  });
+
+  it('el mineral siempre acaba en la Fundidora', () => {
+    expect(dropOffFor('ore', 12, origen)!.machineId).toBe('smelter');
+  });
+
+  it('desde el yacimiento entra por la cinta, que es lo que pilla más cerca', () => {
+    const veta = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_a')!);
+    const bay = dropOffFor('ore', 12, veta)!;
+    expect(bay.machineId).toBe('smelter');
+    expect(bay.beltId).toBe('c1');
+  });
+
+  it('lo que no tiene cinta se lleva a la máquina directamente', () => {
+    const bay = dropOffFor('scrap', 12, origen)!;
+    expect(bay.machineId).toBe('recycler');
+    expect(bay.beltId).toBeUndefined();
+  });
+
+  it('con la fábrica recién empezada sólo existe el destino del mineral', () => {
+    expect(dropOffFor('ore', 1, origen)).not.toBeNull();
+    // La Recicladora abre a nivel 4: antes, la chatarra no tiene a dónde ir.
+    expect(dropOffFor('scrap', 1, origen)).toBeNull();
+    expect(dropOffFor('copper', 1, origen)).toBeNull();
+  });
+
+  it('los consumibles no le interesan y no tienen destino', () => {
+    const consumibles = ITEM_LIST.filter((i) => i.category === 'consumable');
+    expect(consumibles.length).toBeGreaterThan(0);
+    for (const c of consumibles) {
+      expect(petAccepts(c.id)).toBe(false);
+      expect(dropOffFor(c.id, 12, origen)).toBeNull();
+    }
+    expect(petAccepts('ore')).toBe(true);
+  });
+
+  it('decide con el material del que más lleva, ignorando consumibles', () => {
+    expect(heaviestItem({ ore: 3, copper: 9 })).toBe('copper');
+    expect(heaviestItem({ energyDrink: 99, ore: 1 })).toBe('ore');
+    expect(heaviestItem({})).toBeNull();
+  });
+});
+
 /* ─────────────────────── PRIORIDADES DE LA IA ─────────────────────── */
 
 describe('prioridades de la mascota', () => {
@@ -181,8 +249,9 @@ describe('prioridades de la mascota', () => {
       ownerY: p.y,
       derived,
       storedUnits: 5, // lleva material, pero minar tiene prioridad
-      active: true,
+      mode: 'gather',
       ownerHasRoom: true,
+      dropOff: null,
     });
     expect(b.state).toBe('MINAR');
   });
@@ -196,8 +265,9 @@ describe('prioridades de la mascota', () => {
       ownerY: p.y,
       derived,
       storedUnits: derived.capacity,
-      active: true,
+      mode: 'gather',
       ownerHasRoom: true,
+      dropOff: null,
     });
     expect(b.state).toBe('VOLVER');
   });
@@ -210,8 +280,9 @@ describe('prioridades de la mascota', () => {
       ownerY: 300,
       derived: { ...derived, radius: 1 },
       storedUnits: 4,
-      active: true,
+      mode: 'gather',
       ownerHasRoom: true,
+      dropOff: null,
     });
     expect(b.state).toBe('VOLVER');
   });
@@ -224,8 +295,9 @@ describe('prioridades de la mascota', () => {
       ownerY: 300,
       derived: { ...derived, radius: 1 },
       storedUnits: 0,
-      active: true,
+      mode: 'gather',
       ownerHasRoom: true,
+      dropOff: null,
     });
     expect(b.state).toBe('SEGUIR');
   });
@@ -239,8 +311,9 @@ describe('prioridades de la mascota', () => {
       ownerY: p.y,
       derived,
       storedUnits: 0,
-      active: false,
+      mode: 'follow',
       ownerHasRoom: true,
+      dropOff: null,
     });
     expect(b.state).toBe('SEGUIR');
   });
@@ -256,8 +329,9 @@ describe('prioridades de la mascota', () => {
         ownerY: p.y,
         derived,
         storedUnits: 0,
-        active: true,
+        mode: 'gather',
         ownerHasRoom: true,
+        dropOff: null,
       });
       if (ev.mined) mined = ev.mined;
     }
@@ -265,6 +339,58 @@ describe('prioridades de la mascota', () => {
     expect(mined!.qty).toBeGreaterThan(0);
     // Nunca acumula más de lo que le cabe.
     expect(b.pending).toBeLessThanOrEqual(derived.capacity);
+  });
+
+  it('llena y con destino, va a la cinta en vez de a su dueño', () => {
+    const p = at('vein_a');
+    const b = brainAt(p.x, p.y);
+    const bay = dropOffFor('ore', 10, { x: p.x, y: p.y })!;
+    b.update(T0, {
+      dt: 0.016,
+      ownerX: p.x,
+      ownerY: p.y,
+      derived,
+      storedUnits: derived.capacity,
+      mode: 'gather',
+      ownerHasRoom: true,
+      dropOff: bay,
+    });
+    expect(b.state).toBe('IR_A_CINTA');
+    expect(b.bay?.machineId).toBe('smelter');
+  });
+
+  it('al llegar a la cinta pide soltar la carga', () => {
+    const bay = dropOffFor('ore', 10, { x: 0, y: 0 })!;
+    const b = brainAt(bay.x, bay.y);
+    const ev = b.update(T0, {
+      dt: 0.016,
+      ownerX: bay.x,
+      ownerY: bay.y,
+      derived: { ...derived, radius: 1 },
+      storedUnits: 10,
+      mode: 'gather',
+      ownerHasRoom: true,
+      dropOff: bay,
+    });
+    expect(ev.deposit?.machineId).toBe('smelter');
+    expect(b.state).toBe('DESCARGAR');
+  });
+
+  it('en modo SEGUIR no reparte por la fábrica: te lo entrega a ti', () => {
+    const bay = dropOffFor('ore', 10, { x: 0, y: 0 })!;
+    const b = brainAt(bay.x, bay.y);
+    const ev = b.update(T0, {
+      dt: 0.016,
+      ownerX: bay.x + 400,
+      ownerY: bay.y,
+      derived,
+      storedUnits: 10,
+      mode: 'follow',
+      ownerHasRoom: true,
+      dropOff: bay,
+    });
+    expect(ev.deposit).toBeNull();
+    expect(b.state).toBe('VOLVER');
   });
 
   it('nunca se sale del mundo ni atraviesa el mapa de golpe', () => {
@@ -277,8 +403,9 @@ describe('prioridades de la mascota', () => {
         ownerY: 800,
         derived,
         storedUnits: 0,
-        active: true,
+        mode: 'gather',
         ownerHasRoom: true,
+        dropOff: null,
       });
       expect(Math.hypot(b.x - before.x, b.y - before.y)).toBeLessThan(12);
     }
@@ -342,11 +469,12 @@ describe('operaciones de la mascota', () => {
     expect(malo.player!.pet.color).toBe(DEFAULT_PET.color);
   });
 
-  it('se puede mandar a reposo y volver a desplegar', () => {
-    const off = runOp('setPetLook', player(), factory(), { active: false, now: T0 });
-    expect(off.player!.pet.active).toBe(false);
-    const on = runOp('setPetLook', off.player!, off.factory!, { active: true, now: T0 });
-    expect(on.player!.pet.active).toBe(true);
+  it('se le puede cambiar la orden de trabajo', () => {
+    const seguir = runOp('setPetLook', player(), factory(), { mode: 'follow', now: T0 });
+    expect(seguir.player!.pet.mode).toBe('follow');
+    const reposo = runOp('setPetLook', seguir.player!, seguir.factory!, { mode: 'off', now: T0 });
+    expect(reposo.player!.pet.mode).toBe('off');
+    expect(runOp('setPetLook', player(), factory(), { mode: 'turbo', now: T0 }).ok).toBe(false);
   });
 
   it('liquida lo minado y lo mete en SU mochila, no en la del jugador', () => {
@@ -402,8 +530,8 @@ describe('operaciones de la mascota', () => {
     ).toBe(false);
   });
 
-  it('en reposo no puede reclamar nada', () => {
-    const p = player({ pet: pet({ active: false }) });
+  it('si no está extrayendo no puede reclamar nada', () => {
+    const p = player({ pet: pet({ mode: 'follow' }) });
     expect(runOp('petMine', p, factory(), { stationId: 'vein_a', qty: 5, now: T0 + 60_000 }).ok)
       .toBe(false);
   });
@@ -443,5 +571,107 @@ describe('operaciones de la mascota', () => {
 
   it('sin nada encima no hay nada que entregar', () => {
     expect(runOp('petUnload', player(), factory(), { now: T0 }).ok).toBe(false);
+  });
+
+  it('la mascota nunca recibe consumibles, ni en su mochila', () => {
+    const p = player({ pet: pet({ inventory: {} }) });
+    expect(addToPet(p.pet, 'energyDrink', 5).added).toBe(0);
+  });
+});
+
+/* ───────────── DEJAR EL MATERIAL DONDE SIRVE ───────────── */
+
+describe('descarga en cinta o máquina', () => {
+  const conCarga = (inv: Record<string, number>, mode: PetState['mode'] = 'gather') =>
+    player({ pet: pet({ inventory: inv, mode }) });
+
+  const nivel = (n: number): FactoryState => ({ ...factory(), level: n });
+
+  it('por cinta el material viaja: no aparece de golpe en la máquina', () => {
+    const out = runOp('petDeposit', conCarga({ ore: 12 }), nivel(6), {
+      machineId: 'smelter',
+      beltId: 'c1',
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.pet.inventory.ore).toBeUndefined();
+    expect(beltCount(out.factory!.belts.c1, 'c1', T0)).toBe(12);
+    expect(out.factory!.machines.smelter.input.ore ?? 0).toBe(0);
+  });
+
+  it('sin cinta entra directo en la máquina y arranca el ciclo', () => {
+    const out = runOp('petDeposit', conCarga({ scrap: 20 }), nivel(6), {
+      machineId: 'recycler',
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.pet.inventory.scrap).toBeUndefined();
+    expect(out.factory!.machines.recycler.cycleStartAt).toBeGreaterThan(0);
+  });
+
+  it('sólo se lleva lo que la máquina admite; el resto se queda encima', () => {
+    const out = runOp('petDeposit', conCarga({ ore: 5, copper: 7 }), nivel(6), {
+      machineId: 'smelter',
+      beltId: 'c1',
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.pet.inventory.copper).toBe(7);
+    expect(out.player!.pet.inventory.ore).toBeUndefined();
+  });
+
+  it('respeta el filtro de la cinta', () => {
+    // La bajante c6 sólo admite cristal, aunque el Laboratorio coma engranajes.
+    const out = runOp('petDeposit', conCarga({ crystal: 3, gear: 4 }), nivel(8), {
+      machineId: 'lab',
+      beltId: 'c6',
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.pet.inventory.gear).toBe(4);
+    expect(beltCount(out.factory!.belts.c6, 'c6', T0)).toBe(3);
+  });
+
+  it('rechaza máquinas y cintas bloqueadas por nivel', () => {
+    expect(
+      runOp('petDeposit', conCarga({ scrap: 5 }), nivel(1), { machineId: 'recycler', now: T0 }).ok,
+    ).toBe(false);
+    expect(
+      runOp('petDeposit', conCarga({ ore: 5 }), nivel(1), {
+        machineId: 'smelter',
+        beltId: 'c1',
+        now: T0,
+      }).ok,
+    ).toBe(false);
+  });
+
+  it('rechaza una cinta que no lleva a esa máquina', () => {
+    expect(
+      runOp('petDeposit', conCarga({ ore: 5 }), nivel(8), {
+        machineId: 'smelter',
+        beltId: 'c5',
+        now: T0,
+      }).ok,
+    ).toBe(false);
+  });
+
+  it('en modo SEGUIR no reparte por la fábrica', () => {
+    expect(
+      runOp('petDeposit', conCarga({ ore: 5 }, 'follow'), nivel(6), {
+        machineId: 'smelter',
+        beltId: 'c1',
+        now: T0,
+      }).ok,
+    ).toBe(false);
+  });
+
+  it('sin material compatible no hace nada', () => {
+    expect(
+      runOp('petDeposit', conCarga({ copper: 5 }), nivel(6), {
+        machineId: 'smelter',
+        beltId: 'c1',
+        now: T0,
+      }).ok,
+    ).toBe(false);
   });
 });

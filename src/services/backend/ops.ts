@@ -39,13 +39,16 @@ import {
   PET_CHASSIS_MAP,
   PET_COLORS,
   PET_RATE_TOLERANCE,
+  PET_MODES,
   PET_STAT_MAP,
+  getChassis,
   normalizePet,
   petStatCost,
 } from '../../config/pets';
 import {
   addToPet,
   isPetStation,
+  petAccepts,
   petFree,
   petMineCap,
   petUsed,
@@ -1266,27 +1269,26 @@ export function opBuyPetStat(
   };
 }
 
-/** Color, detalles y encendido/apagado. Es estética: no cuesta nada. */
+/** Color, detalles y orden de trabajo. Es configuración: no cuesta nada. */
 export function opSetPetLook(
   player: PlayerState,
   factory: FactoryState,
-  args: { color?: string; accent?: string; active?: boolean; now: number },
+  args: { color?: string; accent?: string; mode?: string; now: number },
 ): OpOutcome<{ ok: true }> {
   const pet = normalizePet(player.pet, args.now);
   const color =
     args.color && PET_COLORS.some((c) => c.id === args.color) ? args.color : pet.color;
   const accent =
     args.accent && PET_ACCENTS.some((c) => c.id === args.accent) ? args.accent : pet.accent;
-  const active = typeof args.active === 'boolean' ? args.active : pet.active;
+  const modeDef = args.mode ? PET_MODES.find((m) => m.id === args.mode) : undefined;
+  if (args.mode && !modeDef) return fail('Modo desconocido');
+  const mode = modeDef?.id ?? pet.mode;
 
   return {
     ok: true,
-    player: { ...player, pet: { ...pet, color, accent, active } },
+    player: { ...player, pet: { ...pet, color, accent, mode } },
     factory,
-    events:
-      typeof args.active === 'boolean'
-        ? [{ kind: 'info', text: active ? 'Mascota desplegada' : 'Mascota en reposo' }]
-        : [],
+    events: modeDef ? [{ kind: 'info', text: `Mascota: ${modeDef.label}` }] : [],
     data: { ok: true },
   };
 }
@@ -1309,11 +1311,12 @@ export function opPetMine(
   if (!station || !isPetStation(station.id)) return fail('Estación inválida');
 
   const pet = normalizePet(player.pet, args.now);
-  if (!pet.active) return fail('Mascota en reposo');
+  if (pet.mode !== 'gather') return fail('La mascota no está extrayendo');
 
   // El item lo decide el servidor a partir de la estación: el cliente no elige
-  // qué material saca.
+  // qué material saca. Y los consumibles no le hacen falta.
   const { item, amount } = stationYield(station);
+  if (!petAccepts(item)) return fail('La mascota no recoge ese material');
   const asked = Math.max(0, Math.floor(args.qty || 0));
   if (asked <= 0) return fail('Nada que liquidar');
 
@@ -1349,6 +1352,92 @@ export function opPetMine(
   f = bumpObjectives(f, 'gathered', added, events);
 
   return { ok: true, player: p, factory: f, events, data: { item, qty: added } };
+}
+
+/**
+ * La mascota suelta su carga en la cinta o la máquina que la consume.
+ *
+ * Es la razón de ser del modo EXTRAER: el material no se queda muerto en su
+ * mochila ni depende de que tú tengas hueco, entra directo en la cadena de
+ * producción. El destino se valida contra las recetas y los desbloqueos, así
+ * que no se puede meter cualquier cosa en cualquier sitio.
+ */
+export function opPetDeposit(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { machineId: string; beltId?: string; now: number },
+): OpOutcome<{ deposited: Record<string, number> }> {
+  const pet = normalizePet(player.pet, args.now);
+  if (pet.mode !== 'gather') return fail('La mascota no está extrayendo');
+
+  const def = getMachine(args.machineId);
+  const cur = factory.machines[args.machineId];
+  if (!cur) return fail('Máquina no encontrada');
+  if (factory.level < def.unlockFactoryLevel) return fail('Máquina bloqueada');
+
+  // Si va por cinta, la cinta tiene que existir, estar viva y llevar ahí.
+  let belt: ReturnType<typeof getBelt> | undefined;
+  if (args.beltId) {
+    belt = getBelt(args.beltId);
+    if (!belt || belt.feeds !== args.machineId) return fail('Cinta inválida');
+    if (factory.level < belt.fromLevel) return fail('Cinta sin energía');
+  }
+
+  const allowed = belt?.accepts?.length ? belt.accepts : Object.keys(def.input);
+  const moving: Record<string, number> = {};
+  const inventory = { ...pet.inventory };
+  let units = 0;
+  for (const item of allowed) {
+    const have = Math.max(0, Math.floor(inventory[item] ?? 0));
+    if (have <= 0 || !petAccepts(item)) continue;
+    moving[item] = have;
+    units += have;
+    delete inventory[item];
+  }
+  if (units <= 0) return fail('La mascota no lleva nada para ahí');
+
+  const settled = settleMachine(cur, args.machineId, factory.level, args.now);
+  let machine: MachineState = settled.state;
+  let belts = factory.belts ?? {};
+
+  for (const [item, qty] of Object.entries(moving)) {
+    if (belt) {
+      // Por cinta el material tarda en llegar, y se ve viajar.
+      belts = pushToBelt(belts, belt.id, item, qty, args.now);
+    } else {
+      machine = { ...machine, input: { ...machine.input, [item]: (machine.input[item] ?? 0) + qty } };
+    }
+  }
+  // Volver a liquidar arranca el ciclo si con lo entregado ya hay receta.
+  if (!belt) machine = settleMachine(machine, args.machineId, factory.level, args.now).state;
+
+  const events: OpEvent[] = [
+    {
+      kind: 'info',
+      text: `${getChassis(pet.chassis).name}: ${units} → ${belt?.label ?? def.short}`,
+    },
+  ];
+
+  let p: PlayerState = { ...player, pet: { ...pet, inventory } };
+  p = stat(p, { deposited: units });
+  p = bumpMissions(
+    p,
+    Object.entries(moving).map(([item, amount]) => ({ metric: 'deposit' as const, item, amount })),
+    events,
+  );
+
+  return {
+    ok: true,
+    player: p,
+    factory: {
+      ...factory,
+      machines: { ...factory.machines, [args.machineId]: machine },
+      belts,
+      updatedAt: args.now,
+    },
+    events,
+    data: { deposited: moving },
+  };
 }
 
 /**
@@ -1556,6 +1645,7 @@ export type OpName =
   | 'buyPetStat'
   | 'setPetLook'
   | 'petMine'
+  | 'petDeposit'
   | 'petUnload'
   | 'withdraw'
   | 'dropItem'
@@ -1584,6 +1674,7 @@ export const OPS = {
   buyPetStat: opBuyPetStat,
   setPetLook: opSetPetLook,
   petMine: opPetMine,
+  petDeposit: opPetDeposit,
   petUnload: opPetUnload,
   withdraw: opWithdraw,
   dropItem: opDropItem,
