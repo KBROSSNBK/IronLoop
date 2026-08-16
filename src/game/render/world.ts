@@ -512,7 +512,13 @@ export function drawConveyors(
       }
     }
 
-    // ── Los bultos: uno por unidad real que viaja por la cinta ──
+    /*
+     * ── Los bultos: UNO por tanda, con la cantidad escrita ──
+     *
+     * Antes iba una cajita por unidad, así que una cinta cargada era una
+     * hilera de cien cajas iguales: no había forma de saber cuánto viajaba.
+     * Con un bulto y un «×128» se lee de un vistazo.
+     */
     for (const it of cargo) {
       const def = getItem(it.item);
       // Traqueteo al pasar por los rodillos + entrada/salida suave.
@@ -520,21 +526,40 @@ export function drawConveyors(
       const fade = Math.min(1, it.t * 12, (1 - it.t) * 12);
       ctx.globalAlpha = (active ? 1 : 0.22) * Math.max(0.15, fade);
 
+      // Un bulto grande engorda un poco con la carga, para que se note.
+      const ancho = it.qty > 1 ? 20 : 16;
+      const bx = it.x - ancho / 2;
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      roundRect(ctx, it.x - 8, it.y - 3 + jitter, 16, 12, 3);
+      roundRect(ctx, bx, it.y - 3 + jitter, ancho, 12, 3);
       ctx.fill();
       ctx.fillStyle = '#7c4a1e';
-      roundRect(ctx, it.x - 8, it.y - 8 + jitter, 16, 15, 3);
+      roundRect(ctx, bx, it.y - 9 + jitter, ancho, 16, 3);
       ctx.fill();
       ctx.fillStyle = def.color;
-      ctx.fillRect(it.x - 8, it.y - 3 + jitter, 16, 3.5);
+      ctx.fillRect(bx, it.y - 3 + jitter, ancho, 3.5);
       ctx.fillStyle = 'rgba(255,255,255,0.12)';
-      roundRect(ctx, it.x - 8, it.y - 8 + jitter, 16, 4, 3);
+      roundRect(ctx, bx, it.y - 9 + jitter, ancho, 4, 3);
       ctx.fill();
-      ctx.font = '9px "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
+      ctx.font = '10px "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(def.icon, it.x, it.y - 5.5 + jitter);
+      ctx.fillText(itemGlyph(it.item), it.x, it.y - 6 + jitter);
+
+      // La cifra, en una chapita al lado para que no tape el icono.
+      if (it.qty > 1) {
+        const txt = `×${it.qty}`;
+        ctx.font = '800 10px "Rajdhani", system-ui, sans-serif';
+        const tw = ctx.measureText(txt).width + 8;
+        const ty = it.y + 12 + jitter;
+        ctx.fillStyle = 'rgba(6,11,20,0.92)';
+        roundRect(ctx, it.x - tw / 2, ty - 7, tw, 14, 6);
+        ctx.fill();
+        ctx.strokeStyle = hexA(def.color, 0.65);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillText(txt, it.x, ty);
+      }
     }
     ctx.globalAlpha = active ? 1 : 0.22;
     ctx.restore();

@@ -208,9 +208,17 @@ export function GameCanvas() {
 
     /* Escuadrilla de drones: uno por perro, más tu escolta. Van en dúo. */
     const drones: DroneBrain[] = [];
-    /* Las entregas van de una en una: son escrituras contra el servidor y
-       encadenarlas a lo bruto atasca la cola y las acciones del jugador. */
-    let droneBusy = false;
+    /*
+     * RITMO DE ENTREGAS, no turno de uno en uno.
+     *
+     * Antes había un cerrojo global: mientras un dron liquidaba su entrega,
+     * los otros cuatro se quedaban flotando sobre su máquina con la carga
+     * colgando —"pegados"— hasta que terminaba la transacción del primero.
+     * La cola de operaciones ya serializa las escrituras, así que aquí basta
+     * con no dispararlas todas en el mismo fotograma.
+     */
+    const DRONE_OP_GAP_MS = 130;
+    let nextDroneOpAt = 0;
 
     /* Lo que la fábrica está esperando, para el modo automático de la jauría. */
     const NEEDS_REFRESH_MS = 1500;
@@ -1061,7 +1069,7 @@ export function GameCanvas() {
             dogY: perro.y,
             items,
             source: escolta ? 'player' : 'pet',
-            canDeliver: !droneBusy,
+            canDeliver: nowMs >= nextDroneOpAt,
             carry: squad.carry,
             speed: squad.speed,
             ownerX: me.x,
@@ -1070,7 +1078,7 @@ export function GameCanvas() {
             now,
           });
           if (dev.deliver) {
-            droneBusy = true;
+            nextDroneOpAt = nowMs + DRONE_OP_GAP_MS;
             const { bay, items: carga, units, source } = dev.deliver;
             void session
               .op(source === 'pet' ? 'petDeposit' : 'droneHaul', {
@@ -1086,9 +1094,6 @@ export function GameCanvas() {
                   fx.ring(bay.x, bay.y, '#38bdf8', 7);
                   emit('sfx', { name: 'machine', volume: 0.4 });
                 }
-              })
-              .finally(() => {
-                droneBusy = false;
               });
           }
         }
@@ -1108,7 +1113,7 @@ export function GameCanvas() {
             dogY: caex.y - 22,
             items: player.caex.bag ?? {},
             source: 'pet',
-            canDeliver: !droneBusy && !caexBusy,
+            canDeliver: nowMs >= nextDroneOpAt && !caexBusy,
             carry: caexDerived.droneCarry,
             speed: caexDerived.droneSpeed,
             ownerX: caex.x,
@@ -1117,7 +1122,7 @@ export function GameCanvas() {
             now,
           });
           if (dev.deliver) {
-            droneBusy = true;
+            nextDroneOpAt = nowMs + DRONE_OP_GAP_MS;
             const { bay, items: carga, units } = dev.deliver;
             void session
               .op('caexDeposit', {
@@ -1132,9 +1137,6 @@ export function GameCanvas() {
                   fx.ring(bay.x, bay.y, '#fbbf24', 8);
                   emit('sfx', { name: 'machine', volume: 0.4 });
                 }
-              })
-              .finally(() => {
-                droneBusy = false;
               });
           }
         } else {

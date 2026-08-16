@@ -27,6 +27,30 @@ export const DRONE_ALTITUDE = 30;
 const ARRIVE = 7;
 
 /**
+ * DISTANCIA DE ENGANCHE.
+ *
+ * Para cargar no hace falta tocar a su pareja: el dron baja el cable y engancha
+ * desde un poco más lejos. Y eso es justo lo que le permite trabajar sobre algo
+ * EN MOVIMIENTO — con la tolerancia de 7 px de "posarse" nunca terminaba de
+ * alcanzar a un CAEX en marcha.
+ */
+const PICKUP_RANGE = 30;
+
+/** Y para soltar, otro tanto: se vacía sobre la tolva, no dentro de ella. */
+const DROP_RANGE = 16;
+
+/**
+ * Velocidad mínima al ir a por la carga, en fracción de su punta.
+ *
+ * Al acercarse, el dron frena de forma proporcional para no pasarse. Con un
+ * objetivo quieto está bien; con uno que anda, esa frenada dejaba su velocidad
+ * por debajo de la del propio objetivo y no lo alcanzaba JAMÁS: se quedaba
+ * persiguiendo al camión eternamente a dos metros. Con este suelo siempre lo
+ * caza y luego vuela a su lado.
+ */
+const CHASE_MIN_SPEED = 0.6;
+
+/**
  * Aceleración del vuelo, en "veces la velocidad punta por segundo". Sin esto
  * el dron cambiaba de dirección en seco y parecía un cursor, no una máquina
  * con inercia.
@@ -158,12 +182,23 @@ export class DroneBrain {
    * Vuelo con inercia: acelera hacia el objetivo y frena al llegar, en vez de
    * teletransportarse en línea recta a velocidad constante. Devuelve true
    * cuando ya está encima del punto.
+   *
+   * `arrive` es lo cerca que hace falta estar, y `minSpeed` un suelo de
+   * velocidad para perseguir cosas que se mueven: sin él, la frenada de
+   * aproximación lo dejaba más lento que su presa y no la alcanzaba nunca.
    */
-  private flyTo(tx: number, ty: number, speed: number, dt: number): boolean {
+  private flyTo(
+    tx: number,
+    ty: number,
+    speed: number,
+    dt: number,
+    arrive = ARRIVE,
+    minSpeed = 0,
+  ): boolean {
     const dx = tx - this.x;
     const dy = ty - this.y;
     const d = Math.hypot(dx, dy);
-    if (d <= ARRIVE) {
+    if (d <= arrive) {
       // Amortigua en vez de clavarse: se queda flotando en el sitio.
       this.vx *= Math.max(0, 1 - dt * 6);
       this.vy *= Math.max(0, 1 - dt * 6);
@@ -173,7 +208,7 @@ export class DroneBrain {
     }
 
     // Freno proporcional a lo que queda: llega suave, no de morros.
-    const objetivo = speed * Math.min(1, d / BRAKE_DIST);
+    const objetivo = Math.max(minSpeed, speed * Math.min(1, d / BRAKE_DIST));
     const deseadaX = (dx / d) * objetivo;
     const deseadaY = (dy / d) * objetivo;
     const k = Math.min(1, ACCEL * dt);
@@ -232,7 +267,21 @@ export class DroneBrain {
           this.state = 'ESPERA';
           break;
         }
-        if (this.flyTo(parejaX, parejaY - DRONE_ALTITUDE, speed, dt)) {
+        /*
+         * A por la carga, esté quieta o EN MARCHA. Engancha desde un poco
+         * lejos y sin frenar por debajo de cierta velocidad, que es lo que le
+         * permite alcanzar al CAEX rodando o a un perro que cruza el mapa.
+         */
+        if (
+          this.flyTo(
+            parejaX,
+            parejaY - DRONE_ALTITUDE,
+            speed,
+            dt,
+            PICKUP_RANGE,
+            speed * CHASE_MIN_SPEED,
+          )
+        ) {
           this.state = 'CARGANDO';
           this.until = now + 420;
         }
@@ -240,6 +289,17 @@ export class DroneBrain {
       }
 
       case 'CARGANDO': {
+        // Carga EN MOVIMIENTO: mientras sube el material vuela pegado a su
+        // pareja en vez de quedarse plantado. Así el camión no tiene que
+        // parar la ronda para que le vacíen la tolva.
+        this.flyTo(
+          parejaX,
+          parejaY - DRONE_ALTITUDE,
+          speed,
+          dt,
+          PICKUP_RANGE * 0.7,
+          speed * CHASE_MIN_SPEED,
+        );
         if (now < this.until) break;
         // La ruta se calcula AQUÍ, con el material que de verdad hay ahora.
         this.route = planHaul(items, carry, factoryLevel, { x: this.x, y: this.y });
@@ -262,8 +322,14 @@ export class DroneBrain {
           this.finish();
           break;
         }
-        if (this.flyTo(parada.bay.x, parada.bay.y - DRONE_ALTITUDE, speed, dt)) {
-          // Sobre la máquina, pero si hay otra entrega en curso espera aquí
+        /*
+         * Soltar no exige precisión de cirujano: basta con estar sobre la
+         * tolva. Con la tolerancia de 7 px el dron llegaba con inercia, se
+         * pasaba, volvía, y daba dos o tres vueltas con la carga colgando
+         * antes de decidirse — que es justo lo que parecía "quedarse pegado".
+         */
+        if (this.flyTo(parada.bay.x, parada.bay.y - DRONE_ALTITUDE, speed, dt, DROP_RANGE)) {
+          // Encima de la máquina, pero si toca esperar turno se queda aquí
           // arriba: soltar sin poder liquidar sería tirar el viaje.
           if (!canDeliver) break;
           this.state = 'SOLTANDO';

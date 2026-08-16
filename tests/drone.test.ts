@@ -308,3 +308,145 @@ describe('el dron no se va con otro', () => {
     expect(d.state).toBe('AL_DESTINO');
   });
 });
+
+/* ─────────────── CARGAR SOBRE ALGO QUE SE MUEVE ─────────────── */
+
+/**
+ * El CAEX no para: hace su ronda sin descanso. Su dron tenía que poder
+ * engancharle la tolva EN MARCHA — y no podía, porque al acercarse frenaba de
+ * forma proporcional y su velocidad acababa por debajo de la del propio
+ * camión: se quedaba persiguiéndolo eternamente a dos metros.
+ */
+describe('el dron alcanza a su pareja aunque vaya en marcha', () => {
+  const base = {
+    dt: 0.05,
+    carry: 40,
+    speed: 230,
+    factoryLevel: 12,
+    canDeliver: true,
+    source: 'pet' as const,
+    items: { ore: 30 },
+  };
+
+  /** Simula el dron persiguiendo algo que avanza a `vel` px/s. */
+  function persigue(vel: number) {
+    const d = new DroneBrain(1);
+    d.reset(600, 600);
+    let camionX = 600;
+    let entrega = null;
+    let alcanzado = false;
+    for (let i = 0; i < 1200 && !entrega; i++) {
+      camionX += vel * base.dt;
+      const r = d.update({
+        ...base,
+        dogX: camionX,
+        dogY: 600,
+        ownerX: camionX,
+        ownerY: 600,
+        now: T0 + i * 50,
+      });
+      if (d.state === 'CARGANDO' || d.load > 0) alcanzado = true;
+      if (r.deliver) entrega = r.deliver;
+    }
+    return { alcanzado, entrega, distanciaFinal: Math.abs(d.x - camionX) };
+  }
+
+  it('con la pareja parada, carga y entrega', () => {
+    const r = persigue(0);
+    expect(r.alcanzado).toBe(true);
+    expect(r.entrega).not.toBeNull();
+  });
+
+  it('con la pareja rodando como el CAEX, también', () => {
+    // 96 px/s es la marcha del camión.
+    const r = persigue(96);
+    expect(r.alcanzado).toBe(true);
+    expect(r.entrega).not.toBeNull();
+    expect(r.entrega!.units).toBeGreaterThan(0);
+  });
+
+  it('incluso con una pareja rápida, la caza', () => {
+    // Un perro con los servos a tope no llega a esto, así que hay margen.
+    const r = persigue(180);
+    expect(r.alcanzado).toBe(true);
+    expect(r.entrega).not.toBeNull();
+  });
+
+  it('no la alcanza si corre más que él, y no se cuelga por intentarlo', () => {
+    const r = persigue(400);
+    // No pasa nada: sigue en su persecución sin romperse ni cargar de la nada.
+    expect(r.entrega).toBeNull();
+  });
+});
+
+/* ─────────────── SIN CERROJOS: NADIE SE QUEDA COLGADO ─────────────── */
+
+/**
+ * Había un cerrojo global de entregas: mientras un dron liquidaba la suya,
+ * los demás se quedaban flotando sobre su máquina con la carga puesta hasta
+ * que el primero terminaba. Con cinco drones eso se veía todo el rato.
+ */
+describe('varios drones entregan sin esperarse unos a otros', () => {
+  it('cuatro drones sueltan su carga en la misma ventana de tiempo', () => {
+    const flota = [0, 1, 2, 3].map((i) => {
+      const d = new DroneBrain(i);
+      d.reset(700 + i * 40, 700);
+      return d;
+    });
+    const entregas = new Set<number>();
+    for (let i = 0; i < 1500; i++) {
+      flota.forEach((d, idx) => {
+        const r = d.update({
+          dt: 0.05,
+          dogX: 700 + idx * 40,
+          dogY: 700,
+          items: { ore: 20 },
+          source: 'pet',
+          canDeliver: true,
+          carry: 18,
+          speed: 210,
+          ownerX: 700,
+          ownerY: 700,
+          factoryLevel: 12,
+          now: T0 + i * 50,
+        });
+        if (r.deliver) entregas.add(idx);
+      });
+      if (entregas.size === flota.length) break;
+    }
+    expect(entregas.size).toBe(4);
+  });
+
+  it('esperar turno no pierde la carga: la suelta en cuanto puede', () => {
+    const d = new DroneBrain(1);
+    d.reset(700, 700);
+    const tick = (canDeliver: boolean, i: number) =>
+      d.update({
+        dt: 0.05,
+        dogX: 700,
+        dogY: 700,
+        items: { ore: 20 },
+        source: 'pet',
+        canDeliver,
+        carry: 18,
+        speed: 210,
+        ownerX: 700,
+        ownerY: 700,
+        factoryLevel: 12,
+        now: T0 + i * 50,
+      });
+
+    // Con el turno cerrado llega, espera arriba y NO suelta.
+    let i = 0;
+    for (; i < 600; i++) if (tick(false, i).deliver) throw new Error('no debería entregar');
+    expect(d.load).toBeGreaterThan(0);
+    expect(d.state).toBe('AL_DESTINO');
+
+    // En cuanto se abre, entrega lo mismo que llevaba.
+    const llevaba = d.load;
+    let entrega = null;
+    for (; i < 700 && !entrega; i++) entrega = tick(true, i).deliver;
+    expect(entrega).not.toBeNull();
+    expect(entrega!.units).toBeLessThanOrEqual(llevaba);
+  });
+});

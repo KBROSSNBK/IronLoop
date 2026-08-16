@@ -87,7 +87,7 @@ describe('material viajando por la cinta', () => {
     expect(beltCount(belts[BELT], BELT, T0 + travel + 8 * BELT_ITEM_GAP_MS)).toBe(0);
   });
 
-  it('dibuja un bulto por unidad, repartidos por la cinta', () => {
+  it('dibuja los bultos dentro de la cinta y con su material', () => {
     const belts = pushToBelt({}, BELT, 'crystal', 4, T0);
     const travel = beltTravelMs(getBelt(BELT)!);
     const items = beltItems(BELT, belts[BELT], T0 + travel * 0.6);
@@ -173,5 +173,69 @@ describe('material viajando por la cinta', () => {
     const out = settleBelts(f, T0 + 10_000);
     expect(out.deliveries).toHaveLength(0);
     expect(out.factory).toBe(f);
+  });
+});
+
+/* ─────────── UN BULTO POR TANDA, CON SU CIFRA ─────────── */
+
+/**
+ * Antes se dibujaba una cajita por unidad: una cinta cargada era una hilera de
+ * cien cajas iguales y no había forma de saber cuánto material iba de verdad.
+ * Ahora va un bulto con su «×N» — y ese número tiene que ser EXACTO, porque si
+ * miente da la sensación de que la cinta pierde cosas.
+ */
+describe('lo que se ve en la cinta es lo que lleva', () => {
+  it('una tanda es UN bulto, no una hilera', () => {
+    const belts = pushToBelt({}, BELT, 'crystal', 40, T0);
+    const items = beltItems(BELT, belts[BELT], T0 + 200);
+    expect(items).toHaveLength(1);
+    expect(items[0].qty).toBe(40);
+  });
+
+  it('la cifra del bulto coincide SIEMPRE con lo que queda en la cinta', () => {
+    const travel = beltTravelMs(getBelt(BELT)!);
+    const belts = pushToBelt({}, BELT, 'crystal', 30, T0);
+    const fin = T0 + travel + 30 * BELT_ITEM_GAP_MS + 500;
+    for (let t = T0; t <= fin; t += 211) {
+      const visto = beltItems(BELT, belts[BELT], t).reduce((a, i) => a + i.qty, 0);
+      expect(visto, `en t=${t - T0}`).toBe(beltCount(belts[BELT], BELT, t));
+    }
+  });
+
+  it('con varios materiales, un bulto por cada uno', () => {
+    let belts = pushToBelt({}, BELT, 'crystal', 12, T0);
+    // Un material distinto entra detrás, sin montarse encima del anterior.
+    belts = pushToBelt(belts, BELT, 'gear', 5, T0 + 3000);
+    const entra = belts[BELT].queue[1].at;
+    const t = entra + 200;
+    const items = beltItems(BELT, belts[BELT], t);
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.item).sort()).toEqual(['crystal', 'gear']);
+    // Y entre los dos suman exactamente lo que queda sobre la banda.
+    expect(items.reduce((a, i) => a + i.qty, 0)).toBe(beltCount(belts[BELT], BELT, t));
+  });
+
+  it('el bulto avanza hasta la máquina y no se sale de la cinta', () => {
+    const travel = beltTravelMs(getBelt(BELT)!);
+    const belts = pushToBelt({}, BELT, 'crystal', 8, T0);
+    let anterior = -1;
+    // Mientras no ha empezado a entregar, sólo avanza.
+    for (let k = 0; k <= 9; k++) {
+      const it = beltItems(BELT, belts[BELT], T0 + (travel * k) / 10)[0];
+      expect(it).toBeTruthy();
+      expect(it.t).toBeGreaterThanOrEqual(anterior);
+      anterior = it.t;
+    }
+    /*
+     * Al empezar a entregar, el bulto RETROCEDE a propósito: enseña dónde
+     * está la primera unidad que aún no ha entrado, o sea, se va comiendo por
+     * delante. Lo que no puede es salirse de la banda.
+     */
+    for (let k = 0; k <= 8; k++) {
+      const it = beltItems(BELT, belts[BELT], T0 + travel + k * BELT_ITEM_GAP_MS)[0];
+      if (!it) break;
+      expect(it.t).toBeGreaterThanOrEqual(0);
+      expect(it.t).toBeLessThanOrEqual(1);
+    }
   });
 });

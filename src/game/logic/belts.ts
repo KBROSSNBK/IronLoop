@@ -34,9 +34,6 @@ export const BELT_ITEM_GAP = 26;
  */
 export const BELT_ITEM_GAP_MS = (BELT_ITEM_GAP / BELT_SPEED) * 1000;
 
-/** Cuántos bultos como máximo se dibujan por tanda (rendimiento). */
-const MAX_DRAWN_PER_BATCH = 24;
-
 export const BELT_MAP: Record<string, ConveyorDef> = Object.fromEntries(
   CONVEYORS.map((c) => [c.id, c]),
 );
@@ -299,12 +296,19 @@ export interface BeltItemVisual {
   item: string;
   /** 0..1 dentro del recorrido, para efectos de entrada/salida. */
   t: number;
+  /** Unidades que van en este bulto. Se pinta como «×128». */
+  qty: number;
 }
 
 /**
- * Posiciones reales de los bultos que hay en la cinta. Un lote de N unidades
- * se dibuja como una hilera de bultos separados, de modo que una cinta
- * saturada se ve saturada y una con poca carga se ve casi vacía.
+ * Los bultos que hay en la cinta: UNO por tanda, con su cantidad encima.
+ *
+ * Antes se dibujaba una cajita por unidad y una cinta cargada era una hilera
+ * de cien cajas idénticas: bonito un rato y luego imposible saber cuánto
+ * material iba de verdad. Con un bulto y un «×128» se lee de un vistazo.
+ *
+ * La lógica de entrega no cambia ni un ápice: el material sigue entrando en
+ * la máquina de unidad en unidad (ver `beltArrived`). Esto es sólo la cara.
  */
 export function beltItems(
   beltId: string,
@@ -320,21 +324,19 @@ export function beltItems(
   for (const batch of state.queue) {
     const age = now - batch.at;
     if (age < 0 || batchDone(def, batch, now)) continue;
+
+    // Lo ya entregado no se pinta: el bulto lleva lo que de verdad queda.
+    const entregadas = beltArrived(def, batch, now);
+    const quedan = batch.qty - entregadas;
+    if (quedan <= 0) continue;
+
+    // El bulto va donde está la primera unidad que aún no ha llegado, que es
+    // la cabeza del tren que queda por entrar.
     const head = (age / travel) * len;
-    // Se dibuja SÓLO la ventana de bultos que está encima de la banda: los
-    // que ya han entrado en la máquina y los que aún no han salido del
-    // cargador quedan fuera. Así la hilera se vacía por delante mientras
-    // sigue entrando por detrás, sin desapariciones de golpe.
-    const iStart = Math.max(0, Math.ceil((head - len) / BELT_ITEM_GAP));
-    const iEnd = Math.min(batch.qty - 1, Math.floor(head / BELT_ITEM_GAP));
-    const iTop = Math.min(iEnd, iStart + MAX_DRAWN_PER_BATCH - 1);
-    for (let i = iStart; i <= iTop; i++) {
-      const d = head - i * BELT_ITEM_GAP;
-      if (d < 0 || d > len) continue;
-      const t = d / len;
-      const p = beltPointAt(def, t);
-      out.push({ x: p.x, y: p.y, item: batch.item, t });
-    }
+    const d = Math.max(0, Math.min(len, head - entregadas * BELT_ITEM_GAP));
+    const t = d / len;
+    const p = beltPointAt(def, t);
+    out.push({ x: p.x, y: p.y, item: batch.item, t, qty: quedan });
   }
   return out;
 }
