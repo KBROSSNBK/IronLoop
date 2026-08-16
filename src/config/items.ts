@@ -213,16 +213,74 @@ export const ITEMS = {
     color: '#f472b6',
     desc: 'Lo último que sabe fabricar la planta. Nada vale más.',
   },
+  /*
+   * ── LEGADO ──
+   *
+   * La bebida energética ya no se da ni se vende: la estamina se recupera
+   * sola. Pero la definición SE QUEDA, porque hay partidas guardadas con
+   * botellas en la mochila y un item que existe en el documento y no en el
+   * catálogo reventaba el juego entero. Se puede usar y tirar; no vuelve.
+   */
+  energyDrink: {
+    id: 'energyDrink',
+    name: 'Bebida Energética',
+    icon: '🥤',
+    category: 'consumable',
+    sellPrice: 0,
+    contribValue: 0,
+    weight: 1,
+    color: '#22d3ee',
+    desc: 'Restaura 60 de estamina. Ya no se fabrica: gástate las que te queden.',
+  },
 } as const satisfies Record<string, ItemDef>;
 
 export type ItemId = keyof typeof ITEMS;
 
-export const ITEM_LIST = Object.values(ITEMS) as ItemDef[];
+/** Lo que se muestra en catálogos y listas: sin los restos del pasado. */
+export const LEGACY_ITEMS = ['energyDrink'] as const;
+
+export const ITEM_LIST = (Object.values(ITEMS) as ItemDef[]).filter(
+  (i) => !(LEGACY_ITEMS as readonly string[]).includes(i.id),
+);
+
+/** Todos, incluidos los de legado. Para inventarios de partidas viejas. */
+export const ALL_ITEMS = Object.values(ITEMS) as ItemDef[];
+
+/**
+ * Material desconocido: un documento viejo (o manipulado) puede traer ids que
+ * ya no existen en el catálogo.
+ *
+ * ESTO NO PUEDE REVENTAR. Antes lanzaba una excepción, y como `getItem` se
+ * llama desde el bucle de dibujo, una sola botella olvidada en la mochila
+ * mataba el `requestAnimationFrame`: las mascotas se quedaban congeladas y el
+ * juego dejaba de responder a los clics. Ahora devuelve un item inerte —sin
+ * valor, sin receta, imposible de vender— y la partida sigue.
+ */
+function unknownItem(id: string): ItemDef {
+  return {
+    id,
+    name: 'Material desconocido',
+    icon: '❔',
+    category: 'raw',
+    sellPrice: 0,
+    contribValue: 0,
+    weight: 1,
+    color: '#64748b',
+    desc: 'Resto de una versión anterior de la fábrica. Ya no sirve para nada.',
+  };
+}
+
+const unknownCache = new Map<string, ItemDef>();
 
 export function getItem(id: string): ItemDef {
   const item = (ITEMS as Record<string, ItemDef>)[id];
-  if (!item) throw new Error(`Item desconocido: ${id}`);
-  return item;
+  if (item) return item;
+  let fake = unknownCache.get(id);
+  if (!fake) {
+    fake = unknownItem(id);
+    unknownCache.set(id, fake);
+  }
+  return fake;
 }
 
 export function isItemId(id: string): id is ItemId {
@@ -240,6 +298,8 @@ export function itemGlyph(id: string): string {
 
 /**
  * Efectos de consumibles — data driven para poder añadir más sin tocar lógica.
- * Ahora mismo no hay ninguno: la estamina se recupera sola con el tiempo.
+ * Sólo queda el de legado: sirve para vaciar las botellas que ya tuvieras.
  */
-export const CONSUMABLE_EFFECTS: Record<string, { stamina?: number }> = {};
+export const CONSUMABLE_EFFECTS: Record<string, { stamina?: number }> = {
+  energyDrink: { stamina: 60 },
+};

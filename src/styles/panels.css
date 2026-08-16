@@ -693,22 +693,171 @@
 .r-chip[data-ok='true'] u { color: var(--green); }
 .r-chip.out u { color: var(--blue); }
 
-/* ── Personalización: vista previa y opciones ── */
-
-/* Girar el personaje y probar la pose: los efectos y el perfil sólo se
-   aprecian en movimiento y desde el ángulo correcto. */
-.preview-ctl {
+/* ── VESTIDOR ──
+   El personaje SIEMPRE a la vista y una pestaña por parte del cuerpo. Antes
+   eran nueve filas de fichas seguidas: para cambiar el pelo había que bucear
+   entre colores de ropa, y el muñeco quedaba tan arriba que ni se veía el
+   cambio que acababas de hacer. */
+.dressing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dressing-stage {
   display: flex;
   align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
   justify-content: center;
+  gap: 6px;
 }
-.preview-ctl .sep {
-  width: 1px;
-  height: 20px;
-  background: rgba(255, 255, 255, 0.14);
-  margin: 0 3px;
+.dressing-stage .turn {
+  width: 34px;
+  height: 62px;
+  flex: none;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.dressing-stage .turn:hover {
+  background: rgba(34, 211, 238, 0.16);
+  color: var(--cyan);
+}
+.pose-row {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+}
+
+.wardrobe {
+  display: flex;
+  gap: 8px;
+  min-height: 178px;
+}
+/* Raíl de categorías: iconos grandes, siempre visibles. */
+.cat-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+  width: 74px;
+}
+.cat-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-mute);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.cat-btn .ico { font-style: normal; font-size: 17px; line-height: 1.1; }
+.cat-btn:hover { background: rgba(255, 255, 255, 0.09); }
+.cat-btn[data-on='true'] {
+  background: rgba(34, 211, 238, 0.18);
+  border-left-color: var(--cyan);
+  color: var(--cyan-soft);
+}
+
+.cat-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.028);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+.wardrobe-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--text-mute);
+  margin-bottom: 5px;
+}
+/* Fichas grandes: se elige por icono, no leyendo una lista. */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  gap: 5px;
+}
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 7px 3px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s, transform 0.14s;
+}
+.tile:hover { background: rgba(255, 255, 255, 0.1); transform: translateY(-1px); }
+.tile .ico { font-style: normal; font-size: 19px; line-height: 1; }
+.tile .nm {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.15;
+}
+.tile[data-on='true'] {
+  background: rgba(34, 211, 238, 0.2);
+  border-color: var(--cyan);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.4);
+}
+.tile[data-on='true'] .nm { color: var(--cyan-soft); }
+.tile .pin {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 9px;
+  color: var(--amber-soft);
+}
+
+.tone-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.tone {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.12s;
+}
+.tone:hover { transform: scale(1.1); }
+.tone[data-on='true'] {
+  border-color: var(--cyan);
+  box-shadow: var(--shadow-glow);
+  transform: scale(1.12);
+}
+
+/* En pantallas anchas, el muñeco al lado del vestidor y no encima. */
+@media (min-width: 560px) {
+  .dressing {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      'stage wardrobe'
+      'pose  wardrobe';
+    align-items: start;
+    column-gap: 10px;
+  }
+  .dressing-stage { grid-area: stage; }
+  .pose-row { grid-area: pose; }
+  .wardrobe { grid-area: wardrobe; }
 }
 
 /* El icono hace reconocible cada opción antes de leer el nombre. */

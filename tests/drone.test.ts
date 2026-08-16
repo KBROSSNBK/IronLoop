@@ -4,6 +4,7 @@ import { DRONE, DEFAULT_PET, PACK, deriveDrones, droneSlots } from '../src/confi
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { getBelt, beltCount } from '../src/game/logic/belts';
+import { DroneBrain } from '../src/game/systems/droneBrain';
 import type { FactoryState, PlayerState } from '../src/types';
 
 const T0 = 1_700_000_000_000;
@@ -227,5 +228,83 @@ describe('el dron entrega exactamente lo que carga', () => {
     });
     expect(out.ok).toBe(false);
     expect(p.inventory.ore).toBe(10);
+  });
+});
+
+/* ─────────────── CADA DRON CON SU PAREJA, Y SÓLO CON ELLA ─────────────── */
+
+describe('el dron no se va con otro', () => {
+  const base = {
+    dt: 0.05,
+    carry: 18,
+    speed: 210,
+    factoryLevel: 12,
+    canDeliver: true,
+    ownerX: 400,
+    ownerY: 400,
+    dogX: 1400,
+    dogY: 900,
+  };
+
+  it('tu escolta ignora lo que lleva el perro', () => {
+    const d = new DroneBrain(0);
+    d.reset(base.ownerX, base.ownerY);
+    for (let i = 0; i < 20; i++) {
+      d.update({ ...base, items: {}, source: 'player', now: T0 + i * 50 });
+    }
+    // El perro está cargadísimo, pero eso no es asunto suyo.
+    expect(d.state).toBe('ESPERA');
+    expect(d.load).toBe(0);
+    // Y se queda pegado a ti, no junto al perro.
+    expect(Math.hypot(d.x - base.ownerX, d.y - base.ownerY)).toBeLessThan(90);
+  });
+
+  it('el dron de un perro no te vacía a ti la mochila', () => {
+    const d = new DroneBrain(1);
+    d.reset(base.dogX, base.dogY);
+    for (let i = 0; i < 20; i++) {
+      d.update({ ...base, items: {}, source: 'pet', now: T0 + i * 50 });
+    }
+    expect(d.state).toBe('ESPERA');
+    // Espera junto a SU perro, al otro lado del mapa.
+    expect(Math.hypot(d.x - base.dogX, d.y - base.dogY)).toBeLessThan(90);
+  });
+
+  it('con carga de su pareja, arranca el viaje', () => {
+    const d = new DroneBrain(1);
+    d.reset(base.dogX, base.dogY);
+    let out = null;
+    for (let i = 0; i < 600 && !out; i++) {
+      const r = d.update({
+        ...base,
+        items: { ore: 12, crystal: 1 },
+        source: 'pet',
+        now: T0 + i * 50,
+      });
+      if (r.deliver) out = r.deliver;
+    }
+    expect(out).not.toBeNull();
+    expect(out!.source).toBe('pet');
+    expect(out!.units).toBeGreaterThan(0);
+  });
+
+  it('si no se puede liquidar, espera sobre la máquina sin soltar', () => {
+    const d = new DroneBrain(1);
+    d.reset(base.dogX, base.dogY);
+    let entregas = 0;
+    for (let i = 0; i < 600; i++) {
+      const r = d.update({
+        ...base,
+        canDeliver: false,
+        items: { ore: 12 },
+        source: 'pet',
+        now: T0 + i * 50,
+      });
+      if (r.deliver) entregas++;
+    }
+    // Ni una entrega: se queda flotando con la carga puesta.
+    expect(entregas).toBe(0);
+    expect(d.load).toBeGreaterThan(0);
+    expect(d.state).toBe('AL_DESTINO');
   });
 });

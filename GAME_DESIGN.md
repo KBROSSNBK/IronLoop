@@ -223,13 +223,21 @@ máquina que consuma titanio hace que la mascota empiece a llevárselo sola.
 Puede sacar exactamente lo mismo que tú; lo único que no toca son consumibles,
 porque no le hacen falta.
 
+**Automático no es «lo que pille cerca».** Un perro sin encargo mira las
+máquinas, busca la que está más cerca de arrancar y le falta UN ingrediente, y
+se va a por ese material. Con varios perros en automático, cada uno coge una
+necesidad distinta. Antes «automático» acababa con tres montañas de hierro y la
+cadena parada por falta de un cristal.
+
 **La jauría: hasta tres perros, cada uno a su mineral.** Comparten mochila
 —una sola, más grande por cada perro— pero cada uno tiene su encargo, su veta y
 su ruta. Ahí está la gracia: uno al cobre, otro al titanio del filón inestable
 (donde una persona no puede entrar) y otro a la chatarra, alimentando tres
 ramas de la cadena a la vez sin que muevas un dedo.
 
-**Los drones van en dúo: uno por perro y uno para ti.** No extraen; quitan la
+**Los drones van en dúo, y en dúo ESTRICTO: uno por perro y uno para ti.** El
+tuyo no se va con los perros y el de un perro no viene a vaciarte a ti; cada
+uno espera junto a su pareja y se lleva lo que ésta saca. No extraen: quitan la
 carga *donde estés* y la reparten por las cintas y máquinas. Cada viaje se
 lleva **de todo lo que haya, al menos una unidad de cada material**, y hace
 tantas paradas como haga falta: sin esa regla, un diamante suelto entre

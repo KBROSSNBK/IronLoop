@@ -396,7 +396,9 @@ function PetTab() {
             <div className="dog-head">
               <span className="dog-tag">🐕 Perro {i + 1}</span>
               <span className="dog-now">
-                {def ? `${getItem(def.item).icon} ${getItem(def.item).name}` : '🎯 Automático'}
+                {def
+                  ? `${getItem(def.item).icon} ${getItem(def.item).name}`
+                  : '🎯 Lo que falte en la fábrica'}
               </span>
             </div>
             <div className="dog-picks">
@@ -404,7 +406,7 @@ function PetTab() {
                 className="pick"
                 data-on={!actual}
                 disabled={busy || mode !== 'gather'}
-                title="Trabaja la veta que pille más cerca"
+                title="Automático: mira qué le falta a las máquinas y va a por ello"
                 onClick={() => void op('setPetLook', { dog: i, target: null })}
               >
                 🎯
@@ -438,8 +440,11 @@ function PetTab() {
         );
       })}
       <div className="stat" style={{ fontSize: 11.5, color: 'var(--text-mute)' }}>
-        Con un material fijo cruza el mapa hasta su veta y no se queda contigo. El
-        ☢️ titanio del filón inestable sólo lo saca un robot: ahí no puedes entrar.
+        🎯 <b>Automático</b> no es «lo que pille cerca»: mira <b>qué le falta a las
+        máquinas</b> para arrancar y va a buscarlo, y si hay varios perros en
+        automático cada uno coge una cosa distinta. Con un material fijo cruza el mapa
+        hasta su veta. El ☢️ titanio del filón inestable sólo lo saca un robot: ahí no
+        puedes entrar.
       </div>
 
       <div className="pet-stats">

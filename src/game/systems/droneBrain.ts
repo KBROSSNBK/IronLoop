@@ -41,12 +41,25 @@ export interface DroneTickInput {
   /** Dónde está el perro al que sirve este dron. */
   dogX: number;
   dogY: number;
-  /** Lo que el perro lleva encima y aún nadie ha reservado. */
-  dogItems: Record<string, number>;
-  /** Lo que llevas TÚ y los drones pueden cogerte. */
-  playerItems: Record<string, number>;
-  /** A quién atiende primero: tu escolta va a lo tuyo, los demás al perro. */
-  prefer: DroneSource;
+  /** Lo que puede coger de SU pareja, ya descontado lo que otros reservaron. */
+  items: Record<string, number>;
+  /**
+   * A quién sirve este dron, y sólo a ése.
+   *
+   * Van en DÚO de verdad: el tuyo no se va con los perros ni el de un perro
+   * viene a vaciarte a ti. Antes se ayudaban entre ellos «por eficiencia» y el
+   * resultado era un enjambre en el que no se entendía quién trabajaba con
+   * quién.
+   */
+  source: DroneSource;
+  /**
+   * ¿Se puede liquidar una entrega ahora mismo?
+   *
+   * Las entregas son escrituras contra el servidor y se hacen de una en una.
+   * Si toca esperar, el dron se queda flotando sobre la máquina en vez de
+   * soltar al vacío: la carga no se pierde y el viaje no se desperdicia.
+   */
+  canDeliver: boolean;
   /** Unidades por viaje y velocidad, según el nivel de la escuadrilla. */
   carry: number;
   speed: number;
@@ -134,7 +147,7 @@ export class DroneBrain {
     dogX: number,
     dogY: number,
   ): { x: number; y: number } {
-    if (this.slot === 0) {
+    if (this.source === 'player') {
       return { x: ownerX + 26, y: ownerY - DRONE_ALTITUDE - 4 };
     }
     const lado = this.slot % 2 === 1 ? 1 : -1;
@@ -181,9 +194,9 @@ export class DroneBrain {
       dt,
       dogX,
       dogY,
-      dogItems,
-      playerItems,
-      prefer,
+      items,
+      source,
+      canDeliver,
       carry,
       speed,
       ownerX,
@@ -192,18 +205,18 @@ export class DroneBrain {
       now,
     } = input;
     if (!this.spawned) this.reset(ownerX, ownerY);
+    this.source = source;
+    // Dónde está su pareja: tú, o su perro.
+    const parejaX = source === 'player' ? ownerX : dogX;
+    const parejaY = source === 'player' ? ownerY : dogY;
 
     this.phase += dt * 5.5;
     this.bob = Math.sin(this.phase) * 2.4 + Math.sin(this.phase * 0.37) * 0.9;
 
     switch (this.state) {
       case 'ESPERA': {
-        // Cada dron atiende primero a su pareja; sólo si ésta no tiene nada
-        // mira lo del otro. Así el trabajo se reparte solo.
-        const orden: DroneSource[] = prefer === 'player' ? ['player', 'pet'] : ['pet', 'player'];
-        const elegido = orden.find((s) => tieneAlgo(s === 'pet' ? dogItems : playerItems));
-        if (elegido) {
-          this.source = elegido;
+        // Sólo trabaja para SU pareja. Si ésta no tiene nada, espera a su lado.
+        if (tieneAlgo(items)) {
           this.state = 'AL_ORIGEN';
           break;
         }
@@ -214,16 +227,12 @@ export class DroneBrain {
       }
 
       case 'AL_ORIGEN': {
-        const mio = this.source === 'pet';
-        const disponible = mio ? dogItems : playerItems;
-        if (!tieneAlgo(disponible)) {
-          // Se lo ha llevado otro dron (o su dueño): a esperar.
+        if (!tieneAlgo(items)) {
+          // Se lo ha llevado otro (o su dueño): a esperar.
           this.state = 'ESPERA';
           break;
         }
-        const ox = mio ? dogX : ownerX;
-        const oy = mio ? dogY : ownerY;
-        if (this.flyTo(ox, oy - DRONE_ALTITUDE, speed, dt)) {
+        if (this.flyTo(parejaX, parejaY - DRONE_ALTITUDE, speed, dt)) {
           this.state = 'CARGANDO';
           this.until = now + 420;
         }
@@ -232,9 +241,8 @@ export class DroneBrain {
 
       case 'CARGANDO': {
         if (now < this.until) break;
-        const disponible = this.source === 'pet' ? dogItems : playerItems;
         // La ruta se calcula AQUÍ, con el material que de verdad hay ahora.
-        this.route = planHaul(disponible, carry, factoryLevel, { x: this.x, y: this.y });
+        this.route = planHaul(items, carry, factoryLevel, { x: this.x, y: this.y });
         this.stop = 0;
         this.cargo = {};
         for (const s of this.route) {
@@ -255,6 +263,9 @@ export class DroneBrain {
           break;
         }
         if (this.flyTo(parada.bay.x, parada.bay.y - DRONE_ALTITUDE, speed, dt)) {
+          // Sobre la máquina, pero si hay otra entrega en curso espera aquí
+          // arriba: soltar sin poder liquidar sería tirar el viaje.
+          if (!canDeliver) break;
           this.state = 'SOLTANDO';
           this.until = now + 380;
           return {

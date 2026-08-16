@@ -86,8 +86,17 @@ export interface PetTickInput {
   otherPending: number;
   /** Qué le has mandado hacer. */
   mode: PetMode;
-  /** Material encargado a ESTE perro, o null para que busque él la veta. */
+  /** Material encargado a ESTE perro, o null para modo automático. */
   target: string | null;
+  /**
+   * MODO AUTOMÁTICO. Material que la fábrica está esperando ahora mismo.
+   *
+   * Sin esto, «automático» era «pica lo que pilles al lado», que acaba con
+   * tres montañas de hierro y la cadena parada por falta de un cristal. Con
+   * esto, el perro mira qué máquina está a punto de arrancar, ve qué le falta
+   * y se va a por ello. Lo calcula quien conoce el estado de la fábrica.
+   */
+  autoTarget: string | null;
   /** ¿Hay drones de apoyo? Entonces no interrumpe la extracción para el paseo. */
   hasDrones: boolean;
   /** ¿Cabe algo en el inventario del dueño? Si no, no tiene sentido entregárselo. */
@@ -190,11 +199,19 @@ export class PetBrain {
       otherPending,
       mode,
       target,
+      autoTarget,
       ownerHasRoom,
       dropOff,
       hasDrones,
     } = input;
     if (!this.spawned) this.reset(ownerX, ownerY);
+
+    /*
+     * Lo que va a buscar: tu encargo manda, y si lo has dejado en automático,
+     * lo que la fábrica esté esperando. Sólo si no hace falta nada en ninguna
+     * máquina se dedica a picar lo que tenga al lado.
+     */
+    const encargo = target ?? autoTarget;
 
     // La mochila es de la jauría: cuenta lo suyo, lo de los demás y lo que ya
     // está confirmado.
@@ -205,10 +222,12 @@ export class PetBrain {
 
     /* ── 1. Decisión: minar manda; soltar la carga es el plan B ── */
     // Con material encargado no hay correa: se lo has pedido tú y cruza el mapa.
-    const leashed = !target && Math.hypot(ownerX - this.x, ownerY - this.y) > LEASH;
+    // Con encargo no hay correa: se lo has pedido tú (o hace falta en una
+    // máquina) y cruza el mapa si toca.
+    const leashed = !encargo && Math.hypot(ownerX - this.x, ownerY - this.y) > LEASH;
     const found =
       working && !full && !leashed
-        ? nearestStation(this.x, this.y, derived.radius, target)
+        ? nearestStation(this.x, this.y, derived.radius, encargo)
         : null;
 
     // Sitio al que llevar lo que carga. En modo SEGUIR no reparte por la
@@ -241,7 +260,7 @@ export class PetBrain {
       this.state = 'IR_A_CINTA';
     } else if (esperandoDron) {
       // Llena pero con drones de apoyo: se queda en la veta a que la releven.
-      const p = nearestStation(this.x, this.y, derived.radius, target);
+      const p = nearestStation(this.x, this.y, derived.radius, encargo);
       this.station = p?.station ?? null;
       this.state = p ? 'MINAR' : 'SEGUIR';
     } else if (carried > 0 && ownerHasRoom) {
@@ -259,7 +278,7 @@ export class PetBrain {
     let stopAt = FOLLOW_GAP;
 
     if (this.state === 'IR_A_VETA' || this.state === 'MINAR') {
-      const p = found ?? nearestStation(this.x, this.y, derived.radius, target);
+      const p = found ?? nearestStation(this.x, this.y, derived.radius, encargo);
       if (p) {
         // Cada perro pica en su hueco de la veta, no encima del de al lado.
         goalX = p.point.x + this.lateral;

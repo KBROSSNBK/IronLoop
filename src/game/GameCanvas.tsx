@@ -42,6 +42,7 @@ import {
 import { DroneBrain } from './systems/droneBrain';
 import { drawDrone } from './render/drone';
 import { dropOffFor, heaviestItem } from './logic/pet';
+import { factoryNeeds, shareNeeds } from './logic/needs';
 import {
   drawConveyors,
   drawGroundItems,
@@ -188,6 +189,14 @@ export function GameCanvas() {
 
     /* Escuadrilla de drones: uno por perro, más tu escolta. Van en dúo. */
     const drones: DroneBrain[] = [];
+    /* Las entregas van de una en una: son escrituras contra el servidor y
+       encadenarlas a lo bruto atasca la cola y las acciones del jugador. */
+    let droneBusy = false;
+
+    /* Lo que la fábrica está esperando, para el modo automático de la jauría. */
+    const NEEDS_REFRESH_MS = 1500;
+    let autoNeeds: (string | null)[] = [];
+    let needsAt = 0;
 
     /* ── canvas / DPR ── */
     const resize = () => {
@@ -393,8 +402,7 @@ export function GameCanvas() {
     };
 
     /* ── bucle principal ── */
-    const frame = (nowMs: number) => {
-      if (!running) return;
+    const step = (nowMs: number) => {
       const dt = Math.min(0.05, (nowMs - last) / 1000);
       last = nowMs;
       const now = Date.now();
@@ -791,6 +799,21 @@ export function GameCanvas() {
         const modo = player.pet?.mode ?? 'gather';
         const hayDrones = (player.pet?.drones ?? 0) > 0;
         const conHueco = inventoryFree(player) > 0;
+
+        /*
+         * MODO AUTOMÁTICO = «mira qué le falta a la fábrica y ve a por ello».
+         * Se recalcula despacio (recorre todas las máquinas) y se reparte:
+         * mandar a los tres perros al mismo mineral es tener uno trabajando y
+         * dos estorbando.
+         */
+        if (live && nowMs >= needsAt) {
+          needsAt = nowMs + NEEDS_REFRESH_MS;
+          const autos = pets.filter((_, i) => !dogTarget(player.pet, i)).length;
+          autoNeeds = shareNeeds(factoryNeeds(live.factory, now, pets[0]?.y ?? me.y), autos);
+        }
+        let autoSlot = 0;
+        // Lo que acaba buscando cada perro, encargado o automático.
+        const dogBusca: (string | null)[] = [];
         // La mochila es común: lo que uno lleva picado sin liquidar le quita
         // sitio a los demás, así que todos necesitan el total.
         petPending = pets.reduce((a, p) => a + p.pending, 0);
@@ -798,13 +821,18 @@ export function GameCanvas() {
         for (let i = 0; i < pets.length; i++) {
           const dog = pets[i];
           const encargo = dogTarget(player.pet, i);
+          // En automático, cada perro coge una necesidad distinta de la lista.
+          const auto = encargo ? null : (autoNeeds[autoSlot++] ?? null);
+          const busca = encargo ?? auto;
+          // Su dron necesita saberlo para llevar lo mismo que saca su perro.
+          dogBusca[i] = busca;
           /*
            * A dónde lleva lo que carga: primero SU material —el que le has
            * encargado— y si no lleva de ese, lo que más pese de la mochila
            * común. Recorre cintas y máquinas, así que se recalcula sólo al
            * cambiar de material o cada medio segundo.
            */
-          const suyo = encargo && (packInv[encargo] ?? 0) > 0 ? encargo : petTop;
+          const suyo = busca && (packInv[busca] ?? 0) > 0 ? busca : petTop;
           if (!suyo || !factory) {
             petDrops[i] = null;
             petDropItem[i] = null;
@@ -823,6 +851,7 @@ export function GameCanvas() {
             otherPending: petPending - dog.pending,
             mode: modo,
             target: encargo,
+            autoTarget: auto,
             hasDrones: hayDrones,
             ownerHasRoom: conHueco,
             dropOff: petDrops[i] ?? null,
@@ -890,15 +919,16 @@ export function GameCanvas() {
         }
 
         /*
-         * ESCUADRILLA. Van en DÚO: el dron 0 es tu escolta y cada uno de los
-         * demás trabaja con su perro. En cada viaje se llevan de TODO lo que
-         * haya —al menos una unidad de cada material— y reparten por varias
-         * paradas si hace falta, así que nada se queda criando polvo.
+         * ESCUADRILLA. Van en DÚO y de forma ESTRICTA: el dron 0 es tu escolta
+         * y no se separa de ti; el dron N trabaja con el perro N y con ningún
+         * otro. Cada viaje se lleva de TODO lo que haya —al menos una unidad
+         * de cada material— y reparte por varias paradas si hace falta.
          */
         const squad = deriveDrones(player.pet);
         while (drones.length < squad.count) drones.push(new DroneBrain(drones.length));
         drones.length = squad.count;
 
+        /** Lo que queda libre de una mochila una vez descontado lo ya volando. */
         const sinReservar = (
           inv: Record<string, number>,
           fuente: 'pet' | 'player',
@@ -918,18 +948,35 @@ export function GameCanvas() {
 
         for (let i = 0; i < drones.length; i++) {
           const d = drones[i];
-          // Su pareja: el dron 0 va contigo, el resto con su perro.
-          const pareja = pets[Math.min(pets.length - 1, Math.max(0, i - 1))];
-          const dev = d.update({
-            dt,
-            dogX: pareja.x,
-            dogY: pareja.y,
-            dogItems: sinReservar(packInv, 'pet', d),
-            playerItems:
+          const escolta = i === 0;
+          // Su pareja: el 0 eres tú; el resto, SU perro (nunca otro).
+          const perro = pets[Math.min(pets.length - 1, i - 1)] ?? pets[0];
+
+          let items: Record<string, number>;
+          if (escolta) {
+            items =
               player.pet?.droneTakesPlayer === false
                 ? {}
-                : sinReservar(player.inventory, 'player', d),
-            prefer: i === 0 ? 'player' : 'pet',
+                : sinReservar(player.inventory, 'player', d);
+          } else {
+            const libre = sinReservar(packInv, 'pet', d);
+            /*
+             * Se lleva lo de SU perro —lo que le hayas encargado, o lo que
+             * esté sacando en automático— si hay de eso en la mochila: así se
+             * ve que el dron del titanio lleva titanio. Si no hay, echa una
+             * mano con el resto para que nada se quede parado.
+             */
+            const suyo = dogBusca[i - 1] ?? dogTarget(player.pet, i - 1);
+            items = suyo && (libre[suyo] ?? 0) > 0 ? { [suyo]: libre[suyo] } : libre;
+          }
+
+          const dev = d.update({
+            dt,
+            dogX: perro.x,
+            dogY: perro.y,
+            items,
+            source: escolta ? 'player' : 'pet',
+            canDeliver: !droneBusy,
             carry: squad.carry,
             speed: squad.speed,
             ownerX: me.x,
@@ -938,12 +985,13 @@ export function GameCanvas() {
             now,
           });
           if (dev.deliver) {
-            const { bay, items, units, source } = dev.deliver;
+            droneBusy = true;
+            const { bay, items: carga, units, source } = dev.deliver;
             void session
               .op(source === 'pet' ? 'petDeposit' : 'droneHaul', {
                 machineId: bay.machineId,
                 beltId: bay.beltId,
-                items,
+                items: carga,
                 limit: units,
               })
               .then((out) => {
@@ -952,6 +1000,9 @@ export function GameCanvas() {
                   fx.ring(bay.x, bay.y, '#38bdf8', 7);
                   emit('sfx', { name: 'machine', volume: 0.4 });
                 }
+              })
+              .finally(() => {
+                droneBusy = false;
               });
           }
         }
@@ -1229,7 +1280,40 @@ export function GameCanvas() {
             : useGameplayStore.getState().debug,
         });
       }
+    };
 
+    /*
+     * EL BUCLE NO SE PUEDE MORIR.
+     *
+     * Una sola excepción dentro del fotograma mataba el requestAnimationFrame
+     * y con él TODO: las mascotas se quedaban congeladas, los botones dejaban
+     * de responder y no había forma de recuperarse salvo recargar. Pasó de
+     * verdad con un item que existía en una partida guardada y ya no estaba en
+     * el catálogo.
+     *
+     * Ahora un fotograma malo se registra una vez y el juego sigue: si el
+     * problema era pasajero, ni te enteras; y si no, al menos puedes moverte,
+     * abrir paneles y guardar.
+     */
+    let frameErrors = 0;
+    const frame = (nowMs: number) => {
+      if (!running) return;
+      try {
+        step(nowMs);
+      } catch (err) {
+        frameErrors += 1;
+        if (frameErrors <= 3) {
+          console.error('[ironloop] fotograma con error', err);
+          if (frameErrors === 1) {
+            emit('toast', {
+              title: 'FALLO GRÁFICO',
+              body: 'Un fotograma ha petado, pero el juego sigue. Avisa si se repite.',
+              icon: '⚠️',
+              tone: 'bad',
+            });
+          }
+        }
+      }
       requestAnimationFrame(frame);
     };
 
