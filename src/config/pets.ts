@@ -133,6 +133,13 @@ export const PET_ACCENTS: { id: string; name: string }[] = [
   { id: '#ffffff', name: 'Blanco' },
 ];
 
+/** Mejoras de mascota sin tope. La UI lo reconoce y no pinta «MÁX». */
+export const UNLIMITED_PET_LEVEL = 9_999;
+
+export function isPetStatUnlimited(def: Pick<PetStatDef, 'maxLevel'>): boolean {
+  return def.maxLevel >= UNLIMITED_PET_LEVEL;
+}
+
 export interface PetStatDef {
   id: PetStat;
   name: string;
@@ -178,8 +185,10 @@ export const PET_STATS: PetStatDef[] = [
     name: 'Perforadora',
     icon: '⛏️',
     accent: '#fbbf24',
-    desc: 'Velocidad a la que saca material de una veta.',
-    maxLevel: 12,
+    desc: 'Velocidad a la que saca material de una veta. Sin tope.',
+    // Sin tope: es la mejora que define el ritmo de toda la cadena, así que
+    // el freno lo pone el precio (×1,6 por nivel), no un número inventado.
+    maxLevel: UNLIMITED_PET_LEVEL,
     baseCost: 1_200,
     costGrowth: 1.6,
     effect: (l) => `${((PET_BASE.mining + PET_BASE.miningPerLevel * l) * 60).toFixed(0)} unidades/min`,
@@ -216,6 +225,68 @@ export function petStatCost(def: PetStatDef, level: number): number {
   return Math.round(def.baseCost * Math.pow(def.costGrowth, level));
 }
 
+/* ─────────────────────────── DRONES ─────────────────────────── */
+
+/**
+ * DRONES DE APOYO.
+ *
+ * El perro pica muy rápido, pero cada vez que llena la mochila tiene que
+ * dejar la veta e ir hasta la cinta: ese paseo es tiempo que no está picando.
+ * Los drones lo resuelven — le quitan la carga en el sitio y la llevan ellos,
+ * así el perro no se mueve de la veta.
+ *
+ * Comprar más drones sube el caudal de verdad: cada uno hace su viaje con su
+ * propia carga, así que la cadena sólo se atasca si el perro produce más de
+ * lo que la escuadrilla es capaz de mover.
+ */
+export const DRONE = {
+  /** Unidades por viaje, y cuánto sube por nivel de la escuadrilla. */
+  carry: 18,
+  carryPerLevel: 10,
+  /** Velocidad de vuelo en px/s. Vuelan recto: no les frenan los muros. */
+  speed: 210,
+  speedPerLevel: 14,
+  /** Segundos enganchado al perro y descargando. */
+  loadMs: 450,
+  dropMs: 400,
+  /** Máximo de drones por jugador. */
+  max: 6,
+  /** Coste del primer dron y crecimiento por cada uno más. */
+  baseCost: 18_000,
+  costGrowth: 2.15,
+  /** Coste de subir el nivel de TODA la escuadrilla. */
+  upgradeBase: 9_000,
+  upgradeGrowth: 1.72,
+  maxLevel: UNLIMITED_PET_LEVEL,
+} as const;
+
+export function droneCost(owned: number): number {
+  return Math.round(DRONE.baseCost * Math.pow(DRONE.costGrowth, owned));
+}
+
+export function droneUpgradeCost(level: number): number {
+  return Math.round(DRONE.upgradeBase * Math.pow(DRONE.upgradeGrowth, level));
+}
+
+export interface DerivedDrone {
+  count: number;
+  level: number;
+  /** Unidades que se lleva cada dron en cada viaje. */
+  carry: number;
+  speed: number;
+}
+
+export function deriveDrones(pet: PetState | undefined): DerivedDrone {
+  const count = Math.max(0, Math.min(DRONE.max, Math.floor(pet?.drones ?? 0)));
+  const level = Math.max(1, Math.floor(pet?.droneLevel ?? 1));
+  return {
+    count,
+    level,
+    carry: DRONE.carry + DRONE.carryPerLevel * (level - 1),
+    speed: DRONE.speed + DRONE.speedPerLevel * (level - 1),
+  };
+}
+
 /** Estado persistente de la mascota (vive dentro de PlayerState). */
 export interface PetState {
   /** Chasis equipado. */
@@ -239,6 +310,10 @@ export interface PetState {
    * pille más cerca dentro del radio de su sensor.
    */
   zone: string | null;
+  /** Drones de apoyo comprados. */
+  drones: number;
+  /** Nivel de la escuadrilla: carga y velocidad de TODOS los drones. */
+  droneLevel: number;
 }
 
 export const DEFAULT_PET: PetState = {
@@ -252,6 +327,8 @@ export const DEFAULT_PET: PetState = {
   mined: 0,
   mode: 'gather',
   zone: null,
+  drones: 0,
+  droneLevel: 1,
 };
 
 /**
@@ -281,6 +358,8 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
     mined: raw?.mined ?? 0,
     mode,
     zone: typeof raw?.zone === 'string' ? raw.zone : null,
+    drones: Math.max(0, Math.min(DRONE.max, Math.floor(raw?.drones ?? 0))),
+    droneLevel: Math.max(1, Math.floor(raw?.droneLevel ?? 1)),
   };
 }
 

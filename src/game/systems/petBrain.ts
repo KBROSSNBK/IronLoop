@@ -46,6 +46,12 @@ const LEASH = 560;
 const STUCK_MS = 700;
 /** Duración de la animación de descarga. */
 const UNLOAD_MS = 620;
+/**
+ * Con drones, al llenarse espera a que vengan a por la carga en vez de dejar
+ * la veta. Si tardan más que esto (escuadrilla corta o muy lenta), va ella:
+ * más vale un paseo que quedarse plantada para siempre.
+ */
+const DRONE_WAIT_MS = 7000;
 /** Distancia a la que se da por alcanzado un punto del camino. */
 const WAYPOINT_REACHED = 10;
 /** Pausa mínima entre cálculos de ruta. */
@@ -76,6 +82,8 @@ export interface PetTickInput {
   mode: PetMode;
   /** Zona asignada, o null para que elija la más cercana ella sola. */
   zone: string | null;
+  /** ¿Hay drones de apoyo? Entonces no interrumpe la extracción para el paseo. */
+  hasDrones: boolean;
   /** ¿Cabe algo en el inventario del dueño? Si no, no tiene sentido entregárselo. */
   ownerHasRoom: boolean;
   /**
@@ -126,6 +134,8 @@ export class PetBrain {
   private path: Point[] = [];
   private pathGoal: Point | null = null;
   private repathAt = 0;
+  /** Desde cuándo está llena esperando a un dron. */
+  private fullSince = 0;
 
   /** Coloca la mascota junto a su dueño sin animación (al entrar al juego). */
   reset(x: number, y: number): void {
@@ -148,7 +158,7 @@ export class PetBrain {
   }
 
   update(now: number, input: PetTickInput): PetTickResult {
-    const { dt, ownerX, ownerY, derived, storedUnits, mode, zone, ownerHasRoom, dropOff } = input;
+    const { dt, ownerX, ownerY, derived, storedUnits, mode, zone, ownerHasRoom, dropOff, hasDrones } = input;
     if (!this.spawned) this.reset(ownerX, ownerY);
 
     const carried = this.carried(storedUnits);
@@ -166,7 +176,14 @@ export class PetBrain {
 
     // Sitio al que llevar lo que carga. En modo SEGUIR no reparte por la
     // fábrica: te lo da a ti y se acabó.
-    const bay = working && storedUnits > 0 ? dropOff : null;
+    // Con drones esperando a recoger, la mascota NO abandona la veta: se
+    // queda picando (o esperando un momento) y son ellos los que reparten.
+    if (!full) this.fullSince = 0;
+    else if (this.fullSince === 0) this.fullSince = now;
+    const esperandoDron =
+      hasDrones && full && this.fullSince > 0 && now - this.fullSince < DRONE_WAIT_MS;
+
+    const bay = working && storedUnits > 0 && !esperandoDron ? dropOff : null;
     this.bay = bay;
 
     if (this.state === 'DESCARGAR') {
@@ -179,6 +196,11 @@ export class PetBrain {
       // Llena, o sin veta cerca: el material va a su cinta o máquina.
       this.station = null;
       this.state = 'IR_A_CINTA';
+    } else if (esperandoDron) {
+      // Llena pero con drones de apoyo: se queda en la veta a que la releven.
+      const p = nearestStation(this.x, this.y, derived.radius, zone);
+      this.station = p?.station ?? null;
+      this.state = p ? 'MINAR' : 'SEGUIR';
     } else if (carried > 0 && ownerHasRoom) {
       // No hay dónde dejarlo (o no está trabajando): te lo entrega.
       this.station = null;

@@ -45,6 +45,70 @@ interface SessionState {
 
 let backend: Backend | null = null;
 let booted = false;
+
+/** Cola de operaciones: se ejecutan de una en una, en orden. */
+let opQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Sombra de escritura optimista.
+ *
+ * Tras una operación pintamos su resultado al instante para que el juego
+ * responda. Durante un momento, los avisos del servidor pueden traer una foto
+ * ANTERIOR a esa escritura (van por su cuenta), y aplicarla haría que el
+ * material recién movido pareciera esfumarse. Así que en esa ventana corta se
+ * ignora cualquier foto más vieja que la nuestra; pasada la ventana manda
+ * siempre el servidor, que es lo correcto en multijugador.
+ */
+let optimisticUntil = 0;
+let optimisticAt = 0;
+const OPTIMISTIC_WINDOW_MS = 4000;
+
+type Setter = (patch: Partial<SessionState>) => void;
+type Getter = () => SessionState;
+
+/** Aplica una fábrica venida del servidor descartando ecos atrasados. */
+function acceptFactory(f: FactoryState, set: Setter): boolean {
+  if (Date.now() < optimisticUntil && (f.updatedAt ?? 0) < optimisticAt) return false;
+  set({ factory: f });
+  return true;
+}
+
+/** Ejecuta UNA operación. La cola garantiza que no se solapan. */
+async function runOne(
+  op: OpName,
+  args: Record<string, unknown>,
+  set: Setter,
+  get: Getter,
+): Promise<OpOutcome> {
+  const { player, factory } = get();
+  if (!backend || !player || !factory) {
+    return { ok: false, reason: 'Sesión no lista', events: [] };
+  }
+  set({ busy: true });
+  try {
+    const out = await backend.runOp(player.uid, factory.id, op, {
+      ...args,
+      now: Date.now(),
+    });
+    if (out.ok) {
+      if (out.player) set({ player: out.player });
+      if (out.factory) {
+        // Resultado autoritativo recién calculado: manda sobre cualquier eco.
+        optimisticAt = out.factory.updatedAt ?? Date.now();
+        optimisticUntil = Date.now() + OPTIMISTIC_WINDOW_MS;
+        set({ factory: out.factory });
+      }
+    }
+    dispatchOpEvents(out.events ?? []);
+    if (!out.ok && out.reason && !(out.events ?? []).some((e) => e.kind === 'error')) {
+      useUiStore.getState().pushToast({ title: out.reason, icon: '⛔', tone: 'bad' });
+    }
+    return out;
+  } finally {
+    set({ busy: false });
+  }
+}
+
 const subs: Unsub[] = [];
 let lastPresenceWrite = 0;
 let tickTimer: number | null = null;
@@ -237,29 +301,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   async op(op, args = {}) {
-    const { player, factory } = get();
-    if (!backend || !player || !factory) {
-      return { ok: false, reason: 'Sesión no lista', events: [] };
-    }
-    set({ busy: true });
-    try {
-      const out = await backend.runOp(player.uid, factory.id, op, {
-        ...args,
-        now: Date.now(),
-      });
-      // Actualización optimista inmediata: el listener confirmará después.
-      if (out.ok) {
-        if (out.player) set({ player: out.player });
-        if (out.factory) set({ factory: out.factory });
-      }
-      dispatchOpEvents(out.events ?? []);
-      if (!out.ok && out.reason && !(out.events ?? []).some((e) => e.kind === 'error')) {
-        useUiStore.getState().pushToast({ title: out.reason, icon: '⛔', tone: 'bad' });
-      }
-      return out;
-    } finally {
-      set({ busy: false });
-    }
+    // Las operaciones se ENCOLAN: nunca hay dos en vuelo a la vez.
+    //
+    // Sin esto, dos acciones simultáneas (la mascota soltando carga y tú
+    // pasando por una cinta, por ejemplo) resolvían en cualquier orden y la
+    // que llegaba tarde machacaba el estado de la otra: si había 10 items en
+    // la cinta y entraban 34, se quedaban en 34 en vez de sumar 44. El
+    // servidor los contaba bien; era el cliente el que pisaba el resultado.
+    const run = opQueue.then(() => runOne(op, args, set, get));
+    // La cola no se rompe aunque una operación falle.
+    opQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   },
 
   publishPresence(state) {
@@ -295,7 +350,9 @@ async function enterGame(
     b.watchPlayer(user.uid, (p) => set({ player: p })),
     b.watchFactory(factoryId, (f) => {
       const prev = get().factory;
-      set({ factory: f });
+      // Un eco anterior a nuestra última escritura se descarta: aplicarlo
+      // haría desaparecer material que ya está confirmado.
+      if (!acceptFactory(f, set)) return;
       if (prev && f.level > prev.level) {
         useUiStore.getState().celebrateFactory(f.level);
         emit('factoryLevelUp', { level: f.level });

@@ -41,6 +41,9 @@ import {
   PET_RATE_TOLERANCE,
   PET_MODES,
   PET_STAT_MAP,
+  DRONE,
+  droneCost,
+  droneUpgradeCost,
   getChassis,
   normalizePet,
   petStatCost,
@@ -1367,6 +1370,55 @@ export function opBuyPetStat(
   };
 }
 
+/**
+ * Compra un dron de apoyo, o sube el nivel de toda la escuadrilla.
+ *
+ * Los drones no extraen: le quitan la carga a la mascota en la propia veta y
+ * la llevan a su máquina, para que ella no pierda tiempo en el paseo.
+ */
+export function opBuyDrone(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { upgrade?: boolean; now: number },
+): OpOutcome<{ drones: number; level: number; cost: number }> {
+  const pet = normalizePet(player.pet, args.now);
+  const subir = args.upgrade === true;
+
+  if (!subir && pet.drones >= DRONE.max) return fail('Escuadrilla completa');
+  if (subir && pet.drones <= 0) return fail('Primero compra un dron');
+
+  const cost = subir ? droneUpgradeCost(pet.droneLevel) : droneCost(pet.drones);
+  if (player.money < cost) return fail('Dinero insuficiente');
+
+  const next = subir
+    ? { ...pet, droneLevel: pet.droneLevel + 1 }
+    : { ...pet, drones: pet.drones + 1 };
+
+  const events: OpEvent[] = [];
+  let p: PlayerState = { ...player, money: player.money - cost, pet: next };
+  p = stat(p, { upgradesBought: 1 });
+  p = bumpMissions(p, [{ metric: 'upgrade', amount: 1 }], events);
+
+  const contrib = Math.round(cost * UPGRADE_CONTRIB_RATIO);
+  const f = addContribution(factory, contrib, events);
+  p = stat(p, { contributed: contrib });
+
+  events.push({ kind: 'money', amount: -cost });
+  events.push({
+    kind: 'info',
+    text: subir ? `Escuadrilla nivel ${next.droneLevel}` : `Dron ${next.drones} desplegado`,
+  });
+
+  return {
+    ok: true,
+    player: p,
+    factory: f,
+    memberDelta: { contributed: contrib, money: p.money },
+    events,
+    data: { drones: next.drones, level: next.droneLevel, cost },
+  };
+}
+
 /** Color, detalles y orden de trabajo. Es configuración: no cuesta nada. */
 export function opSetPetLook(
   player: PlayerState,
@@ -1481,7 +1533,7 @@ export function opPetMine(
 export function opPetDeposit(
   player: PlayerState,
   factory: FactoryState,
-  args: { machineId: string; beltId?: string; now: number },
+  args: { machineId: string; beltId?: string; limit?: number; now: number },
 ): OpOutcome<{ deposited: Record<string, number> }> {
   const pet = normalizePet(player.pet, args.now);
   if (pet.mode !== 'gather') return fail('La mascota no está extrayendo');
@@ -1502,13 +1554,22 @@ export function opPetDeposit(
   const allowed = belt?.accepts?.length ? belt.accepts : Object.keys(def.input);
   const moving: Record<string, number> = {};
   const inventory = { ...pet.inventory };
+  // Un dron se lleva sólo lo que le cabe en el viaje; la mascota, todo.
+  let room =
+    typeof args.limit === 'number' && Number.isFinite(args.limit)
+      ? Math.max(0, Math.floor(args.limit))
+      : Number.POSITIVE_INFINITY;
   let units = 0;
   for (const item of allowed) {
+    if (room <= 0) break;
     const have = Math.max(0, Math.floor(inventory[item] ?? 0));
     if (have <= 0 || !petAccepts(item)) continue;
-    moving[item] = have;
-    units += have;
-    delete inventory[item];
+    const take = Math.min(have, room);
+    moving[item] = take;
+    units += take;
+    room -= take;
+    if (take >= have) delete inventory[item];
+    else inventory[item] = have - take;
   }
   if (units <= 0) return fail('La mascota no lleva nada para ahí');
 
@@ -1759,6 +1820,7 @@ export type OpName =
   | 'setRobotMode'
   | 'buyPetChassis'
   | 'buyPetStat'
+  | 'buyDrone'
   | 'setPetLook'
   | 'petMine'
   | 'petDeposit'
@@ -1788,6 +1850,7 @@ export const OPS = {
   setRobotMode: opSetRobotMode,
   buyPetChassis: opBuyPetChassis,
   buyPetStat: opBuyPetStat,
+  buyDrone: opBuyDrone,
   setPetLook: opSetPetLook,
   petMine: opPetMine,
   petDeposit: opPetDeposit,

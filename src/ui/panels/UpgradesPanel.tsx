@@ -20,7 +20,12 @@ import {
   PET_COLORS,
   PET_MODES,
   PET_STATS,
+  DRONE,
   derivePet,
+  deriveDrones,
+  droneCost,
+  droneUpgradeCost,
+  isPetStatUnlimited,
   getChassis,
   petStatCost,
   petUsed,
@@ -247,6 +252,7 @@ function PetTab() {
   const pet = { ...DEFAULT_PET, ...(player.pet ?? {}) };
   const derived = derivePet(pet);
   const carried = petUsed(pet);
+  const squad = deriveDrones(pet);
   const owned = new Set([...DEFAULT_PET.owned, ...(pet.owned ?? [])]);
   const mode = pet.mode ?? 'gather';
 
@@ -374,7 +380,8 @@ function PetTab() {
       <div className="section-title">MEJORAS DE LA MASCOTA</div>
       {PET_STATS.map((def) => {
         const level = pet.stats?.[def.id] ?? 0;
-        const maxed = level >= def.maxLevel;
+        // Las mejoras sin tope nunca llegan a "MÁX": siempre hay siguiente.
+        const maxed = !isPetStatUnlimited(def) && level >= def.maxLevel;
         const cost = petStatCost(def, level);
         const afford = player.money >= cost;
         return (
@@ -401,6 +408,42 @@ function PetTab() {
           </div>
         );
       })}
+
+      {/* Drones: el complemento del perro, no un sustituto. */}
+      <div className="section-title">ESCUADRILLA DE DRONES</div>
+      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+        Los drones <b>no extraen</b>: le quitan la carga a tu mascota <b>en la propia
+        veta</b> y la llevan a su máquina, para que ella no pierda tiempo en el paseo.
+        Cuantos más tengas, más caudal aguanta la cadena.
+      </div>
+      <div className="pet-stats">
+        <Metric label="Drones" value={`${squad.count}/${DRONE.max}`} accent="var(--blue)" />
+        <Metric label="Carga" value={`${squad.carry}/viaje`} accent="var(--amber-soft)" />
+        <Metric label="Vuelo" value={`${squad.speed} px/s`} accent="var(--green)" />
+      </div>
+      <div className="robot-modes">
+        <button
+          className="mode-btn"
+          disabled={busy || squad.count >= DRONE.max || player.money < droneCost(squad.count)}
+          onClick={() => void op('buyDrone', {})}
+        >
+          {squad.count >= DRONE.max
+            ? '✅ Escuadrilla completa'
+            : `🛸 Comprar dron · ${moneyExact(droneCost(squad.count))}`}
+        </button>
+        <button
+          className="mode-btn"
+          disabled={
+            busy || squad.count === 0 || player.money < droneUpgradeCost(squad.level)
+          }
+          title="Sube la carga y la velocidad de TODOS los drones"
+          onClick={() => void op('buyDrone', { upgrade: true })}
+        >
+          {squad.count === 0
+            ? '🔒 Necesitas un dron'
+            : `⬆️ Nivel ${squad.level + 1} · ${moneyExact(droneUpgradeCost(squad.level))}`}
+        </button>
+      </div>
 
       <div className="section-title">CHASIS</div>
       {PET_CHASSIS.map((c) => {

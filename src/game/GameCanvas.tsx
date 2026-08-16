@@ -32,7 +32,9 @@ import { ROBOTS as ROBOT_LIST } from '../config/robots';
 import { RobotBrain } from './systems/robotBrain';
 import { PetBrain, RemotePet } from './systems/petBrain';
 import { drawPet } from './render/pet';
-import { derivePet, petUsed, PET_FLUSH_MS } from '../config/pets';
+import { derivePet, deriveDrones, petUsed, PET_FLUSH_MS } from '../config/pets';
+import { DroneBrain } from './systems/droneBrain';
+import { drawDrone } from './render/drone';
 import { dropOffFor, heaviestItem } from './logic/pet';
 import {
   drawConveyors,
@@ -171,6 +173,10 @@ export function GameCanvas() {
     const remotePets = new Map<string, RemotePet>();
     let petFlushAt = 0;
     let petBusy = false;
+
+    /* Escuadrilla de drones: le quitan la carga al perro y la reparten. */
+    const drones: DroneBrain[] = [];
+    let droneBusy = false;
 
     /* ── canvas / DPR ── */
     const resize = () => {
@@ -720,6 +726,7 @@ export function GameCanvas() {
           storedUnits: petStored,
           mode: player.pet?.mode ?? 'gather',
           zone: player.pet?.zone ?? null,
+          hasDrones: (player.pet?.drones ?? 0) > 0,
           ownerHasRoom: inventoryFree(player) > 0,
           dropOff,
         });
@@ -745,6 +752,46 @@ export function GameCanvas() {
             .finally(() => {
               petBusy = false;
             });
+        }
+
+        /* — escuadrilla de drones — */
+        // Le quitan la carga al perro en la propia veta y la llevan ellos, de
+        // modo que él no interrumpe la extracción para hacer el paseo.
+        const squad = deriveDrones(player.pet);
+        while (drones.length < squad.count) drones.push(new DroneBrain(drones.length));
+        drones.length = squad.count;
+
+        for (const d of drones) {
+          // Cada dron va a por lo que el perro tenga confirmado y sin reservar.
+          const reservado = drones.reduce((a, o) => a + (o === d ? 0 : o.load), 0);
+          const dev = d.update({
+            dt,
+            dogX: pet.x,
+            dogY: pet.y,
+            dogUnits: Math.max(0, petStored - reservado),
+            dropOff: petDrop,
+            carry: squad.carry,
+            speed: squad.speed,
+            ownerX: me.x,
+            ownerY: me.y,
+            now,
+          });
+          if (dev.deliver && !petBusy && !droneBusy) {
+            droneBusy = true;
+            const { bay, units } = dev.deliver;
+            void session
+              .op('petDeposit', { machineId: bay.machineId, beltId: bay.beltId, limit: units })
+              .then((out) => {
+                if (out.ok) {
+                  fx.burst(d.x, d.y + 12, '#38bdf8', 8, 60, 'spark');
+                  fx.ring(bay.x, bay.y, '#38bdf8', 7);
+                  emit('sfx', { name: 'machine', volume: 0.4 });
+                }
+              })
+              .finally(() => {
+                droneBusy = false;
+              });
+          }
         }
 
         if (ev.deposit && !petBusy) {
@@ -934,6 +981,28 @@ export function GameCanvas() {
             }),
         });
       }
+      // Los drones vuelan: siempre por encima del resto de la escena.
+      if (player && player.pet?.mode !== 'off') {
+        for (const d of drones) {
+          sortables.push({
+            y: 1e9,
+            draw: () =>
+              drawDrone(ctx, {
+                x: d.x,
+                y: d.y,
+                facing: d.facing,
+                bob: d.bob,
+                t: time,
+                state: d.state,
+                color: player.pet?.color ?? '#c7ced8',
+                accent: player.pet?.accent ?? '#22d3ee',
+                load: d.load,
+                loadIcon: petTop ? getItem(petTop).icon : null,
+              }),
+          });
+        }
+      }
+
       sortables.sort((a, b) => a.y - b.y);
       for (const s of sortables) s.draw();
 
