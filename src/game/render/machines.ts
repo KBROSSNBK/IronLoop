@@ -262,7 +262,7 @@ export function drawMachine(
   ctx.fillText(`${def.icon} ${def.short}`, x + w / 2, y - 22);
 
   // Receta en una línea: qué entra y qué sale por cada ciclo.
-  if (!locked) drawRecipeLine(ctx, x + w / 2, y - 38, def);
+  if (!locked) drawRecipeLine(ctx, x + w / 2, y - 38, def, settle.batch);
 
   // Nivel de la máquina (pips)
   if (!locked && live.level > 0) {
@@ -314,13 +314,17 @@ function drawRecipeLine(
   cx: number,
   y: number,
   def: MachineDef,
+  batch = 1,
 ): void {
   const ins = Object.entries(def.input);
   const outs = Object.entries(def.output);
   if (ins.length === 0 || outs.length === 0) return;
 
+  // Con la máquina muy mejorada saca varias recetas de una tacada: se enseña
+  // el lote entero, que es lo que de verdad entra y sale en cada ciclo.
+  const n = Math.max(1, Math.floor(batch));
   const part = (list: [string, number | undefined][]) =>
-    list.map(([id, n]) => `${n ?? 1}×${itemGlyph(id)}`).join(' + ');
+    list.map(([id, q]) => `${(q ?? 1) * n}×${itemGlyph(id)}`).join(' + ');
   const text = `${part(ins)} = ${part(outs)}`;
 
   ctx.save();

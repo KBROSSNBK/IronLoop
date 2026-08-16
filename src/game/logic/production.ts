@@ -32,18 +32,65 @@ export interface SettleResult {
   blocked: BlockedReason;
   /** Duración efectiva de un ciclo tras multiplicadores, en ms. */
   cycleMs: number;
+  /** Recetas que salen en CADA ciclo. Con la máquina muy mejorada, varias. */
+  batch: number;
 }
 
 const MAX_CYCLES_PER_SETTLE = 5000;
 
-export function effectiveCycleMs(
+/**
+ * DURACIÓN MÍNIMA DE UN CICLO VISIBLE.
+ *
+ * Por debajo de esto la barra de progreso deja de ser información y pasa a ser
+ * un parpadeo: a fábrica nivel 12 la Fundidora ya bajaba a 728 ms y con
+ * mejoras se clavaba en 200, o sea cinco barras por segundo. Ilegible y
+ * molesto.
+ */
+const MIN_CYCLE_MS = 900;
+
+/** Duración de UNA receta, sin agrupar. Es lo que dicta la velocidad real. */
+export function recipeMs(
   def: MachineDef,
   machineLevel: number,
   factoryLevel: number,
 ): number {
   const mult =
     machineSpeedMultiplier(machineLevel) * factoryProductionMultiplier(factoryLevel);
-  return Math.max(200, def.cycleMs / mult);
+  return Math.max(1, def.cycleMs / mult);
+}
+
+/**
+ * RECETAS POR CICLO.
+ *
+ * Cuando la máquina va tan rápida que un ciclo no se vería, en vez de acortar
+ * más el ciclo se hace MÁS GRANDE EL LOTE: cuatro lingotes de una tacada en
+ * vez de cuatro ciclos de 200 ms. El caudal es exactamente el mismo y la
+ * barra vuelve a leerse.
+ *
+ * De paso arregla un fallo de balance serio: antes había un suelo duro de
+ * 200 ms, así que a partir de cierto punto mejorar una máquina NO PRODUCÍA
+ * NADA —pagabas mejoras que no hacían nada— y el Reactor acababa rindiendo
+ * igual que la Fundidora. Con lotes, mejorar siempre rinde.
+ */
+export function machineBatch(
+  def: MachineDef,
+  machineLevel: number,
+  factoryLevel: number,
+): number {
+  const raw = recipeMs(def, machineLevel, factoryLevel);
+  return Math.max(1, Math.ceil(MIN_CYCLE_MS / raw));
+}
+
+/** Duración del ciclo que se ve en la barra: el lote entero. */
+export function effectiveCycleMs(
+  def: MachineDef,
+  machineLevel: number,
+  factoryLevel: number,
+): number {
+  return (
+    recipeMs(def, machineLevel, factoryLevel) *
+    machineBatch(def, machineLevel, factoryLevel)
+  );
 }
 
 export function isMachineUnlocked(def: MachineDef, factoryLevel: number): boolean {
@@ -55,6 +102,15 @@ function hasInputs(state: MachineState, def: MachineDef): boolean {
     if ((state.input[item] ?? 0) < (need as number)) return false;
   }
   return true;
+}
+
+/** Recetas completas que salen con lo que hay ahora mismo en la entrada. */
+function recipesAvailable(state: MachineState, def: MachineDef): number {
+  let min = Infinity;
+  for (const [item, need] of Object.entries(def.input)) {
+    min = Math.min(min, Math.floor((state.input[item] ?? 0) / (need as number)));
+  }
+  return Number.isFinite(min) ? Math.max(0, min) : 0;
 }
 
 /**
@@ -84,7 +140,9 @@ export function settleMachine(
     input: { ...input.input },
     output: { ...input.output },
   };
-  const cycleMs = effectiveCycleMs(def, state.level, factoryLevel);
+  const raw = recipeMs(def, state.level, factoryLevel);
+  const batch = machineBatch(def, state.level, factoryLevel);
+  const cycleMs = raw * batch;
   const produced: Record<string, number> = {};
 
   if (!isMachineUnlocked(def, factoryLevel)) {
@@ -96,28 +154,39 @@ export function settleMachine(
       running: false,
       blocked: 'locked',
       cycleMs,
+      batch,
     };
   }
 
   let cyclesDone = 0;
 
-  // Consume ciclos completados.
+  /*
+   * Consume los ciclos completados.
+   *
+   * Cada ciclo saca un LOTE de hasta `batch` recetas. Si no hay material para
+   * el lote entero se hacen las que salgan, y el reloj avanza SÓLO lo que ha
+   * costado hacerlas (`raw` por receta): así ni se regala tiempo ni se pierde,
+   * y el material que falta espera al siguiente en vez de evaporarse.
+   */
   if (state.cycleStartAt > 0) {
     while (cyclesDone < MAX_CYCLES_PER_SETTLE) {
       const elapsed = now - state.cycleStartAt;
       if (elapsed < cycleMs) break;
-      if (!hasInputs(state, def) || !hasOutputRoom(state, def)) break;
+      if (!hasOutputRoom(state, def)) break;
+
+      const n = Math.min(batch, recipesAvailable(state, def));
+      if (n <= 0) break;
 
       for (const [item, need] of Object.entries(def.input)) {
-        state.input[item] = (state.input[item] ?? 0) - (need as number);
+        state.input[item] = (state.input[item] ?? 0) - (need as number) * n;
         if (state.input[item] <= 0) delete state.input[item];
       }
       for (const [item, amount] of Object.entries(def.output)) {
-        state.output[item] = (state.output[item] ?? 0) + (amount as number);
-        produced[item] = (produced[item] ?? 0) + (amount as number);
+        state.output[item] = (state.output[item] ?? 0) + (amount as number) * n;
+        produced[item] = (produced[item] ?? 0) + (amount as number) * n;
       }
-      state.cycles += 1;
-      state.cycleStartAt += cycleMs;
+      state.cycles += n;
+      state.cycleStartAt += raw * n;
       cyclesDone += 1;
     }
   }
@@ -137,7 +206,7 @@ export function settleMachine(
     ? Math.min(1, Math.max(0, (now - state.cycleStartAt) / cycleMs))
     : 0;
 
-  return { state, produced, cyclesDone, progress, running, blocked, cycleMs };
+  return { state, produced, cyclesDone, progress, running, blocked, cycleMs, batch };
 }
 
 /**

@@ -165,13 +165,13 @@ export function FactoryPanel() {
                 </div>
                 <div className="stat">
                   {settled.running
-                    ? `Produciendo · ciclo ${(settled.cycleMs / 1000).toFixed(1)}s · ${pendingCycles(settled.state, m.id)} ciclos en cola`
+                    ? `Produciendo · ${settled.batch > 1 ? `${settled.batch}× por ciclo · ` : ''}ciclo ${(settled.cycleMs / 1000).toFixed(1)}s · ${pendingCycles(settled.state, m.id)} recetas en cola`
                     : settled.blocked === 'output-full'
                       ? '⚠️ Salida llena: recoge el producto'
                       : '⏸ Sin material: carga la entrada'}
                 </div>
                 <div className="stat">
-                  Producidos en total: <b className="mono-num">{compact(settled.state.cycles)}</b> ciclos
+                  Producidos en total: <b className="mono-num">{compact(settled.state.cycles)}</b> recetas
                 </div>
 
                 {/* Extracción manual: saca material guardado, incluido el que
