@@ -57,7 +57,7 @@ export function opBuyCaex(
     if (player.money < CAEX.cost) return fail('Dinero insuficiente');
     const events: OpEvent[] = [
       { kind: 'money', amount: -CAEX.cost },
-      { kind: 'info', text: '🛻 CAEX en ruta' },
+      { kind: 'info', text: '🚚 CAEX en ruta' },
     ];
     let p: PlayerState = {
       ...player,
@@ -334,7 +334,7 @@ export function opCaexDeposit(
   if (!belt) machine = settleMachine(machine, args.machineId, factory.level, args.now).state;
 
   const events: OpEvent[] = [
-    { kind: 'info', text: `🛻 CAEX: ${units} → ${belt?.label ?? def.short}` },
+    { kind: 'info', text: `🚚 CAEX: ${units} → ${belt?.label ?? def.short}` },
   ];
   let p: PlayerState = { ...player, caex: { ...caex, bag } };
   p = stat(p, { deposited: units });

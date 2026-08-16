@@ -20,7 +20,7 @@ export const CAEX_MODES: { id: CaexMode; label: string; icon: string; desc: stri
   {
     id: 'route',
     label: 'En ruta',
-    icon: '🛻',
+    icon: '🚚',
     desc: 'Hace la ronda por todas las zonas de recolección y carga lo que encuentra.',
   },
   { id: 'off', label: 'En taller', icon: '⏸️', desc: 'Aparcado. No aparece en el mapa.' },
@@ -45,7 +45,7 @@ export const CAEX_SKINS: CaexSkinDef[] = [
     id: 'srt',
     name: 'CAEX SRT-95',
     desc: 'El de serie. Tolva alta, seis ruedas y una bocina que se oye en toda la nave.',
-    icon: '🛻',
+    icon: '🚚',
     color: '#f2b705',
     accent: '#1e2430',
     cost: 0,
@@ -131,7 +131,7 @@ export const CAEX_STATS: CaexStatDef[] = [
   {
     id: 'capacity',
     name: 'Tolva',
-    icon: '🪣',
+    icon: '📦',
     accent: '#38bdf8',
     desc: 'Cuánto material aguanta antes de tener que vaciar. Sin tope.',
     effect: (l) => `${CAEX.capacity + CAEX.capacityPerLevel * l} unidades`,

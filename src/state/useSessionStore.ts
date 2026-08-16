@@ -73,6 +73,30 @@ function acceptFactory(f: FactoryState, set: Setter): boolean {
   return true;
 }
 
+/**
+ * OPERACIONES DE FONDO: las que lanza la automatización sola, sin que tú
+ * pulses nada.
+ *
+ * NO marcan la sesión como ocupada. Suena a detalle y no lo es: con tres
+ * perros picando, cuatro drones repartiendo y el CAEX en ruta hay decenas de
+ * escrituras por minuto, y `busy` deshabilita todos los botones de los
+ * paneles. El resultado era una interfaz "pegada" en la que acertar un clic
+ * entre dos operaciones era cuestión de suerte.
+ *
+ * Tampoco sacan aviso: un fallo que se reintenta solo cada pocos segundos no
+ * es una noticia, es ruido. Lo que sí sale —subir de nivel, completar una
+ * misión, el dinero y el material que entra— viaja como evento y se ve igual.
+ */
+const BACKGROUND_OPS = new Set<OpName>([
+  'petMine',
+  'petDeposit',
+  'petUnload',
+  'droneHaul',
+  'caexMine',
+  'caexDeposit',
+  'tick',
+]);
+
 /** Ejecuta UNA operación. La cola garantiza que no se solapan. */
 async function runOne(
   op: OpName,
@@ -84,7 +108,8 @@ async function runOne(
   if (!backend || !player || !factory) {
     return { ok: false, reason: 'Sesión no lista', events: [] };
   }
-  set({ busy: true });
+  const background = BACKGROUND_OPS.has(op);
+  if (!background) set({ busy: true });
   try {
     const out = await backend.runOp(player.uid, factory.id, op, {
       ...args,
@@ -99,13 +124,18 @@ async function runOne(
         set({ factory: out.factory });
       }
     }
-    dispatchOpEvents(out.events ?? []);
-    if (!out.ok && out.reason && !(out.events ?? []).some((e) => e.kind === 'error')) {
+    dispatchOpEvents(out.events ?? [], background);
+    if (
+      !background &&
+      !out.ok &&
+      out.reason &&
+      !(out.events ?? []).some((e) => e.kind === 'error')
+    ) {
       useUiStore.getState().pushToast({ title: out.reason, icon: '⛔', tone: 'bad' });
     }
     return out;
   } finally {
-    set({ busy: false });
+    if (!background) set({ busy: false });
   }
 }
 
@@ -123,7 +153,15 @@ function cleanup() {
 }
 
 /** Traduce los eventos de una operación en feedback visual/sonoro. */
-function dispatchOpEvents(events: OpEvent[]) {
+/**
+ * Convierte los eventos de una operación en cosas que se ven y se oyen.
+ *
+ * `quiet` es para lo que hace la automatización sola: los números flotantes y
+ * las celebraciones siguen saliendo —eso es lo bonito de tener la fábrica
+ * trabajando— pero los avisos de texto no, porque se repiten cada pocos
+ * segundos y tapan la pantalla.
+ */
+function dispatchOpEvents(events: OpEvent[], quiet = false) {
   const ui = useUiStore.getState();
   for (const ev of events) {
     switch (ev.kind) {
@@ -213,10 +251,10 @@ function dispatchOpEvents(events: OpEvent[]) {
         });
         break;
       case 'info':
-        if (ev.text) ui.pushToast({ title: ev.text, icon: '⚡', tone: 'good' });
+        if (ev.text && !quiet) ui.pushToast({ title: ev.text, icon: '⚡', tone: 'good' });
         break;
       case 'error':
-        if (ev.text) {
+        if (ev.text && !quiet) {
           ui.pushToast({ title: ev.text, icon: '⛔', tone: 'bad' });
           emit('sfx', { name: 'error' });
         }

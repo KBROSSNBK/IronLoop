@@ -84,7 +84,7 @@ export function UpgradesPanel() {
           🐕 Mascota
         </button>
         <button className="rank-tab bevel-sm" data-on={tab === 'caex'} onClick={() => setTab('caex')}>
-          🛻 CAEX
+          🚚 CAEX
         </button>
         <button className="rank-tab bevel-sm" data-on={tab === 'robots'} onClick={() => setTab('robots')}>
           🤖 Robots
@@ -638,7 +638,7 @@ function CaexTab() {
           cada parada. Lento y cabezota, pero su tolva es enorme y no para nunca.
         </div>
         <div className="pet-hero bevel-sm">
-          <div className="ico">🛻</div>
+          <div className="ico">🚚</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="nm">{CAEX_SKINS[0].name}</div>
             <div className="stat">{CAEX_SKINS[0].desc}</div>
@@ -661,7 +661,7 @@ function CaexTab() {
           >
             {locked
               ? `🔒 Requiere fábrica nivel ${CAEX.unlockFactoryLevel}`
-              : `🛻 Comprar CAEX · ${moneyExact(CAEX.cost)}`}
+              : `🚚 Comprar CAEX · ${moneyExact(CAEX.cost)}`}
           </button>
         </div>
       </>
