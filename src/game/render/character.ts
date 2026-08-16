@@ -168,6 +168,8 @@ const SHOE_COLORS: Record<string, string> = {
   boots: '#3b2a1d',
   sneakers: '#e2e8f0',
   servo: '#1e293b',
+  heavy: '#4b5563',
+  rocket: '#334155',
 };
 
 /**
@@ -211,6 +213,9 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   ctx.beginPath();
   ctx.ellipse(x, y + 16, 10 - pose.hop * 0.2, 3.6, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  // El aura va DEBAJO del cuerpo: nunca tapa la cara ni lo que estás haciendo.
+  drawAura(ctx, x, y, ap, c.t, false);
 
   // Cuña de orientación pegada a los pies. Es la señal más barata y más
   // legible de hacia dónde miras: en vista cenital el cuerpo apenas cambia
@@ -270,6 +275,27 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
     ctx.fillStyle = ap.accent;
     ctx.fillRect(x - 7 - sp, y + 16 - bob, 6.5, 1);
     ctx.fillRect(x + 0.5 + sp, y + 16 - bob, 6.5, 1);
+  } else if (ap.shoes === 'heavy') {
+    // Puntera reforzada: se ve pesada aunque ocupe cuatro píxeles.
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillRect(x - 7.5 - sp, y + 13 - bob, 2.4, 4);
+    ctx.fillRect(x + 5.5 + sp, y + 13 - bob, 2.4, 4);
+  } else if (ap.shoes === 'rocket') {
+    // Llama de los propulsores; parpadea con el paso.
+    const f = 2.5 + Math.abs(Math.sin(c.t * 14)) * 2.5;
+    ctx.fillStyle = '#fbbf24';
+    ctx.globalAlpha = (c.alpha ?? 1) * 0.85;
+    ctx.beginPath();
+    ctx.ellipse(x - 4 - sp, y + 18 - bob, 2, f, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + 4 + sp, y + 18 - bob, 2, f, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = ap.accent;
+    ctx.globalAlpha = (c.alpha ?? 1) * 0.6;
+    ctx.beginPath();
+    ctx.ellipse(x - 4 - sp, y + 17 - bob, 1.1, f * 0.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + 4 + sp, y + 17 - bob, 1.1, f * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = c.alpha ?? 1;
   }
 
   // Brazo del lado LEJANO: de perfil va detrás del torso y más oscuro, que
@@ -319,6 +345,53 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
     ctx.arc(x, bodyY + 8, 2.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = c.alpha ?? 1;
+  } else if (ap.outfit === 'hazmat') {
+    // Capucha sellada y ventana de visor: el traje se reconoce al instante.
+    ctx.fillStyle = shade(ap.outfitColor, 22);
+    roundRect(ctx, x - torsoW / 2 - 1, bodyY - 2, torsoW + 2, 6, 3);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(15,23,42,0.55)';
+    roundRect(ctx, x - 5, bodyY + 5, 10, 5, 2);
+    ctx.fill();
+    ctx.fillStyle = ap.accent;
+    ctx.fillRect(x - 5, bodyY + 5, 10, 1.2);
+    // Franjas de peligro en el pecho
+    ctx.fillStyle = 'rgba(250,204,21,0.85)';
+    for (let i = 0; i < 3; i++) ctx.fillRect(x - 6 + i * 4.5, bodyY + 11, 2.4, 2.4);
+  } else if (ap.outfit === 'armor') {
+    // Placas: hombreras, peto y remaches.
+    ctx.fillStyle = shade(ap.outfitColor, 30);
+    roundRect(ctx, x - torsoW / 2 - 2, bodyY - 1, 6, 6, 2);
+    ctx.fill();
+    roundRect(ctx, x + torsoW / 2 - 4, bodyY - 1, 6, 6, 2);
+    ctx.fill();
+    ctx.fillStyle = shade(ap.outfitColor, -25);
+    roundRect(ctx, x - 6, bodyY + 4, 12, 8, 2);
+    ctx.fill();
+    ctx.fillStyle = ap.accent;
+    for (const px of [-4.5, 0, 4.5]) {
+      ctx.beginPath();
+      ctx.arc(x + px, bodyY + 8, 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (ap.outfit === 'hoodie') {
+    // Capucha caída por la espalda y cordones.
+    ctx.fillStyle = shade(ap.outfitColor, -22);
+    ctx.beginPath();
+    ctx.ellipse(x, bodyY + 1, torsoW / 2 + 1, 4, 0, Math.PI, 0);
+    ctx.fill();
+    ctx.strokeStyle = ap.accent;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - 2, bodyY + 3);
+    ctx.lineTo(x - 2.6, bodyY + 9);
+    ctx.moveTo(x + 2, bodyY + 3);
+    ctx.lineTo(x + 2.6, bodyY + 9);
+    ctx.stroke();
+    // Bolsillo central
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    roundRect(ctx, x - 5, bodyY + 8, 10, 4.5, 2);
+    ctx.fill();
   }
 
   // Brazos
@@ -446,6 +519,9 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
     }
   }
 
+  // La parte del aura que va por delante (satélites cercanos, interferencia).
+  drawAura(ctx, x, y, ap, c.t, true);
+
   // Mirando hacia arriba, la cuña va sobre la cabeza: en el suelo quedaría
   // detrás del propio cuerpo y no se vería.
   if (wedgeArriba) drawFacingWedge(ctx, x, headY - 16, 'up', ap.accent, moving);
@@ -500,6 +576,57 @@ function drawHair(ctx: CanvasRenderingContext2D, x: number, hy: number, ap: Appe
       ctx.fill();
       ctx.fillRect(x - 1.8, hy - 7.5, 3.6, 4);
       break;
+    case 'ponytail':
+      ctx.beginPath();
+      ctx.arc(x, hy - 1.5, 7, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(x - 7, hy - 2, 14, 2);
+      // La coleta cae por detrás y se mueve un poco al andar.
+      ctx.beginPath();
+      ctx.moveTo(x - 6, hy - 3);
+      ctx.quadraticCurveTo(x - 11, hy + 3, x - 8.5, hy + 10);
+      ctx.quadraticCurveTo(x - 6, hy + 4, x - 4, hy - 2);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'afro':
+      ctx.beginPath();
+      ctx.arc(x, hy - 3, 9.6, 0, Math.PI * 2);
+      ctx.fill();
+      // Un par de mordiscos para que no sea un círculo perfecto.
+      ctx.fillStyle = shade(ap.hairColor, 18);
+      ctx.beginPath();
+      ctx.arc(x - 4, hy - 6, 3.6, 0, Math.PI * 2);
+      ctx.arc(x + 4.5, hy - 5, 3, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'spiky':
+      ctx.beginPath();
+      ctx.arc(x, hy - 1.5, 7, Math.PI, 0);
+      ctx.fill();
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(x + i * 3 - 1.6, hy - 4);
+        ctx.lineTo(x + i * 3 + Math.sign(i) * 1.5, hy - 11 + Math.abs(i) * 1.6);
+        ctx.lineTo(x + i * 3 + 1.6, hy - 4);
+        ctx.closePath();
+        ctx.fill();
+      }
+      break;
+    case 'braids':
+      ctx.beginPath();
+      ctx.arc(x, hy - 1.5, 7.2, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(x - 7.2, hy - 2, 14.4, 2);
+      // Dos trenzas a los lados, con sus nudos.
+      for (const s of [-1, 1]) {
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.arc(x + s * 7.6, hy + 1 + i * 3.4, 2 - i * 0.25, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      break;
   }
 }
 
@@ -540,6 +667,63 @@ function drawHelmet(
       ctx.fillRect(x - 5, hy - 3, 10, 1);
       ctx.globalAlpha /= 0.5;
       break;
+    case 'cap':
+      ctx.fillStyle = ap.accent;
+      ctx.beginPath();
+      ctx.arc(x, hy - 2, 7.2, Math.PI, 0);
+      ctx.fill();
+      // Visera hacia delante (el cuerpo ya está espejado si mira a la izq.).
+      ctx.beginPath();
+      ctx.ellipse(x + 4, hy - 2, 6.5, 2, 0, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(x - 7, hy - 3.4, 14, 1.4);
+      break;
+    case 'headset':
+      // Diadema + almohadillas: silueta muy reconocible desde lejos.
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(x, hy - 1, 8, Math.PI * 1.1, Math.PI * 1.9);
+      ctx.stroke();
+      ctx.fillStyle = '#1e293b';
+      roundRect(ctx, x - 9.6, hy - 3, 3.6, 6, 1.6);
+      ctx.fill();
+      roundRect(ctx, x + 6, hy - 3, 3.6, 6, 1.6);
+      ctx.fill();
+      ctx.fillStyle = ap.accent;
+      ctx.beginPath();
+      ctx.arc(x + 7.8, hy, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+      // Micrófono
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x + 7.8, hy + 2.6);
+      ctx.quadraticCurveTo(x + 7, hy + 6, x + 3, hy + 5.6);
+      ctx.stroke();
+      break;
+    case 'crown': {
+      const brillo = 0.75 + Math.sin(t * 4) * 0.25;
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.moveTo(x - 7, hy - 4);
+      ctx.lineTo(x - 7, hy - 10);
+      ctx.lineTo(x - 3.5, hy - 6.5);
+      ctx.lineTo(x, hy - 11.5);
+      ctx.lineTo(x + 3.5, hy - 6.5);
+      ctx.lineTo(x + 7, hy - 10);
+      ctx.lineTo(x + 7, hy - 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = ap.accent;
+      ctx.globalAlpha *= brillo;
+      ctx.beginPath();
+      ctx.arc(x, hy - 6, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha /= brillo;
+      break;
+    }
     case 'halo': {
       const pulse = 0.6 + Math.sin(t * 3) * 0.25;
       ctx.strokeStyle = ap.accent;
@@ -549,6 +733,138 @@ function drawHelmet(
       ctx.ellipse(x, hy - 11, 7, 2.4, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha /= pulse;
+      break;
+    }
+  }
+}
+
+/**
+ * AURA — el efecto que envuelve al personaje.
+ *
+ * Se dibuja DEBAJO del cuerpo (salvo las que deben verse por delante) para
+ * que nunca tape la cara ni lo que estás haciendo. Todo se deriva del tiempo:
+ * no guarda partículas, así que no cuesta memoria ni se desincroniza entre
+ * jugadores.
+ */
+function drawAura(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ap: Appearance,
+  t: number,
+  front: boolean,
+): void {
+  const TAU = Math.PI * 2;
+  const cy = y - 8;
+
+  switch (ap.aura) {
+    case 'sparks': {
+      if (front) return;
+      for (let i = 0; i < 7; i++) {
+        const a = t * 1.6 + i * (TAU / 7);
+        const r = 13 + Math.sin(t * 3 + i) * 3;
+        const px = x + Math.cos(a) * r;
+        const py = cy + Math.sin(a) * (r * 0.42);
+        ctx.globalAlpha = 0.45 + Math.abs(Math.sin(t * 4 + i)) * 0.55;
+        ctx.fillStyle = ap.accent;
+        ctx.fillRect(px - 1.1, py - 1.1, 2.2, 2.2);
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'embers': {
+      if (front) return;
+      // Brasas que suben y se apagan; el ciclo se deriva del tiempo.
+      for (let i = 0; i < 9; i++) {
+        const k = (t * 0.55 + i / 9) % 1;
+        const px = x + Math.sin(i * 3.1 + t * 1.4) * 9;
+        const py = y + 12 - k * 30;
+        ctx.globalAlpha = (1 - k) * 0.75;
+        ctx.fillStyle = k < 0.4 ? '#fbbf24' : '#f87171';
+        ctx.beginPath();
+        ctx.arc(px, py, 1.5 * (1 - k * 0.6), 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'ring': {
+      if (front) return;
+      const pulse = (t * 0.7) % 1;
+      for (const off of [0, 0.5]) {
+        const k = (pulse + off) % 1;
+        ctx.globalAlpha = (1 - k) * 0.8;
+        ctx.strokeStyle = ap.accent;
+        ctx.lineWidth = 2.8 - k * 1.4;
+        ctx.beginPath();
+        ctx.ellipse(x, y + 15, 8 + k * 16, 3 + k * 6, 0, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'orbit': {
+      // Tres satélites: los de detrás van al fondo y los de delante encima.
+      for (let i = 0; i < 3; i++) {
+        const a = t * 1.9 + i * (TAU / 3);
+        const delante = Math.sin(a) > 0;
+        if (delante !== front) continue;
+        const px = x + Math.cos(a) * 15;
+        const py = cy + Math.sin(a) * 5 - 2;
+        ctx.globalAlpha = delante ? 0.95 : 0.45;
+        ctx.fillStyle = ap.accent;
+        ctx.beginPath();
+        ctx.arc(px, py, 2.1, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha *= 0.4;
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'glitch': {
+      if (!front) return;
+      // Franjas horizontales desplazadas: parece una señal con interferencia.
+      for (let i = 0; i < 3; i++) {
+        const yy = cy - 12 + ((t * 26 + i * 13) % 30);
+        const w = 8 + Math.sin(t * 20 + i) * 6;
+        ctx.globalAlpha = 0.32;
+        ctx.fillStyle = i % 2 === 0 ? ap.accent : '#f472b6';
+        ctx.fillRect(x - w / 2 + Math.sin(t * 30 + i) * 3, yy, w, 1.6);
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'ash': {
+      if (front) return;
+      for (let i = 0; i < 10; i++) {
+        const k = (t * 0.3 + i / 10) % 1;
+        const px = x + Math.sin(i * 2.3 + t * 0.6) * 13;
+        const py = cy - 16 + k * 34;
+        ctx.globalAlpha = Math.sin(k * Math.PI) * 0.5;
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillRect(px, py, 1.4, 1.4);
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'shadow': {
+      if (front) return;
+      // Una sombra que respira debajo, más grande y más oscura de lo normal.
+      const s = 1 + Math.sin(t * 2) * 0.12;
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#0b1120';
+      ctx.beginPath();
+      ctx.ellipse(x, y + 16, 15 * s, 5.5 * s, 0, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = ap.accent;
+      ctx.beginPath();
+      ctx.ellipse(x, y + 16, 11 * s, 4 * s, 0, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
       break;
     }
   }

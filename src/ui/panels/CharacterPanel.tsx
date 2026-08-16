@@ -4,7 +4,22 @@ import { useSessionStore } from '../../state/useSessionStore';
 import { APPEARANCE_SLOTS, randomAppearance } from '../../config/cosmetics';
 import { deriveStats } from '../../config/balance';
 import { drawCharacter } from '../../game/render/character';
-import type { Appearance } from '../../types';
+import type { ActivityKind, Appearance, FacingDir } from '../../types';
+
+const DIR_ICON: Record<FacingDir, string> = {
+  down: '⬇️',
+  right: '➡️',
+  up: '⬆️',
+  left: '⬅️',
+};
+
+/** Poses de la vista previa. Un efecto parado no se ve igual que corriendo. */
+const ACTS: { id: ActivityKind; icon: string; label: string }[] = [
+  { id: 'idle', icon: '🧍', label: 'Quieto' },
+  { id: 'walk', icon: '🚶', label: 'Andando' },
+  { id: 'run', icon: '🏃', label: 'Corriendo' },
+  { id: 'gather', icon: '⛏️', label: 'Picando' },
+];
 
 export function CharacterPanel() {
   const player = useSessionStore((s) => s.player);
@@ -12,6 +27,8 @@ export function CharacterPanel() {
   const busy = useSessionStore((s) => s.busy);
   const [draft, setDraft] = useState<Appearance | null>(null);
   const [name, setName] = useState('');
+  const [dir, setDir] = useState<FacingDir>('down');
+  const [act, setAct] = useState<ActivityKind>('walk');
 
   useEffect(() => {
     if (player && !draft) {
@@ -53,7 +70,29 @@ export function CharacterPanel() {
         </>
       }
     >
-      <Preview appearance={draft} />
+      <Preview appearance={draft} dir={dir} act={act} />
+
+      {/* Girar y probar la animación: los efectos y el perfil sólo se
+          aprecian moviéndose y desde el ángulo correcto. */}
+      <div className="preview-ctl">
+        {(['down', 'right', 'up', 'left'] as FacingDir[]).map((d) => (
+          <button key={d} className="mode-btn" data-on={dir === d} onClick={() => setDir(d)}>
+            {DIR_ICON[d]}
+          </button>
+        ))}
+        <span className="sep" />
+        {ACTS.map((a) => (
+          <button
+            key={a.id}
+            className="mode-btn"
+            data-on={act === a.id}
+            title={a.label}
+            onClick={() => setAct(a.id)}
+          >
+            {a.icon}
+          </button>
+        ))}
+      </div>
 
       <div className="section-title">NOMBRE</div>
       <input
@@ -90,8 +129,10 @@ export function CharacterPanel() {
                     key={o.id}
                     className="opt-chip"
                     data-on={on}
+                    title={o.name}
                     onClick={() => setDraft({ ...draft, [slot.key]: o.id })}
                   >
+                    {o.icon && <i className="ico">{o.icon}</i>}
                     {o.name}
                     {o.premium ? ' ✦' : ''}
                   </button>
@@ -127,7 +168,15 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Preview({ appearance }: { appearance: Appearance }) {
+function Preview({
+  appearance,
+  dir,
+  act,
+}: {
+  appearance: Appearance;
+  dir: FacingDir;
+  act: ActivityKind;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -149,8 +198,8 @@ function Preview({ appearance }: { appearance: Appearance }) {
       drawCharacter(ctx, {
         x: 0,
         y: 0,
-        dir: 'down',
-        act: 'walk',
+        dir,
+        act,
         t: t / 1000,
         appearance,
         name: '',
@@ -162,7 +211,7 @@ function Preview({ appearance }: { appearance: Appearance }) {
     };
     raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
-  }, [appearance]);
+  }, [appearance, dir, act]);
 
   return (
     <div className="char-preview">

@@ -14,11 +14,15 @@ export interface Appearance {
   accent: string;    // color secundario / detalles
   helmet: string;    // casco / accesorio de cabeza
   shoes: string;
+  /** Efecto que te envuelve. Es puro lucimiento y se ve desde lejos. */
+  aura: string;
 }
 
 export interface OptionDef {
   id: string;
   name: string;
+  /** Icono para el selector: se reconoce antes de leer el nombre. */
+  icon?: string;
   /** Coste en monedas; 0 = gratis desde el inicio. */
   cost?: number;
   premium?: boolean;
@@ -34,11 +38,15 @@ export const SKIN_TONES: OptionDef[] = [
 ];
 
 export const HAIR_STYLES: OptionDef[] = [
-  { id: 'short', name: 'Corto' },
-  { id: 'long', name: 'Largo' },
-  { id: 'bun', name: 'Moño' },
-  { id: 'mohawk', name: 'Cresta' },
-  { id: 'bald', name: 'Rapado' },
+  { id: 'short', name: 'Corto', icon: '💇' },
+  { id: 'long', name: 'Largo', icon: '💁' },
+  { id: 'bun', name: 'Moño', icon: '🍡' },
+  { id: 'mohawk', name: 'Cresta', icon: '🦅' },
+  { id: 'ponytail', name: 'Coleta', icon: '🎀' },
+  { id: 'afro', name: 'Afro', icon: '☁️' },
+  { id: 'spiky', name: 'Pinchos', icon: '⚡' },
+  { id: 'braids', name: 'Trenzas', icon: '🧶' },
+  { id: 'bald', name: 'Rapado', icon: '🥚' },
 ];
 
 export const HAIR_COLORS: OptionDef[] = [
@@ -49,13 +57,19 @@ export const HAIR_COLORS: OptionDef[] = [
   { id: '#e5e7eb', name: 'Platino' },
   { id: '#22d3ee', name: 'Cian' },
   { id: '#f472b6', name: 'Magenta' },
+  { id: '#4ade80', name: 'Lima' },
+  { id: '#a855f7', name: 'Violeta' },
+  { id: '#fb923c', name: 'Naranja' },
 ];
 
 export const OUTFITS: OptionDef[] = [
-  { id: 'overall', name: 'Mono de trabajo' },
-  { id: 'vest', name: 'Chaleco reflectante' },
-  { id: 'jacket', name: 'Chaqueta técnica' },
-  { id: 'suit', name: 'Traje de exo' },
+  { id: 'overall', name: 'Mono de trabajo', icon: '🧑‍🏭' },
+  { id: 'vest', name: 'Chaleco reflectante', icon: '🦺' },
+  { id: 'jacket', name: 'Chaqueta técnica', icon: '🧥' },
+  { id: 'suit', name: 'Traje de exo', icon: '🤖' },
+  { id: 'hazmat', name: 'Traje NBQ', icon: '☣️' },
+  { id: 'armor', name: 'Placas de aleación', icon: '🛡️' },
+  { id: 'hoodie', name: 'Sudadera', icon: '👕' },
 ];
 
 export const OUTFIT_COLORS: OptionDef[] = [
@@ -66,6 +80,11 @@ export const OUTFIT_COLORS: OptionDef[] = [
   { id: '#a855f7', name: 'Violeta' },
   { id: '#e2e8f0', name: 'Blanco' },
   { id: '#334155', name: 'Grafito' },
+  { id: '#14b8a6', name: 'Turquesa' },
+  { id: '#f472b6', name: 'Rosa' },
+  { id: '#facc15', name: 'Amarillo' },
+  { id: '#7c3aed', name: 'Índigo' },
+  { id: '#0f172a', name: 'Negro' },
 ];
 
 export const ACCENTS: OptionDef[] = [
@@ -74,20 +93,46 @@ export const ACCENTS: OptionDef[] = [
   { id: '#f472b6', name: 'Rosa' },
   { id: '#4ade80', name: 'Lima' },
   { id: '#ffffff', name: 'Blanco' },
+  { id: '#f87171', name: 'Rojo' },
+  { id: '#a78bfa', name: 'Violeta' },
+  { id: '#fb923c', name: 'Naranja' },
 ];
 
 export const HELMETS: OptionDef[] = [
-  { id: 'none', name: 'Ninguno' },
-  { id: 'hardhat', name: 'Casco de obra' },
-  { id: 'visor', name: 'Visor HUD' },
-  { id: 'welder', name: 'Máscara de soldador' },
-  { id: 'halo', name: 'Aro holográfico', premium: true },
+  { id: 'none', name: 'Ninguno', icon: '🚫' },
+  { id: 'hardhat', name: 'Casco de obra', icon: '⛑️' },
+  { id: 'visor', name: 'Visor HUD', icon: '🕶️' },
+  { id: 'welder', name: 'Máscara de soldador', icon: '🥽' },
+  { id: 'cap', name: 'Gorra', icon: '🧢' },
+  { id: 'headset', name: 'Auriculares', icon: '🎧' },
+  { id: 'crown', name: 'Corona', icon: '👑' },
+  { id: 'halo', name: 'Aro holográfico', icon: '💫', premium: true },
 ];
 
 export const SHOES: OptionDef[] = [
-  { id: 'boots', name: 'Botas' },
-  { id: 'sneakers', name: 'Deportivas' },
-  { id: 'servo', name: 'Servo-botas' },
+  { id: 'boots', name: 'Botas', icon: '🥾' },
+  { id: 'sneakers', name: 'Deportivas', icon: '👟' },
+  { id: 'servo', name: 'Servo-botas', icon: '🦿' },
+  { id: 'heavy', name: 'Botas de carga', icon: '🧱' },
+  { id: 'rocket', name: 'Propulsores', icon: '🚀' },
+];
+
+/**
+ * AURAS — el efecto que te envuelve.
+ *
+ * Es lo único puramente decorativo del juego, y a propósito: en una fábrica
+ * donde todos vais de mono de trabajo, es lo que hace que se distinga de lejos
+ * quién es quién. No da ninguna ventaja.
+ */
+export const AURAS: OptionDef[] = [
+  { id: 'none', name: 'Ninguna', icon: '🚫' },
+  { id: 'sparks', name: 'Chispas', icon: '✨' },
+  { id: 'embers', name: 'Brasas', icon: '🔥' },
+  { id: 'ring', name: 'Anillo de energía', icon: '⭕' },
+  { id: 'orbit', name: 'Satélites', icon: '🛰️' },
+  { id: 'glitch', name: 'Interferencia', icon: '📺' },
+  { id: 'ash', name: 'Ceniza', icon: '🌫️' },
+  { id: 'shadow', name: 'Sombra viva', icon: '🌑' },
 ];
 
 export const DEFAULT_APPEARANCE: Appearance = {
@@ -99,6 +144,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   accent: '#22d3ee',
   helmet: 'hardhat',
   shoes: 'boots',
+  aura: 'none',
 };
 
 const pick = <T,>(arr: T[], rand: () => number) => arr[Math.floor(rand() * arr.length)];
@@ -113,6 +159,7 @@ export function randomAppearance(rand: () => number = Math.random): Appearance {
     accent: pick(ACCENTS, rand).id,
     helmet: pick(HELMETS.filter((o) => !o.premium), rand).id,
     shoes: pick(SHOES, rand).id,
+    aura: pick(AURAS, rand).id,
   };
 }
 
@@ -125,4 +172,5 @@ export const APPEARANCE_SLOTS = [
   { key: 'accent' as const, label: 'Detalles', options: ACCENTS, kind: 'color' as const },
   { key: 'helmet' as const, label: 'Cabeza', options: HELMETS, kind: 'style' as const },
   { key: 'shoes' as const, label: 'Calzado', options: SHOES, kind: 'style' as const },
+  { key: 'aura' as const, label: 'Efecto', options: AURAS, kind: 'style' as const },
 ];

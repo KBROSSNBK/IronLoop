@@ -632,3 +632,48 @@
 }
 .r-chip[data-ok='true'] u { color: var(--green); }
 .r-chip.out u { color: var(--blue); }
+
+/* ── Personalización: vista previa y opciones ── */
+
+/* Girar el personaje y probar la pose: los efectos y el perfil sólo se
+   aprecian en movimiento y desde el ángulo correcto. */
+.preview-ctl {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.preview-ctl .sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.14);
+  margin: 0 3px;
+}
+
+/* El icono hace reconocible cada opción antes de leer el nombre. */
+.opt-chip .ico {
+  font-style: normal;
+  margin-right: 5px;
+  font-size: 13px;
+}
+
+/* Rejilla luminosa detrás del personaje: se ven mejor las auras oscuras. */
+.char-preview {
+  position: relative;
+  overflow: hidden;
+  /* `overflow` distinto de `visible` hace que el tamaño mínimo automático de
+     un elemento flexible pase a ser 0, y el panel lo aplastaba hasta dejarlo
+     en una raya. Con `flex: none` conserva su tamaño. */
+  flex: none;
+}
+.char-preview::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(56, 189, 248, 0.07) 1px, transparent 1px) 0 0 / 100% 14px,
+    linear-gradient(90deg, rgba(56, 189, 248, 0.07) 1px, transparent 1px) 0 0 / 14px 100%;
+  pointer-events: none;
+}
+.char-preview canvas { position: relative; z-index: 1; }
