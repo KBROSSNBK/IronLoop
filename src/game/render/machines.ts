@@ -142,6 +142,48 @@ export function drawMachine(
     roundRect(ctx, coreX - 12, coreY - 5 * squash, 24, 10 * squash, 2);
     ctx.fill();
     ctx.globalAlpha = 1;
+  } else if (def.kind === 'refinery') {
+    // Columna de destilación: burbujas subiendo por un tubo de gas.
+    ctx.fillStyle = hexA(def.accent, running ? 0.28 : 0.12);
+    roundRect(ctx, coreX - 9, coreY - 14, 18, 28, 4);
+    ctx.fill();
+    for (let i = 0; i < 5; i++) {
+      const t = running ? (time * 0.8 + i / 5) % 1 : (i + 1) / 6;
+      const r = 1.6 + (1 - t) * 2.2;
+      ctx.fillStyle = hexA(i % 2 ? '#ffffff' : def.accent, running ? 0.85 - t * 0.55 : 0.2);
+      ctx.beginPath();
+      ctx.arc(coreX + Math.sin((t + i) * 5) * 4, coreY + 13 - t * 26, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = hexA('#e2e8f0', 0.28);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(coreX - 9, coreY - 14);
+    ctx.lineTo(coreX - 9, coreY + 14);
+    ctx.moveTo(coreX + 9, coreY - 14);
+    ctx.lineTo(coreX + 9, coreY + 14);
+    ctx.stroke();
+  } else if (def.kind === 'starforge') {
+    // Estrella en miniatura: corona pulsante y fulgores en aspa.
+    const pulso = running ? 0.75 + Math.sin(time * 5) * 0.25 : 0.28;
+    const g2 = ctx.createRadialGradient(coreX, coreY, 1, coreX, coreY, 16);
+    g2.addColorStop(0, hexA('#fffbeb', pulso));
+    g2.addColorStop(0.45, hexA(def.accent, pulso * 0.8));
+    g2.addColorStop(1, hexA(def.accent, 0));
+    ctx.fillStyle = g2;
+    ctx.beginPath();
+    ctx.arc(coreX, coreY, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = hexA('#fffbeb', pulso * 0.8);
+    ctx.lineWidth = 1.6;
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + (running ? time * 0.9 : 0);
+      const l = 10 + (running ? Math.sin(time * 6 + i) * 4 : 0);
+      ctx.beginPath();
+      ctx.moveTo(coreX + Math.cos(a) * 4, coreY + Math.sin(a) * 2.5);
+      ctx.lineTo(coreX + Math.cos(a) * (4 + l), coreY + Math.sin(a) * (2.5 + l * 0.6));
+      ctx.stroke();
+    }
   } else if (def.kind === 'fusion') {
     /*
      * Cámara de Singularidad: tres anillos que se cierran sobre un punto

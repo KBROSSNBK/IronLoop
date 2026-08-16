@@ -376,7 +376,17 @@ export const WALL_RECTS: Rect[] = [
 
 /** Props decorativos: cajas, barriles, palés, señales. Sólidos si `solid`. */
 export interface PropDef {
-  kind: 'crate' | 'barrel' | 'pallet' | 'pipe' | 'sign' | 'lamp' | 'cone' | 'terminal';
+  kind:
+    | 'crate'
+    | 'barrel'
+    | 'pallet'
+    | 'pipe'
+    | 'sign'
+    | 'lamp'
+    | 'cone'
+    | 'terminal'
+    | 'rock'
+    | 'antenna';
   tx: number;
   ty: number;
   solid?: boolean;
@@ -408,6 +418,22 @@ export const PROPS: PropDef[] = [
   { kind: 'sign', tx: 18, ty: 5.5 },
   { kind: 'terminal', tx: 30, ty: 12, solid: true },
   { kind: 'terminal', tx: 5, ty: 18, solid: true },
+
+  // ── El planeta: rocas sueltas y antenas de la base ──
+  { kind: 'antenna', tx: 19, ty: 39 },
+  { kind: 'antenna', tx: 26, ty: 41, variant: 1 },
+  { kind: 'rock', tx: 4, ty: 45, solid: true },
+  { kind: 'rock', tx: 8.5, ty: 41.5, variant: 1 },
+  { kind: 'rock', tx: 13.5, ty: 43, solid: true, variant: 1 },
+  { kind: 'rock', tx: 9, ty: 50.5 },
+  { kind: 'rock', tx: 14.5, ty: 49.5, variant: 1 },
+  { kind: 'rock', tx: 17, ty: 45 },
+  { kind: 'rock', tx: 30.5, ty: 51.5, variant: 1 },
+  { kind: 'antenna', tx: 44, ty: 43 },
+  { kind: 'lamp', tx: 31, ty: 41 },
+  { kind: 'lamp', tx: 44, ty: 51 },
+  { kind: 'cone', tx: 22, ty: 42.5 },
+  { kind: 'cone', tx: 24.5, ty: 42.5 },
 ];
 
 /**

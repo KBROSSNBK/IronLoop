@@ -219,15 +219,15 @@ function paintTile(ctx: CanvasRenderingContext2D, tx: number, ty: number, polish
     }
     case 'regolith': {
       // Suelo del planeta: polvo violáceo, cráteres y algún destello mineral.
-      ctx.fillStyle = `rgb(${26 + n * 9},${24 + n * 9},${44 + n * 12})`;
+      ctx.fillStyle = `rgb(${34 + n * 11},${30 + n * 10},${54 + n * 14})`;
       ctx.fillRect(x, y, TILE, TILE);
       const c = hash(tx * 3, ty * 5, 13);
-      if (c > 0.72) {
+      if (c > 0.82) {
         // Cráter: aro claro arriba, sombra abajo.
         const cx = x + TILE / 2 + (c - 0.85) * 18;
         const cy = y + TILE / 2 + (hash(tx, ty, 21) - 0.5) * 14;
-        const r = 5 + c * 7;
-        ctx.fillStyle = 'rgba(8,10,20,0.5)';
+        const r = 4 + c * 6;
+        ctx.fillStyle = 'rgba(10,12,24,0.34)';
         ctx.beginPath();
         ctx.ellipse(cx, cy, r, r * 0.55, 0, 0, Math.PI * 2);
         ctx.fill();
@@ -782,6 +782,74 @@ function drawProp(ctx: CanvasRenderingContext2D, p: PropDef, time: number) {
       ctx.fillStyle = '#fde68a';
       ctx.globalAlpha = 0.85;
       roundRect(ctx, x + 12, y + 12, 16, 4, 2);
+      ctx.fill();
+      break;
+    }
+    case 'rock': {
+      // Peñasco del planeta: silueta angular con vetas que brillan poco.
+      const s = v ? 1.25 : 1;
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.beginPath();
+      ctx.ellipse(x + 18, y + 28, 15 * s, 5 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#2b2740';
+      ctx.beginPath();
+      ctx.moveTo(x + 4, y + 27);
+      ctx.lineTo(x + 9, y + 10 * s);
+      ctx.lineTo(x + 20, y + 5 * s);
+      ctx.lineTo(x + 31, y + 13 * s);
+      ctx.lineTo(x + 33, y + 27);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      ctx.beginPath();
+      ctx.moveTo(x + 9, y + 10 * s);
+      ctx.lineTo(x + 20, y + 5 * s);
+      ctx.lineTo(x + 21, y + 27);
+      ctx.lineTo(x + 12, y + 27);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(148,140,220,0.45)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x + 13, y + 24);
+      ctx.lineTo(x + 18, y + 14 * s);
+      ctx.lineTo(x + 25, y + 20);
+      ctx.stroke();
+      break;
+    }
+    case 'antenna': {
+      // Repetidor de la base: mástil, plato y luz de posición.
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(x + 18, y + 32, 10, 3.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#334155';
+      roundRect(ctx, x + 10, y + 27, 16, 5, 2);
+      ctx.fill();
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(x + 18, y + 27);
+      ctx.lineTo(x + 18, y + (v ? 8 : 2));
+      ctx.stroke();
+      // Plato
+      ctx.save();
+      ctx.translate(x + 18, y + (v ? 10 : 5));
+      ctx.rotate(Math.sin(time * 0.35 + x) * 0.35);
+      ctx.fillStyle = '#94a3b8';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 9, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 5.5, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#f87171';
+      ctx.globalAlpha = 0.45 + Math.sin(time * 3.4 + y) * 0.4;
+      ctx.beginPath();
+      ctx.arc(x + 18, y + (v ? 8 : 2), 2.2, 0, Math.PI * 2);
       ctx.fill();
       break;
     }
