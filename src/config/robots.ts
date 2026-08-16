@@ -121,8 +121,8 @@ export const ROBOTS: RobotDef[] = [
     // Frente de la Recicladora → rodea por debajo → carga de la cinta c8.
     path: [
       { x: 1060, y: 976 },
-      { x: 1214, y: 976 },
-      { x: 1214, y: 872 },
+      { x: 1180, y: 976 },
+      { x: 1180, y: 872 },
     ],
     viaConveyor: 'c8',
     accent: '#34d399',
@@ -140,11 +140,12 @@ export const ROBOTS: RobotDef[] = [
     baseCost: 60000,
     costGrowth: 1.78,
     unlockFactoryLevel: 7,
-    // Frente del Laboratorio → rodea el pilar por el sur → cinta de circuitos.
+    // Frente del Laboratorio → baja y va al este hasta la línea transversal.
+    // Rodea por debajo el pilar de (12,18), que está justo en medio.
     path: [
-      { x: 420, y: 790 },
-      { x: 620, y: 790 },
-      { x: 620, y: 545 },
+      { x: 420, y: 760 },
+      { x: 420, y: 800 },
+      { x: 600, y: 800 },
     ],
     viaConveyor: 'c10',
     accent: '#c084fc',
@@ -162,11 +163,13 @@ export const ROBOTS: RobotDef[] = [
     baseCost: 90000,
     costGrowth: 1.8,
     unlockFactoryLevel: 10,
+    // Sale por la derecha de Aleaciones, baja pegado al muro del este y entra
+    // al Reactor por su costado.
     path: [
       { x: 1620, y: 700 },
-      { x: 1770, y: 700 },
-      { x: 1770, y: 918 },
-      { x: 1600, y: 918 },
+      { x: 1780, y: 700 },
+      { x: 1780, y: 1142 },
+      { x: 1206, y: 1142 },
     ],
     viaConveyor: 'c11',
     accent: '#38bdf8',
@@ -184,11 +187,12 @@ export const ROBOTS: RobotDef[] = [
     baseCost: 180000,
     costGrowth: 1.82,
     unlockFactoryLevel: 10,
+    // Mismo corredor que el Portador Pesado, un carril más abajo.
     path: [
-      { x: 1620, y: 862 },
-      { x: 1770, y: 862 },
-      { x: 1770, y: 918 },
-      { x: 1600, y: 918 },
+      { x: 1620, y: 860 },
+      { x: 1810, y: 860 },
+      { x: 1810, y: 1178 },
+      { x: 1206, y: 1150 },
     ],
     viaConveyor: 'c11',
     accent: '#a3e635',

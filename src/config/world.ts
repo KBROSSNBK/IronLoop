@@ -309,11 +309,11 @@ export interface ConveyorDef {
 }
 
 export const CONVEYORS: ConveyorDef[] = [
-  { id: 'c1', tx: 11, ty: 6.5, len: 12, dir: 'right', fromLevel: 2, feeds: 'smelter', label: 'CINTA A FUNDIDORA' },
-  { id: 'c2', tx: 29, ty: 9, len: 5, dir: 'down', fromLevel: 2, feeds: 'assembler', label: 'CINTA A ENSAMBLADORA' },
-  { id: 'c3', tx: 23, ty: 16.5, len: 8, dir: 'left', fromLevel: 4 },
+  { id: 'c1', tx: 11, ty: 6.5, len: 13, dir: 'right', fromLevel: 2, feeds: 'smelter', label: 'CINTA A FUNDIDORA' },
+  { id: 'c2', tx: 29, ty: 9, len: 6, dir: 'down', fromLevel: 2, feeds: 'assembler', label: 'CINTA A ENSAMBLADORA' },
+  { id: 'c3', tx: 30, ty: 15.2, len: 3, dir: 'right', fromLevel: 4 },
   { id: 'c4', tx: 18, ty: 16, len: 4, dir: 'down', fromLevel: 4 },
-  { id: 'c5', tx: 16, ty: 16.5, len: 7, dir: 'left', fromLevel: 6, feeds: 'lab', label: 'CINTA A LABORATORIO' },
+  { id: 'c5', tx: 13, ty: 16.5, len: 10, dir: 'left', fromLevel: 6, feeds: 'lab', label: 'CINTA A LABORATORIO' },
   // Bajante de cristal: recorre el borde del yacimiento y entra al laboratorio.
   // Sólo admite Cristal Resonante, que es lo escaso de esa receta.
   {
@@ -342,44 +342,70 @@ export const CONVEYORS: ConveyorDef[] = [
   // Salida de la Recicladora hacia la Ensambladora.
   {
     id: 'c8',
-    tx: 30,
-    ty: 19.4,
-    len: 2.4,
+    tx: 29.15,
+    ty: 19,
+    len: 2.8,
     dir: 'up',
     fromLevel: 4,
     feeds: 'assembler',
     label: 'CINTA DE RECICLADO',
   },
 
-  // ── Zona Minera → Fundición de Aleaciones ──
+  /*
+   * ── Cintas de las zonas nuevas ──
+   *
+   * Regla de trazado: una cinta SIEMPRE termina tocando el borde de la
+   * máquina a la que alimenta, y su extremo de carga cae en suelo despejado
+   * y cerca de donde nace el material. Antes no era así — la de circuitos
+   * moría en mitad de la nave, a cinco tiles de la Planta de Baterías, y la
+   * del Reactor pasaba por encima de otra zona— y desde el juego no había
+   * manera de entender qué conectaba con qué.
+   *
+   * Regla de contenido: cada máquina tiene AL MENOS una cinta sin filtro, así
+   * que por ella cabe todo lo que pide su receta. Con filtro sólo se dejan
+   * las cintas dedicadas (la bajante de cristal), que son un extra.
+   */
+
+  // Zona Minera → ALEACIONES. Baja desde las vetas y entra por arriba.
   {
     id: 'c9',
-    tx: 43.65,
-    ty: 11.5,
-    len: 3,
+    tx: 40.15,
+    ty: 11.2,
+    len: 2.8,
     dir: 'down',
     fromLevel: 5,
     feeds: 'alloy',
-    label: 'CINTA DE COBRE',
+    label: 'BAJANTE DE LA MINA',
   },
-  // Laboratorio → Planta de Baterías: cruza la nave de punta a punta.
+  // Laboratorio → PLANTA DE BATERÍAS: cruza la nave y entra por su izquierda.
+  // Sin filtro: por aquí entran tanto los circuitos como el cobre.
   {
     id: 'c10',
     tx: 15,
-    ty: 13.05,
-    len: 28,
+    ty: 19.6,
+    len: 23,
     dir: 'right',
     fromLevel: 7,
     feeds: 'batteryPlant',
-    accepts: ['circuit'],
-    label: 'CINTA DE CIRCUITOS',
+    label: 'LÍNEA TRANSVERSAL',
   },
-  // Aleaciones y Baterías → Reactor de Núcleos.
+  // RECOLECCIÓN → RECICLADORA. Nace entre los montones de chatarra.
+  {
+    id: 'c12',
+    tx: 29.15,
+    ty: 22.15,
+    len: 3,
+    dir: 'left',
+    fromLevel: 4,
+    feeds: 'recycler',
+    label: 'CINTA DE CHATARRA',
+  },
+  // Todo lo pesado → REACTOR, por su costado derecho.
   {
     id: 'c11',
-    tx: 28,
-    ty: 22.6,
-    len: 12,
+    tx: 26.15,
+    ty: 28.2,
+    len: 4,
     dir: 'left',
     fromLevel: 10,
     feeds: 'reactor',

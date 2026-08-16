@@ -19,6 +19,7 @@ import {
   WORLD_W,
   ZONES,
   type FloorStyle,
+  conveyorLoadPoint,
   type PropDef,
 } from '../../config/world';
 import { getFactoryLevel } from '../../config/factoryLevels';
@@ -315,8 +316,8 @@ export function drawConveyors(
     const cargo = active ? beltItems(c.id, state, now) : [];
     const count = active ? beltCount(state, c.id, now) : 0;
     // Una cinta cargada se mueve un pelín más lenta: sensación de peso.
-    const load = Math.min(1, count / 60);
-    const bandSpeed = 52 * (1 - load * 0.28);
+    const carga = Math.min(1, count / 60);
+    const bandSpeed = 52 * (1 - carga * 0.28);
 
     ctx.save();
     ctx.globalAlpha = active ? 1 : 0.22;
@@ -427,6 +428,69 @@ export function drawConveyors(
     roundRect(ctx, x + 1.5, y + 1.5, w - 3, h - 3, 3);
     ctx.stroke();
 
+    /*
+     * Patas de apoyo, boca de carga y boca de descarga.
+     *
+     * Sin esto una cinta era una barra flotante y no se sabía por dónde se
+     * carga ni a dónde va. Ahora la boca de entrada se ve como un embudo
+     * abierto y la de salida como una tolva que se mete en la máquina.
+     */
+    const boca = conveyorLoadPoint(c);
+    const endX = horizontal ? (c.dir === 'right' ? x + w : x) : x + w / 2;
+    const endY = horizontal ? y + h / 2 : c.dir === 'down' ? y + h : y;
+
+    // Patas cada tile y medio: la cinta se apoya en el suelo.
+    ctx.fillStyle = 'rgba(6,11,20,0.55)';
+    for (let p = 22; p < span - 8; p += 60) {
+      if (horizontal) ctx.fillRect(x + p, y + h, 5, 5);
+      else ctx.fillRect(x + w, y + p, 5, 5);
+    }
+
+    // Boca de carga: embudo abierto hacia fuera.
+    ctx.fillStyle = active ? 'rgba(56,189,248,0.28)' : 'rgba(100,116,139,0.2)';
+    ctx.strokeStyle = active ? 'rgba(56,189,248,0.75)' : 'rgba(100,116,139,0.4)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    if (horizontal) {
+      const s = c.dir === 'right' ? -1 : 1;
+      ctx.moveTo(boca.x, boca.y - h / 2);
+      ctx.lineTo(boca.x + s * 9, boca.y - h / 2 - 5);
+      ctx.lineTo(boca.x + s * 9, boca.y + h / 2 + 5);
+      ctx.lineTo(boca.x, boca.y + h / 2);
+    } else {
+      const s = c.dir === 'down' ? -1 : 1;
+      ctx.moveTo(boca.x - w / 2, boca.y);
+      ctx.lineTo(boca.x - w / 2 - 5, boca.y + s * 9);
+      ctx.lineTo(boca.x + w / 2 + 5, boca.y + s * 9);
+      ctx.lineTo(boca.x + w / 2, boca.y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Boca de descarga: tolva que apunta a la máquina.
+    if (c.feeds) {
+      ctx.fillStyle = active ? 'rgba(74,222,128,0.25)' : 'rgba(100,116,139,0.16)';
+      ctx.strokeStyle = active ? 'rgba(74,222,128,0.7)' : 'rgba(100,116,139,0.35)';
+      ctx.beginPath();
+      if (horizontal) {
+        const s = c.dir === 'right' ? 1 : -1;
+        ctx.moveTo(endX, endY - h / 2);
+        ctx.lineTo(endX + s * 8, endY - 3);
+        ctx.lineTo(endX + s * 8, endY + 3);
+        ctx.lineTo(endX, endY + h / 2);
+      } else {
+        const s = c.dir === 'down' ? 1 : -1;
+        ctx.moveTo(endX - w / 2, endY);
+        ctx.lineTo(endX - 3, endY + s * 8);
+        ctx.lineTo(endX + 3, endY + s * 8);
+        ctx.lineTo(endX + w / 2, endY);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
     // Contador en vivo: cuántas unidades hay REALMENTE sobre la cinta.
     if (active) {
       const accepts = c.accepts?.length
@@ -439,20 +503,31 @@ export function drawConveyors(
         : accepts.length > 0
           ? getItem(accepts[0]).icon
           : '📦';
-      const label = `${icon} ${count} ITEMS`;
-      const bx = x + w / 2;
-      const by = y - 13;
+      /*
+       * Placa de la cinta: qué admite, cuántas unidades lleva y a dónde va.
+       * Se pone en la BOCA DE CARGA, que es donde el jugador se planta a
+       * echar material, en vez de en mitad del recorrido: así la respuesta
+       * está justo donde surge la pregunta.
+       */
+      const destino = c.feeds ? getMachine(c.feeds) : null;
+      const admite = accepts.slice(0, 3).map((i) => getItem(i).icon).join('');
+      const label = destino
+        ? `${admite || icon} ${count} → ${destino.icon}`
+        : `${icon} ${count}`;
+      // Se aparta del recorrido para no taparlo.
+      const bx = horizontal ? boca.x + (c.dir === 'right' ? 4 : -4) : boca.x;
+      const by = horizontal ? y - 12 : boca.y + (c.dir === 'down' ? -13 : 13);
       ctx.font = '800 10px "Rajdhani", system-ui, sans-serif';
       const tw = ctx.measureText(label).width + 14;
-      ctx.fillStyle = 'rgba(6,11,20,0.88)';
-      roundRect(ctx, bx - tw / 2, by - 8, tw, 15, 7);
+      ctx.fillStyle = 'rgba(6,11,20,0.9)';
+      roundRect(ctx, bx - tw / 2, by - 8, tw, 16, 7);
       ctx.fill();
       ctx.strokeStyle = count > 0 ? '#38bdf8' : 'rgba(148,163,184,0.3)';
       ctx.lineWidth = 1.2;
       ctx.stroke();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = count > 0 ? '#e2e8f0' : '#64748b';
+      ctx.fillStyle = count > 0 ? '#e2e8f0' : '#94a3b8';
       ctx.fillText(label, bx, by);
     }
     ctx.restore();

@@ -1,6 +1,99 @@
 import { describe, expect, it } from 'vitest';
-import { CONVEYORS, conveyorLoadPoint, conveyorRect } from '../src/config/world';
-import { MACHINES, getMachine } from '../src/config/machines';
+
+/**
+ * Reglas de trazado de las cintas. Son las que hacen que la fábrica se
+ * entienda mirándola: si una cinta muere en mitad de la nave o no admite lo
+ * que su máquina necesita, el jugador no tiene forma de saber qué falla.
+ */
+describe('trazado de las cintas', () => {
+  const belts = CONVEYORS.filter((c) => c.feeds);
+
+  it('toda máquina puede recibir su receta COMPLETA por alguna cinta', () => {
+    for (const m of MACHINE_LIST) {
+      const receta = Object.keys(m.input);
+      if (receta.length === 0) continue;
+      const sirve = belts.some((c) => {
+        if (c.feeds !== m.id) return false;
+        // Sin filtro: acepta todo lo que la máquina admite.
+        if (!c.accepts?.length) return true;
+        return receta.every((item) => c.accepts!.includes(item));
+      });
+      expect(sirve, `${m.id} no tiene una cinta que acepte ${receta.join(' + ')}`).toBe(true);
+    }
+  });
+
+  /** Extremo de descarga: el opuesto al de carga. */
+  const dischargePoint = (c: (typeof CONVEYORS)[number]) => {
+    const horizontal = c.dir === 'left' || c.dir === 'right';
+    const w = (horizontal ? c.len : 0.7) * TILE;
+    const h = (horizontal ? 0.7 : c.len) * TILE;
+    const load = conveyorLoadPoint(c);
+    if (c.dir === 'right') return { x: c.tx * TILE + w, y: load.y };
+    if (c.dir === 'left') return { x: c.tx * TILE, y: load.y };
+    if (c.dir === 'down') return { x: load.x, y: c.ty * TILE + h };
+    return { x: load.x, y: c.ty * TILE };
+  };
+
+  it('ninguna cinta muere en mitad de la nave', () => {
+    for (const c of belts) {
+      const m = MACHINE_LIST.find((x) => x.id === c.feeds)!;
+      const end = dischargePoint(c);
+      const rect = { x: m.tx * TILE, y: m.ty * TILE, w: m.tw * TILE, h: m.th * TILE };
+      const dx = Math.max(rect.x - end.x, 0, end.x - (rect.x + rect.w));
+      const dy = Math.max(rect.y - end.y, 0, end.y - (rect.y + rect.h));
+      const aLaMaquina = Math.hypot(dx, dy);
+
+      // O toca su máquina, o entronca con otro tramo que va a la misma:
+      // las bajantes se hacen en dos piezas porque una cinta es recta.
+      const enlaza = belts.some((o) => {
+        if (o === c || o.feeds !== c.feeds) return false;
+        const p = conveyorLoadPoint(o);
+        return Math.hypot(p.x - end.x, p.y - end.y) <= TILE * 1.5;
+      });
+
+      expect(
+        aLaMaquina <= TILE || enlaza,
+        `${c.id} acaba a ${Math.round(aLaMaquina)}px de ${m.id} y no enlaza con nada`,
+      ).toBe(true);
+    }
+  });
+
+  it('se puede llegar al extremo de carga de cualquier cinta', () => {
+    const solids = getSolids();
+    for (const c of CONVEYORS) {
+      const p = conveyorLoadPoint(c);
+      const cuerpo = { x: p.x - 10, y: p.y - 10, w: 20, h: 20 };
+      expect(
+        solids.some((s) => rectsOverlap(cuerpo, s)),
+        `no se puede llegar a cargar ${c.id}`,
+      ).toBe(false);
+    }
+  });
+
+  it('ninguna cinta se cruza con el cuerpo de una máquina', () => {
+    for (const c of CONVEYORS) {
+      const horizontal = c.dir === 'left' || c.dir === 'right';
+      const cinta = {
+        x: c.tx * TILE,
+        y: c.ty * TILE,
+        w: (horizontal ? c.len : 0.7) * TILE,
+        h: (horizontal ? 0.7 : c.len) * TILE,
+      };
+      for (const m of MACHINE_LIST) {
+        // Sólo el cuerpo sólido: la fila de trabajo puede compartirse.
+        const cuerpo = {
+          x: m.tx * TILE + 2,
+          y: m.ty * TILE + 2,
+          w: m.tw * TILE - 4,
+          h: (m.th - 1) * TILE - 4,
+        };
+        expect(rectsOverlap(cinta, cuerpo), `${c.id} atraviesa ${m.id}`).toBe(false);
+      }
+    }
+  });
+});
+import { CONVEYORS, TILE, conveyorLoadPoint, conveyorRect } from '../src/config/world';
+import { MACHINES, MACHINE_LIST, getMachine } from '../src/config/machines';
 import { BALANCE } from '../src/config/balance';
 import { conveyorAccepts, conveyorUnder, getSolids, rectsOverlap } from '../src/game/world/geometry';
 import { runOp } from '../src/services/backend/ops';
