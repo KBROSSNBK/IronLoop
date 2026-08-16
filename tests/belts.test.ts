@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getMachine } from '../src/config/machines';
 import {
   beltCount,
   beltItems,
@@ -11,7 +12,17 @@ import {
 import { settleFactory } from '../src/game/logic/robots';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { runOp } from '../src/services/backend/ops';
+import { conveyorLoadPoint } from '../src/config/world';
 import type { FactoryState, PlayerState } from '../src/types';
+
+/** Punto justo delante de una máquina: cargar y retirar exigen estar ahí. */
+const AT = (id: string) => {
+  const m = getMachine(id);
+  return { x: (m.tx + m.tw / 2) * 40, y: (m.ty + m.th + 0.4) * 40 };
+};
+
+/** Extremo de carga de una cinta: por ahí se le echa el material. */
+const EN_CINTA = (id: string) => conveyorLoadPoint(getBelt(id)!);
 
 const T0 = 1_700_000_000_000;
 const BELT = 'c6'; // bajante de cristal → laboratorio
@@ -32,6 +43,7 @@ describe('material viajando por la cinta', () => {
     const p = player({ inventory: { crystal: 30 } });
     const out = runOp('deposit', p, factory(), {
       machineId: 'lab',
+      at: EN_CINTA(BELT),
       beltId: BELT,
       item: 'crystal',
       qty: 30,
@@ -125,6 +137,7 @@ describe('material viajando por la cinta', () => {
     const p = player({ inventory: { gear: 20 } });
     const out = runOp('deposit', p, factory(), {
       machineId: 'lab',
+      at: EN_CINTA(BELT),
       beltId: BELT, // sólo acepta cristal
       now: T0,
     });
@@ -134,7 +147,7 @@ describe('material viajando por la cinta', () => {
   it('rechaza una cinta que no lleva a esa máquina', () => {
     const p = player({ inventory: { ore: 20 } });
     const out = runOp('deposit', p, factory(), {
-      machineId: 'smelter',
+      machineId: 'smelter', at: AT('smelter'),
       beltId: BELT,
       now: T0,
     });

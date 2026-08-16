@@ -4,8 +4,14 @@ import { beltCount, beltTravelMs, getBelt } from '../src/game/logic/belts';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { runOp } from '../src/services/backend/ops';
 import { ROBOTS, robotCarry, robotCost, robotRate, robotTripMs } from '../src/config/robots';
-import { MACHINES } from '../src/config/machines';
+import { MACHINES, getMachine } from '../src/config/machines';
 import type { FactoryState, PlayerState } from '../src/types';
+
+/** Punto justo delante de una máquina: cargar y retirar exigen estar ahí. */
+const AT = (id: string) => {
+  const m = getMachine(id);
+  return { x: (m.tx + m.tw / 2) * 40, y: (m.ty + m.th + 0.4) * 40 };
+};
 
 const T0 = 1_700_000_000_000;
 const HAULER = ROBOTS[0]; // smelter → assembler, lingotes
@@ -265,7 +271,7 @@ describe('integración: los robots se liquidan en cada operación', () => {
     // El jugador recoge de la fundidora un minuto después: el robot ya habrá
     // puesto material en la cinta aunque nadie estuviera conectado.
     const now = T0 + 60_000;
-    const out = runOp('collect', p, f, { machineId: 'smelter', now });
+    const out = runOp('collect', p, f, { machineId: 'smelter', at: AT('smelter'), now });
     expect(out.ok).toBe(true);
     expect(enCinta(out.factory!, now)).toBe(robotRate(HAULER, 1));
   });

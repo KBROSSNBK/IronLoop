@@ -3,7 +3,13 @@
  * Compartida por el cliente, el backend local y las Cloud Functions.
  */
 
-import { BALANCE, deriveStats } from '../../config/balance';
+import {
+  BALANCE,
+  LEVELUP_TOTAL_MONEY_CAP,
+  OFFLINE_MONEY_CAP,
+  OFFLINE_XP_CAP,
+  deriveStats,
+} from '../../config/balance';
 import { getItem } from '../../config/items';
 import {
   ACTIVE_MISSION_SLOTS,
@@ -45,7 +51,14 @@ export function applyXp(level: number, xp: number, gained: number): LevelUpResul
     gainedLevels += 1;
     money += BALANCE.leveling.moneyPerLevel(lv);
   }
-  return { level: lv, xp: cur, levelsGained: gainedLevels, moneyReward: money };
+  return {
+    level: lv,
+    xp: cur,
+    levelsGained: gainedLevels,
+    // Techo también al total: subir varios niveles de golpe no puede pasarse
+    // de lo que las reglas de seguridad admiten en una escritura.
+    moneyReward: Math.min(money, LEVELUP_TOTAL_MONEY_CAP),
+  };
 }
 
 export function levelProgress(level: number, xp: number): number {
@@ -257,8 +270,10 @@ export function computeOfflineReport(
   return {
     seconds: Math.floor(seconds),
     units,
-    money: Math.round(units * BALANCE.offline.moneyPerUnit),
-    xp: Math.round(units * BALANCE.offline.xpPerUnit),
+    // Con techo: una recompensa enorme la rechazarían las reglas de seguridad
+    // y el jugador se quedaría sin poder jugar (ver MAX_MONEY_PER_WRITE).
+    money: Math.min(OFFLINE_MONEY_CAP, Math.round(units * BALANCE.offline.moneyPerUnit)),
+    xp: Math.min(OFFLINE_XP_CAP, Math.round(units * BALANCE.offline.xpPerUnit)),
     robots: Math.max(0, Math.floor((factoryLevel - 3) / 2)),
     factoryLevel,
   };

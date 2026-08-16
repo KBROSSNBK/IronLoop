@@ -1029,14 +1029,28 @@ export function drawLighting(
 }
 
 /** Viñeta y ruido sutil sobre el viewport (en píxeles de pantalla). */
+let vignette: { w: number; h: number; grad: CanvasGradient } | null = null;
+
 export function drawPostFx(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
 ): void {
-  const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.32, w / 2, h / 2, Math.max(w, h) * 0.78);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, 'rgba(0,0,0,0.5)');
-  ctx.fillStyle = g;
+  // El degradado sólo depende del tamaño de la ventana: se reaprovecha entre
+  // fotogramas en vez de reconstruirlo 60 veces por segundo.
+  if (!vignette || vignette.w !== w || vignette.h !== h) {
+    const grad = ctx.createRadialGradient(
+      w / 2,
+      h / 2,
+      Math.min(w, h) * 0.32,
+      w / 2,
+      h / 2,
+      Math.max(w, h) * 0.78,
+    );
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.5)');
+    vignette = { w, h, grad };
+  }
+  ctx.fillStyle = vignette.grad;
   ctx.fillRect(0, 0, w, h);
 }

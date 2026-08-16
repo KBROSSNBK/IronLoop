@@ -11,7 +11,7 @@
  * contra el estado real (dinero, inventario, buffers de máquina).
  */
 
-import { BALANCE, deriveStats } from '../../config/balance';
+import { BALANCE, SALE_CLAIM_CAP, deriveStats } from '../../config/balance';
 import { getItem, CONSUMABLE_EFFECTS } from '../../config/items';
 import {
   getMachine,
@@ -221,18 +221,32 @@ function claimSaleShare(
   const pending = Math.floor(factory.saleLedger?.[player.uid] ?? 0);
   if (pending <= 0) return { player, factory, money: 0, events: [] };
 
+  // Se cobra por tandas. Un robot vendiendo ocho horas puede acumular millones,
+  // y una escritura que subiera tanto el dinero de golpe la rechazarían las
+  // reglas de seguridad: el jugador se quedaría sin poder hacer NADA, porque
+  // cada operación volvería a intentar el mismo cobro imposible.
+  const paid = Math.min(pending, SALE_CLAIM_CAP);
+  const rest = pending - paid;
+
   const ledger = { ...factory.saleLedger };
-  delete ledger[player.uid];
+  if (rest > 0) ledger[player.uid] = rest;
+  else delete ledger[player.uid];
 
   const events: OpEvent[] = [
-    { kind: 'money', amount: pending },
-    { kind: 'info', text: `Tus robots vendieron por ${pending.toLocaleString('es-ES')} $` },
+    { kind: 'money', amount: paid },
+    {
+      kind: 'info',
+      text:
+        rest > 0
+          ? `Tus robots vendieron: cobras ${paid.toLocaleString('es-ES')} $ (quedan ${rest.toLocaleString('es-ES')} $)`
+          : `Tus robots vendieron por ${paid.toLocaleString('es-ES')} $`,
+    },
   ];
 
-  let p: PlayerState = { ...player, money: player.money + pending };
-  p = stat(p, { earned: pending });
+  let p: PlayerState = { ...player, money: player.money + paid };
+  p = stat(p, { earned: paid });
 
-  return { player: p, factory: { ...factory, saleLedger: ledger }, money: pending, events };
+  return { player: p, factory: { ...factory, saleLedger: ledger }, money: paid, events };
 }
 
 /** Rectángulo del muelle de venta, con un margen de tolerancia. */
@@ -252,6 +266,75 @@ function within(a: { x: number; y: number }, b: { x: number; y: number }, r: num
   return Math.hypot(a.x - b.x, a.y - b.y) <= r;
 }
 
+/** Alcance aceptado para tocar una máquina o una cinta, con su margen. */
+const REACH = BALANCE.actions.range + BALANCE.actions.validationSlack;
+
+/** Distancia de un punto a un rectángulo (0 si está dentro). */
+function distanceToRect(
+  at: { x: number; y: number },
+  r: { x: number; y: number; w: number; h: number },
+): number {
+  const dx = Math.max(r.x - at.x, 0, at.x - (r.x + r.w));
+  const dy = Math.max(r.y - at.y, 0, at.y - (r.y + r.h));
+  return Math.hypot(dx, dy);
+}
+
+function isPoint(at: unknown): at is { x: number; y: number } {
+  const p = at as { x?: unknown; y?: unknown } | undefined;
+  return typeof p?.x === 'number' && typeof p?.y === 'number';
+}
+
+/**
+ * ¿Está el jugador junto a la máquina?
+ *
+ * Cargar y retirar material sólo tiene sentido estando delante: si no, la
+ * fábrica sería un almacén remoto y no habría razón para moverse. Se valida
+ * aquí, no sólo en la interfaz, porque la interfaz se puede saltar.
+ */
+function nearMachine(at: unknown, machineId: string): boolean {
+  if (!isPoint(at)) return false;
+  const m = getMachine(machineId);
+  return (
+    distanceToRect(at, {
+      x: m.tx * TILE,
+      y: m.ty * TILE,
+      w: m.tw * TILE,
+      h: m.th * TILE,
+    }) <= REACH
+  );
+}
+
+/** Lo mismo para una estación: picar exige estar en la veta. */
+function nearStation(at: unknown, stationId: string): boolean {
+  if (!isPoint(at)) return false;
+  const s = STATIONS.find((x) => x.id === stationId);
+  if (!s) return false;
+  return (
+    distanceToRect(at, {
+      x: s.tx * TILE,
+      y: s.ty * TILE,
+      w: s.tw * TILE,
+      h: s.th * TILE,
+    }) <= REACH
+  );
+}
+
+/** Lo mismo para una cinta: el material entra por donde estás tú. */
+function nearBelt(at: unknown, beltId: string): boolean {
+  if (!isPoint(at)) return false;
+  const belt = getBelt(beltId);
+  if (!belt) return false;
+  const horizontal = belt.dir === 'left' || belt.dir === 'right';
+  return (
+    distanceToRect(at, {
+      x: belt.tx * TILE,
+      y: belt.ty * TILE,
+      w: (horizontal ? belt.len : 0.7) * TILE,
+      h: (horizontal ? 0.7 : belt.len) * TILE,
+    }) <= REACH
+  );
+}
+
 function stat(p: PlayerState, patch: Partial<PlayerState['stats']>): PlayerState {
   const stats = { ...p.stats };
   for (const [k, v] of Object.entries(patch)) {
@@ -264,6 +347,8 @@ function stat(p: PlayerState, patch: Partial<PlayerState['stats']>): PlayerState
 
 export interface GatherArgs {
   stationId: string;
+  /** Dónde está el jugador: picar exige estar en la veta. */
+  at?: { x: number; y: number };
   now: number;
   /** Inyectable para tests deterministas. */
   rand?: () => number;
@@ -279,6 +364,7 @@ export function opGather(
   // sistema de items; sólo cambia lo que rinde cada estación.
   if (!station || (station.type !== 'oreVein' && station.type !== 'salvage'))
     return fail('Estación inválida');
+  if (!nearStation(args.at, args.stationId)) return fail('Acércate al yacimiento');
 
   const stats = deriveStats(player.upgrades);
   const cost = BALANCE.actions.gather.stamina * stats.actionCostMult;
@@ -360,6 +446,8 @@ export interface DepositArgs {
    * cinta y tarda en llegar, viajando a la vista de todos los jugadores.
    */
   beltId?: string;
+  /** Dónde está el jugador: cargar exige estar delante. */
+  at?: { x: number; y: number };
   now: number;
 }
 
@@ -371,6 +459,11 @@ export function opDeposit(
   const def = getMachine(args.machineId);
   const cur = factory.machines[args.machineId];
   if (!cur) return fail('Máquina no encontrada');
+  // Por cinta se carga junto a la cinta; a mano, junto a la máquina.
+  const cerca = args.beltId
+    ? nearBelt(args.at, args.beltId)
+    : nearMachine(args.at, args.machineId);
+  if (!cerca) return fail(args.beltId ? 'Acércate a la cinta' : 'Acércate a la máquina');
   if (factory.level < def.unlockFactoryLevel)
     return fail(`Requiere fábrica nivel ${def.unlockFactoryLevel}`);
 
@@ -462,6 +555,8 @@ export function opDeposit(
 
 export interface CollectArgs {
   machineId: string;
+  /** Dónde está el jugador: recoger exige estar delante de la máquina. */
+  at?: { x: number; y: number };
   now: number;
 }
 
@@ -473,6 +568,7 @@ export function opCollect(
   const def = getMachine(args.machineId);
   const cur = factory.machines[args.machineId];
   if (!cur) return fail('Máquina no encontrada');
+  if (!nearMachine(args.at, args.machineId)) return fail('Acércate a la máquina');
 
   const settled = settleMachine(cur, args.machineId, factory.level, args.now);
   let machine = settled.state;
@@ -921,10 +1017,11 @@ export function opSetAppearance(
 export function opWithdraw(
   player: PlayerState,
   factory: FactoryState,
-  args: { machineId: string; item: string; qty: number; now: number },
+  args: { machineId: string; item: string; qty: number; at?: { x: number; y: number }; now: number },
 ): OpOutcome<{ taken: number }> {
   const cur = factory.machines[args.machineId];
   if (!cur) return fail('Máquina no encontrada');
+  if (!nearMachine(args.at, args.machineId)) return fail('Acércate a la máquina');
 
   const settled = settleMachine(cur, args.machineId, factory.level, args.now);
   const machine = settled.state;

@@ -3,6 +3,39 @@
  * Un único sitio para tocar la economía sin buscar números por el código.
  */
 
+/**
+ * TECHO DE DINERO POR ESCRITURA.
+ *
+ * Las reglas de seguridad de Firestore rechazan cualquier escritura que suba
+ * el dinero del jugador más de esto de golpe: es lo que impide que un cliente
+ * manipulado se teletransporte a mil millones. La consecuencia es que NINGUNA
+ * recompensa legítima puede pasarse de aquí, o el servidor rechazaría la
+ * partida entera y el jugador se quedaría sin poder hacer nada.
+ *
+ * Por eso todas las fuentes grandes de dinero llevan techo:
+ *   · la recompensa por subir de nivel (`moneyPerLevel`)
+ *   · el cobro de lo que venden los robots (`SALE_CLAIM_CAP`)
+ *   · la recompensa por producción offline
+ *
+ * Si cambias este valor, cámbialo también en `firestore.rules`.
+ */
+export const MAX_MONEY_PER_WRITE = 5_000_000;
+
+/** Margen de seguridad: ninguna recompensa se acerca al techo duro. */
+const LEVEL_MONEY_CAP = 250_000;
+
+/** Techo del dinero total repartido por subir de nivel en una sola acción,
+ *  aunque se encadenen muchos niveles de golpe. */
+export const LEVELUP_TOTAL_MONEY_CAP = 1_000_000;
+
+/** Máximo que se cobra de una vez de las ventas de los robots. El resto
+ *  queda pendiente y se cobra en la siguiente acción. */
+export const SALE_CLAIM_CAP = 1_000_000;
+
+/** Máximo de la recompensa por producción offline, en dinero y en XP. */
+export const OFFLINE_MONEY_CAP = 1_000_000;
+export const OFFLINE_XP_CAP = 100_000;
+
 export const BALANCE = {
   player: {
     startingMoney: 500,
@@ -51,8 +84,16 @@ export const BALANCE = {
   leveling: {
     /** XP necesaria para pasar del nivel n al n+1. */
     xpForLevel: (level: number) => Math.round(100 * Math.pow(level, 1.42)),
-    /** Recompensa de dinero al subir de nivel. */
-    moneyPerLevel: (level: number) => Math.round(120 * Math.pow(1.28, level - 1)),
+    /**
+     * Recompensa de dinero al subir de nivel.
+     *
+     * La curva crece rápido a propósito, pero con TECHO: sin él, a partir del
+     * nivel ~45 una sola subida repartía más dinero del que las reglas de
+     * seguridad admiten en una escritura, y el juego se quedaba clavado
+     * rechazando todas las acciones. Ver `MAX_MONEY_PER_WRITE`.
+     */
+    moneyPerLevel: (level: number) =>
+      Math.min(LEVEL_MONEY_CAP, Math.round(120 * Math.pow(1.28, level - 1))),
     staminaRefillOnLevelUp: true,
   },
 

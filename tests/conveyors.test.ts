@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { CONVEYORS, conveyorLoadPoint, conveyorRect } from '../src/config/world';
-import { MACHINES } from '../src/config/machines';
+import { MACHINES, getMachine } from '../src/config/machines';
 import { BALANCE } from '../src/config/balance';
 import { conveyorAccepts, conveyorUnder, getSolids, rectsOverlap } from '../src/game/world/geometry';
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import type { FactoryState, PlayerState } from '../src/types';
+
+/** Punto justo delante de una máquina: cargar y retirar exigen estar ahí. */
+const AT = (id: string) => {
+  const m = getMachine(id);
+  return { x: (m.tx + m.tw / 2) * 40, y: (m.ty + m.th + 0.4) * 40 };
+};
 
 const T0 = 1_700_000_000_000;
 
@@ -127,7 +133,7 @@ describe('traspaso automático por tandas', () => {
   it('depositar una tanda no vacía la mochila de golpe', () => {
     const p = player({ inventory: { crystal: 130 } });
     const out = runOp('deposit', p, factory(), {
-      machineId: 'lab',
+      machineId: 'lab', at: AT('lab'),
       item: 'crystal',
       qty: BALANCE.conveyor.autoTransferBatch,
       now: T0,
@@ -142,7 +148,7 @@ describe('traspaso automático por tandas', () => {
     let f = factory();
     for (let i = 0; i < 3; i++) {
       const out = runOp('deposit', p, f, {
-        machineId: 'lab',
+        machineId: 'lab', at: AT('lab'),
         item: 'crystal',
         qty: BALANCE.conveyor.autoTransferBatch,
         now: T0,
@@ -157,7 +163,7 @@ describe('traspaso automático por tandas', () => {
   it('la última tanda sólo mueve lo que queda', () => {
     const p = player({ inventory: { crystal: 12 } });
     const out = runOp('deposit', p, factory(), {
-      machineId: 'lab',
+      machineId: 'lab', at: AT('lab'),
       item: 'crystal',
       qty: 50,
       now: T0,
@@ -169,7 +175,7 @@ describe('traspaso automático por tandas', () => {
   it('el material no se duplica: lo que sale de la mochila entra en la máquina', () => {
     const p = player({ inventory: { crystal: 70 } });
     const out = runOp('deposit', p, factory(), {
-      machineId: 'lab',
+      machineId: 'lab', at: AT('lab'),
       item: 'crystal',
       qty: 50,
       now: T0,

@@ -1,13 +1,26 @@
 import { describe, expect, it } from 'vitest';
+import { STATIONS } from '../src/config/world';
 import { runOp } from '../src/services/backend/ops';
 import {
   createFactoryState,
   createPlayerState,
 } from '../src/game/logic/defaults';
 import { BALANCE } from '../src/config/balance';
-import { MACHINES, machineUpgradeCost } from '../src/config/machines';
+import { MACHINES, machineUpgradeCost, getMachine } from '../src/config/machines';
 import { UPGRADES, upgradeCost } from '../src/config/upgrades';
 import type { FactoryState, PlayerState } from '../src/types';
+
+/** Punto en el que se pica una estación. */
+const EN_VETA = (id: string) => {
+  const s = STATIONS.find((x) => x.id === id)!;
+  return { x: (s.tx + s.tw / 2) * 40, y: (s.ty + s.th + 0.4) * 40 };
+};
+
+/** Punto justo delante de una máquina: cargar y retirar exigen estar ahí. */
+const AT = (id: string) => {
+  const m = getMachine(id);
+  return { x: (m.tx + m.tw / 2) * 40, y: (m.ty + m.th + 0.4) * 40 };
+};
 
 const T0 = 1_700_000_000_000;
 const user = (uid: string) => ({ uid, displayName: uid, photoURL: null, email: null });
@@ -30,7 +43,7 @@ describe('opGather — recolección', () => {
   it('añade material, gasta estamina y da XP', () => {
     const { player, factory } = world();
     const out = runOp('gather', player, factory, {
-      stationId: 'vein_a',
+      stationId: 'vein_a', at: EN_VETA('vein_a'),
       now: T0,
       rand: noLuck,
     });
@@ -43,34 +56,38 @@ describe('opGather — recolección', () => {
 
   it('rechaza si no queda estamina', () => {
     const { player, factory } = world({ stamina: 0, staminaAt: T0 });
-    const out = runOp('gather', player, factory, { stationId: 'vein_a', now: T0, rand: noLuck });
+    const out = runOp('gather', player, factory, { stationId: 'vein_a', at: EN_VETA('vein_a'), now: T0, rand: noLuck });
     expect(out.ok).toBe(false);
     expect(out.reason).toMatch(/estamina/i);
   });
 
   it('rechaza si el inventario está lleno', () => {
     const { player, factory } = world({ inventory: { ore: 10 } });
-    const out = runOp('gather', player, factory, { stationId: 'vein_a', now: T0, rand: noLuck });
+    const out = runOp('gather', player, factory, { stationId: 'vein_a', at: EN_VETA('vein_a'), now: T0, rand: noLuck });
     expect(out.ok).toBe(false);
     expect(out.reason).toMatch(/lleno/i);
   });
 
   it('rechaza estaciones inventadas por el cliente', () => {
     const { player, factory } = world();
-    const out = runOp('gather', player, factory, { stationId: 'veta_falsa', now: T0 });
+    const out = runOp('gather', player, factory, {
+      stationId: 'veta_falsa',
+      at: { x: 200, y: 300 },
+      now: T0,
+    });
     expect(out.ok).toBe(false);
   });
 
   it('la fuerza aumenta las unidades por acción', () => {
     const { player, factory } = world({ upgrades: { strength: 3 } });
-    const out = runOp('gather', player, factory, { stationId: 'vein_a', now: T0, rand: noLuck });
+    const out = runOp('gather', player, factory, { stationId: 'vein_a', at: EN_VETA('vein_a'), now: T0, rand: noLuck });
     expect(out.player!.inventory.ore).toBe(4);
   });
 
   it('la suerte puede entregar un hallazgo raro', () => {
     const { player, factory } = world({ upgrades: { luck: 20, capacity: 2 } });
     const out = runOp('gather', player, factory, {
-      stationId: 'vein_a',
+      stationId: 'vein_a', at: EN_VETA('vein_a'),
       now: T0,
       rand: () => 0, // fuerza el hallazgo y el primer item de la tabla
     });
@@ -81,7 +98,7 @@ describe('opGather — recolección', () => {
 describe('opDeposit / opCollect — cadena de producción', () => {
   it('deposita sólo material compatible y arranca la máquina', () => {
     const { player, factory } = world({ inventory: { ore: 6, gear: 3 } });
-    const out = runOp('deposit', player, factory, { machineId: 'smelter', now: T0 });
+    const out = runOp('deposit', player, factory, { machineId: 'smelter', at: AT('smelter'), now: T0 });
     expect(out.ok).toBe(true);
     expect(out.factory!.machines.smelter.input.ore).toBe(5);
     expect(out.player!.inventory.gear).toBe(3); // los engranajes no entran
@@ -90,13 +107,13 @@ describe('opDeposit / opCollect — cadena de producción', () => {
 
   it('rechaza depositar si no llevas material compatible', () => {
     const { player, factory } = world({ inventory: { gear: 5 } });
-    const out = runOp('deposit', player, factory, { machineId: 'smelter', now: T0 });
+    const out = runOp('deposit', player, factory, { machineId: 'smelter', at: AT('smelter'), now: T0 });
     expect(out.ok).toBe(false);
   });
 
   it('no permite usar una máquina bloqueada por nivel de fábrica', () => {
     const { player, factory } = world({ inventory: { ingot: 10 } });
-    const out = runOp('deposit', player, factory, { machineId: 'assembler', now: T0 });
+    const out = runOp('deposit', player, factory, { machineId: 'assembler', at: AT('assembler'), now: T0 });
     expect(out.ok).toBe(false);
     expect(out.reason).toMatch(/nivel 3/i);
   });
@@ -104,7 +121,7 @@ describe('opDeposit / opCollect — cadena de producción', () => {
   it('una acción de carga descarga un lote, no la mochila entera', () => {
     // El lote por acción es `gatherAmount * 5`; con fuerza 0 son 5 unidades.
     const { player, factory } = world({ inventory: { ore: 12 } });
-    const out = runOp('deposit', player, factory, { machineId: 'smelter', now: T0 });
+    const out = runOp('deposit', player, factory, { machineId: 'smelter', at: AT('smelter'), now: T0 });
     expect(out.factory!.machines.smelter.input.ore).toBe(5);
     expect(out.player!.inventory.ore).toBe(7);
   });
@@ -112,14 +129,14 @@ describe('opDeposit / opCollect — cadena de producción', () => {
   it('recoge el producto y aporta contribución a la fábrica', () => {
     const { player, factory } = world({ inventory: { ore: 6 } });
     const dep = runOp('deposit', player, factory, {
-      machineId: 'smelter',
+      machineId: 'smelter', at: AT('smelter'),
       qty: 6,
       now: T0,
     });
     expect(dep.factory!.machines.smelter.input.ore).toBe(6);
     const later = T0 + MACHINES.smelter.cycleMs * 3 + 10;
     const col = runOp('collect', dep.player!, dep.factory!, {
-      machineId: 'smelter',
+      machineId: 'smelter', at: AT('smelter'),
       now: later,
     });
     expect(col.ok).toBe(true);
@@ -140,14 +157,14 @@ describe('opDeposit / opCollect — cadena de producción', () => {
         smelter: { ...factory.machines.smelter, output: { ingot: 5 } },
       },
     };
-    const out = runOp('collect', player, f, { machineId: 'smelter', now: T0 });
+    const out = runOp('collect', player, f, { machineId: 'smelter', at: AT('smelter'), now: T0 });
     expect(out.ok).toBe(false);
     expect(out.reason).toMatch(/lleno/i);
   });
 
   it('no crea producto de la nada si no hay salida lista', () => {
     const { player, factory } = world();
-    const out = runOp('collect', player, factory, { machineId: 'smelter', now: T0 });
+    const out = runOp('collect', player, factory, { machineId: 'smelter', at: AT('smelter'), now: T0 });
     expect(out.ok).toBe(false);
   });
 });
@@ -300,7 +317,7 @@ describe('opUpgradeMachine — mejora compartida', () => {
     const { player, factory } = world({ money: 10 ** 6 });
     const cost = machineUpgradeCost(0);
     const out = runOp('upgradeMachine', player, factory, {
-      machineId: 'smelter',
+      machineId: 'smelter', at: AT('smelter'),
       now: T0,
     });
     expect(out.ok).toBe(true);
@@ -311,7 +328,7 @@ describe('opUpgradeMachine — mejora compartida', () => {
   it('no se puede mejorar una máquina bloqueada', () => {
     const { player, factory } = world({ money: 10 ** 9 });
     const out = runOp('upgradeMachine', player, factory, {
-      machineId: 'assembler',
+      machineId: 'assembler', at: AT('assembler'),
       now: T0,
     });
     expect(out.ok).toBe(false);
@@ -387,8 +404,8 @@ describe('concurrencia — dos jugadores sobre la misma fábrica', () => {
     const a: PlayerState = { ...createPlayerState(user('a'), T0), inventory: { ore: 4 } };
     const b: PlayerState = { ...createPlayerState(user('b'), T0), inventory: { ore: 4 } };
 
-    const first = runOp('deposit', a, factory, { machineId: 'smelter', now: T0 });
-    const second = runOp('deposit', b, first.factory!, { machineId: 'smelter', now: T0 });
+    const first = runOp('deposit', a, factory, { machineId: 'smelter', at: AT('smelter'), now: T0 });
+    const second = runOp('deposit', b, first.factory!, { machineId: 'smelter', at: AT('smelter'), now: T0 });
 
     expect(second.factory!.machines.smelter.input.ore).toBe(8);
     // Cada jugador conserva SU inventario: no se mezclan.
@@ -408,8 +425,8 @@ describe('concurrencia — dos jugadores sobre la misma fábrica', () => {
     const a = createPlayerState(user('a'), T0);
     const b = createPlayerState(user('b'), T0);
 
-    const first = runOp('collect', a, factory, { machineId: 'smelter', now: T0 });
-    const second = runOp('collect', b, first.factory!, { machineId: 'smelter', now: T0 });
+    const first = runOp('collect', a, factory, { machineId: 'smelter', at: AT('smelter'), now: T0 });
+    const second = runOp('collect', b, first.factory!, { machineId: 'smelter', at: AT('smelter'), now: T0 });
 
     expect(first.ok).toBe(true);
     expect(first.player!.inventory.ingot).toBe(2);
@@ -433,9 +450,9 @@ describe('concurrencia — dos jugadores sobre la misma fábrica', () => {
     const a: PlayerState = { ...createPlayerState(user('a'), T0), money: 10 ** 6 };
     const b: PlayerState = { ...createPlayerState(user('b'), T0), money: 10 ** 6 };
 
-    const first = runOp('upgradeMachine', a, factory, { machineId: 'smelter', now: T0 });
+    const first = runOp('upgradeMachine', a, factory, { machineId: 'smelter', at: AT('smelter'), now: T0 });
     const second = runOp('upgradeMachine', b, first.factory!, {
-      machineId: 'smelter',
+      machineId: 'smelter', at: AT('smelter'),
       now: T0,
     });
 
@@ -461,7 +478,7 @@ describe('resistencia a entradas maliciosas', () => {
   it('depositar cantidades absurdas se acota al inventario real', () => {
     const { player, factory } = world({ inventory: { ore: 3 } });
     const out = runOp('deposit', player, factory, {
-      machineId: 'smelter',
+      machineId: 'smelter', at: AT('smelter'),
       item: 'ore',
       qty: 10 ** 9,
       now: T0,

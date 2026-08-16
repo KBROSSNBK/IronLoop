@@ -369,10 +369,28 @@ async function maybeApplyFactoryReset(
   }
 }
 
-/** El bucle de juego registra aquí la estamina gastada por sprint. */
+/** Último valor de estamina que el bucle de juego quiere persistir. */
 let staminaClaim: number | undefined;
-export function reportSprintStamina(value: number) {
+
+/**
+ * Consolida en memoria la estamina gastada esprintando, SIN escribir en el
+ * servidor.
+ *
+ * La estamina se deriva del par (valor, instante), así que basta con mover esa
+ * línea base localmente: el jugador ve el gasto y la regeneración al momento,
+ * y el latido de sesión persiste el valor cuando le toca (una escritura por
+ * minuto, no una por segundo).
+ *
+ * No es una vía para hacer trampa: el servidor sólo acepta valores IGUALES O
+ * MENORES que los que la regeneración permitiría (`opTick`), de modo que por
+ * aquí únicamente se puede declarar que has gastado, nunca que te sobra.
+ */
+export function applyLocalStamina(value: number, at: number) {
+  const st = useSessionStore.getState();
+  const p = st.player;
+  if (!p) return;
   staminaClaim = value;
+  useSessionStore.setState({ player: { ...p, stamina: value, staminaAt: at } });
 }
 function staminaOverride(): number | undefined {
   const v = staminaClaim;

@@ -135,6 +135,22 @@ export function machineFrontPoint(m: MachineDef) {
   return { x: (m.tx + m.tw / 2) * TILE, y: (m.ty + m.th - 0.5) * TILE };
 }
 
+/**
+ * ¿Está el jugador junto a esta máquina?
+ *
+ * Lo usa la interfaz para no ofrecer acciones imposibles; el servidor vuelve
+ * a comprobarlo con el mismo criterio (ver `nearMachine` en ops.ts), así que
+ * forzar la UI no sirve de nada.
+ */
+export function nearMachine(x: number, y: number, machineId: string): boolean {
+  const m = getMachine(machineId);
+  const x0 = m.tx * TILE;
+  const y0 = m.ty * TILE;
+  const dx = Math.max(x0 - x, 0, x - (x0 + m.tw * TILE));
+  const dy = Math.max(y0 - y, 0, y - (y0 + m.th * TILE));
+  return Math.hypot(dx, dy) <= BALANCE.actions.range + BALANCE.actions.validationSlack;
+}
+
 let cachedInteractables: Omit<Interactable, 'distance'>[] | null = null;
 
 function allInteractables(): Omit<Interactable, 'distance'>[] {

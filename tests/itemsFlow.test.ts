@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import { getMachine } from '../src/config/machines';
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { BALANCE } from '../src/config/balance';
 import { STATIONS } from '../src/config/world';
 import { machineContents } from '../src/game/logic/production';
 import type { FactoryState, GroundItem, PlayerState } from '../src/types';
+
+/** Punto en el que se pica una estación. */
+const EN_VETA = (id: string) => {
+  const s = STATIONS.find((x) => x.id === id)!;
+  return { x: (s.tx + s.tw / 2) * 40, y: (s.ty + s.th + 0.4) * 40 };
+};
+
+/** Punto justo delante de una máquina: cargar y retirar exigen estar ahí. */
+const ANTE = (id: string) => {
+  const m = getMachine(id);
+  return { x: (m.tx + m.tw / 2) * 40, y: (m.ty + m.th + 0.4) * 40 };
+};
 
 const T0 = 1_700_000_000_000;
 const AT = { x: 800, y: 900 };
@@ -45,7 +58,7 @@ describe('opWithdraw — extraer material de una máquina', () => {
   it('mueve el material de la máquina al inventario', () => {
     const f = withStock({ gear: 20, crystal: 5 });
     const out = runOp('withdraw', mkPlayer('u1'), f, {
-      machineId: 'lab',
+      machineId: 'lab', at: ANTE('lab'),
       item: 'gear',
       qty: 4,
       now: T0,
@@ -59,7 +72,7 @@ describe('opWithdraw — extraer material de una máquina', () => {
     // Hay engranajes pero falta cristal: la producción no avanza.
     const f = withStock({ gear: 30 });
     const out = runOp('withdraw', mkPlayer('u1'), f, {
-      machineId: 'lab',
+      machineId: 'lab', at: ANTE('lab'),
       item: 'gear',
       qty: 30,
       now: T0,
@@ -73,7 +86,7 @@ describe('opWithdraw — extraer material de una máquina', () => {
     const f = withStock({ gear: 50 });
     const p = mkPlayer('u1', { inventory: { ore: 7 } }); // 3 huecos libres de 10
     const out = runOp('withdraw', mkPlayer('u1', p), f, {
-      machineId: 'lab',
+      machineId: 'lab', at: ANTE('lab'),
       item: 'gear',
       qty: 50,
       now: T0,
@@ -89,7 +102,7 @@ describe('opWithdraw — extraer material de una máquina', () => {
   it('rechaza si el inventario está lleno', () => {
     const f = withStock({ gear: 10 });
     const p = mkPlayer('u1', { inventory: { ore: 10 } });
-    const out = runOp('withdraw', p, f, { machineId: 'lab', item: 'gear', qty: 1, now: T0 });
+    const out = runOp('withdraw', p, f, { machineId: 'lab', at: ANTE('lab'), item: 'gear', qty: 1, now: T0 });
     expect(out.ok).toBe(false);
     expect(out.reason).toMatch(/lleno/i);
   });
@@ -97,7 +110,7 @@ describe('opWithdraw — extraer material de una máquina', () => {
   it('rechaza material que la máquina no tiene', () => {
     const f = withStock({ gear: 10 });
     const out = runOp('withdraw', mkPlayer('u1'), f, {
-      machineId: 'lab',
+      machineId: 'lab', at: ANTE('lab'),
       item: 'circuit',
       qty: 1,
       now: T0,
@@ -108,7 +121,7 @@ describe('opWithdraw — extraer material de una máquina', () => {
   it('vacía primero la salida, que es lo que el jugador espera llevarse', () => {
     const f = withStock({ gear: 10 }, { circuit: 3 });
     const out = runOp('withdraw', mkPlayer('u1'), f, {
-      machineId: 'lab',
+      machineId: 'lab', at: ANTE('lab'),
       item: 'circuit',
       qty: 3,
       now: T0,
@@ -121,7 +134,7 @@ describe('opWithdraw — extraer material de una máquina', () => {
     const f = withStock({ gear: 10 });
     for (const qty of [0, -5, Number.NaN]) {
       const out = runOp('withdraw', mkPlayer('u1'), f, {
-        machineId: 'lab',
+        machineId: 'lab', at: ANTE('lab'),
         item: 'gear',
         qty,
         now: T0,
@@ -330,7 +343,7 @@ describe('zona de RECOLECCIÓN', () => {
 
   it('usa la misma mecánica de extracción y el mismo inventario', () => {
     const out = runOp('gather', mkPlayer('u1'), mkFactory(), {
-      stationId: 'salvage_a',
+      stationId: 'salvage_a', at: EN_VETA('salvage_a'),
       now: T0,
       rand: () => 0.99,
     });
@@ -341,12 +354,12 @@ describe('zona de RECOLECCIÓN', () => {
 
   it('rinde más unidades por acción que una veta normal', () => {
     const chatarra = runOp('gather', mkPlayer('u1'), mkFactory(), {
-      stationId: 'salvage_a',
+      stationId: 'salvage_a', at: EN_VETA('salvage_a'),
       now: T0,
       rand: () => 0.99,
     });
     const mineral = runOp('gather', mkPlayer('u1'), mkFactory(), {
-      stationId: 'vein_a',
+      stationId: 'vein_a', at: EN_VETA('vein_a'),
       now: T0,
       rand: () => 0.99,
     });
@@ -361,7 +374,7 @@ describe('conservación de material en el ciclo completo', () => {
     let f = mkFactory();
     // A extrae
     const gathered = runOp('gather', mkPlayer('a'), f, {
-      stationId: 'vein_a',
+      stationId: 'vein_a', at: EN_VETA('vein_a'),
       now: T0,
       rand: () => 0.99,
     });

@@ -4,6 +4,7 @@ import { DEBUG_ENABLED } from '../config/env';
 import { MACHINE_LIST } from '../config/machines';
 import { SPAWN, STATIONS, TILE } from '../config/world';
 import { factoryProgress, currentStamina } from './logic/progression';
+import { SprintDrain } from './logic/stamina';
 import { settleFactory } from './logic/robots';
 import { Camera } from './engine/camera';
 import { Fx } from './engine/fx';
@@ -47,7 +48,7 @@ import { inventoryFree } from './logic/progression';
 import { computeMachineVisuals, drawMachine, drawRobots } from './render/machines';
 import { drawCharacter, drawEmoteBubble, drawNameTag } from './render/character';
 import { resolveActions, idleHint, type ActionOption } from './systems/interaction';
-import { useSessionStore, reportSprintStamina } from '../state/useSessionStore';
+import { useSessionStore, applyLocalStamina } from '../state/useSessionStore';
 import { useGameplayStore } from '../state/useGameplayStore';
 import { useUiStore } from '../state/useUiStore';
 import { emit, on } from '../services/bus';
@@ -103,7 +104,11 @@ export function GameCanvas() {
     let viewW = 0;
     let viewH = 0;
     let dpr = 1;
-    let sprintDrain = 0;
+    /* Estamina gastada esprintando y aún no consolidada por el servidor.
+       Se lleva aparte porque contarla dos veces dejaba al jugador clavado
+       a 0 de estamina para el resto de la partida (ver logic/stamina.ts). */
+    const sprintDrain = new SprintDrain();
+    let staminaFlushAt = 0;
     let actionUntil = 0;
     let actionStart = 0;
     let actionKind: ActionOption['kind'] | null = null;
@@ -145,6 +150,21 @@ export function GameCanvas() {
 
     /* Cerebros de los robots: comportamiento visible con recuperación. */
     const brains = new Map<string, RobotBrain>();
+
+    /* La foto viva de la fábrica y las acciones disponibles se recalculan a
+       8 Hz, no por fotograma: son cálculos que copian estructuras enteras y
+       cuyo resultado no cambia entre dos frames seguidos. */
+    const LIVE_REFRESH_MS = 125;
+    const ACTIONS_REFRESH_MS = 125;
+    let live: ReturnType<typeof settleFactory> | null = null;
+    let liveSource: unknown = null;
+    let liveAt = 0;
+    let actionsAt = 0;
+    let lastTargetId: string | null = null;
+    /* Destino de la carga de la mascota: también se refresca a ritmo lento. */
+    let petDrop: ReturnType<typeof dropOffFor> = null;
+    let petDropAt = 0;
+    let petDropItem: string | null = null;
 
     /* Mascota: simulada en local, liquidada por tandas contra el servidor. */
     const pet = new PetBrain();
@@ -234,14 +254,17 @@ export function GameCanvas() {
 
       pendingOp = true;
       try {
+        // La posición viaja SIEMPRE: el servidor comprueba que de verdad
+        // estabas delante de la máquina, la cinta o el muelle.
+        const at = { x: me.x, y: me.y };
         const args: Record<string, unknown> =
           opt.kind === 'gather'
-            ? { stationId: opt.targetId }
+            ? { stationId: opt.targetId, at }
             : opt.kind === 'sell'
-              ? { at: { x: me.x, y: me.y } }
+              ? { at }
               : opt.beltId
-                ? { machineId: opt.targetId, beltId: opt.beltId }
-                : { machineId: opt.targetId };
+                ? { machineId: opt.targetId, beltId: opt.beltId, at }
+                : { machineId: opt.targetId, at };
         const out = await session.op(opt.kind, args);
         if (out.ok && target) {
           const color = opt.color;
@@ -327,8 +350,12 @@ export function GameCanvas() {
       const stats = player
         ? deriveStats(player.upgrades)
         : deriveStats({});
-      let staminaNow = player ? currentStamina(player, now) - sprintDrain : 100;
-      staminaNow = Math.max(0, Math.min(stats.maxStamina, staminaNow));
+      // En cuanto el servidor fija una línea base nueva, el acumulador local
+      // se vacía: lo que ya está persistido no se vuelve a restar.
+      if (player) sprintDrain.sync(player.staminaAt);
+      const staminaNow = player
+        ? sprintDrain.apply(currentStamina(player, now), stats.maxStamina)
+        : 100;
 
       const busyAction = nowMs < actionUntil;
       const canSprint = input.sprint && staminaNow > 1 && !busyAction;
@@ -348,7 +375,7 @@ export function GameCanvas() {
         else me.dir = input.y > 0 ? 'down' : 'up';
         if (!busyAction) me.act = canSprint ? 'run' : 'walk';
         if (canSprint) {
-          sprintDrain += BALANCE.player.sprintStaminaCost * dt;
+          sprintDrain.add(BALANCE.player.sprintStaminaCost * dt);
           if (Math.random() < dt * 8) {
             fx.burst(me.x, me.y + 14, 'rgba(148,163,184,0.9)', 1, 26, 'smoke');
           }
@@ -365,7 +392,14 @@ export function GameCanvas() {
       }
 
       // La estamina gastada al esprintar se consolida en el tick de sesión.
-      if (sprintDrain > 0) reportSprintStamina(staminaNow);
+      // El gasto se consolida en memoria cada segundo: el jugador ve bajar y
+      // subir la estamina al momento aunque el guardado real vaya al ritmo
+      // lento del latido de sesión. Sin esto, tras esprintar te quedabas a 0
+      // hasta el siguiente latido (y podía tardar un minuto).
+      if (sprintDrain.pending > 0 && nowMs >= staminaFlushAt) {
+        staminaFlushAt = nowMs + 1000;
+        applyLocalStamina(staminaNow, now);
+      }
 
       /* — emotes — */
       const emoteId = consumeEmote();
@@ -478,7 +512,13 @@ export function GameCanvas() {
           );
           pendingBelt = true;
           void session
-            .op('deposit', { machineId: belt.feeds, beltId: belt.id, item, qty: batch })
+            .op('deposit', {
+              machineId: belt.feeds,
+              beltId: belt.id,
+              item,
+              qty: batch,
+              at: { x: me.x, y: me.y },
+            })
             .then((out) => {
               if (out.ok) {
                 const p = conveyorLoadPoint(belt);
@@ -495,11 +535,18 @@ export function GameCanvas() {
       }
 
       /* — interacción — */
+      // También a 8 Hz: `resolveActions` liquida máquinas para saber qué se
+      // puede hacer, y eso no cambia entre dos fotogramas seguidos.
       target = findNearestInteractable(me.x, me.y, BALANCE.actions.range);
       if (player && factory) {
-        actions = resolveActions({ player, factory, target, now });
+        if (nowMs >= actionsAt || target?.id !== lastTargetId) {
+          actionsAt = nowMs + ACTIONS_REFRESH_MS;
+          lastTargetId = target?.id ?? null;
+          actions = resolveActions({ player, factory, target, now });
+        }
       } else {
         actions = [];
+        lastTargetId = null;
       }
 
       /* — pulsaciones y modo automático — */
@@ -595,8 +642,21 @@ export function GameCanvas() {
 
       /* — cámara y efectos — */
       /* — la fábrica al día: cintas entregan, máquinas producen, robots reparten.
-           Es lo mismo que persiste `runOp`, así que lo que se ve coincide. — */
-      const live = factory ? settleFactory(factory, now) : null;
+           Es lo mismo que persiste `runOp`, así que lo que se ve coincide.
+
+           NO se recalcula cada fotograma: liquidar la fábrica entera copia
+           todas las máquinas, robots y cintas, y hacerlo 60 veces por segundo
+           era la principal fuente de basura para el recolector (y de tirones).
+           A 8 Hz el ojo no nota la diferencia: lo que se mueve suave son las
+           animaciones, que interpolan por tiempo. — */
+      if (factory && (factory !== liveSource || nowMs >= liveAt)) {
+        liveSource = factory;
+        liveAt = nowMs + LIVE_REFRESH_MS;
+        live = settleFactory(factory, now);
+      } else if (!factory) {
+        live = null;
+        liveSource = null;
+      }
 
       /* — robots: máquina de estados con detección de bloqueo — */
       if (live) {
@@ -631,10 +691,17 @@ export function GameCanvas() {
         petTop = heaviestItem(player.pet?.inventory ?? {});
         // A dónde llevar lo que carga: se decide con el material del que más
         // lleve y con el nivel de fábrica, que es lo que abre cintas y máquinas.
-        const dropOff =
-          petTop && factory
-            ? dropOffFor(petTop, factory.level, { x: pet.x, y: pet.y })
-            : null;
+        // Recorre cintas y máquinas, así que se recalcula sólo si cambia el
+        // material o cada medio segundo, no en cada fotograma.
+        if (!petTop || !factory) {
+          petDrop = null;
+          petDropItem = null;
+        } else if (petTop !== petDropItem || nowMs >= petDropAt) {
+          petDropItem = petTop;
+          petDropAt = nowMs + 500;
+          petDrop = dropOffFor(petTop, factory.level, { x: pet.x, y: pet.y });
+        }
+        const dropOff = petDrop;
         const ev = pet.update(now, {
           dt,
           ownerX: me.x,
@@ -732,10 +799,17 @@ export function GameCanvas() {
       const level = factory?.level ?? 1;
       const time = nowMs / 1000;
 
-      // Suelo estático pre-rasterizado
+      // Suelo estático pre-rasterizado.
+      // Sólo se copia el trozo VISIBLE: el mapa entero son 1920×1360 píxeles y
+      // volcarlo completo en cada fotograma es un blit de 2,6 millones de
+      // píxeles que no se ve — en móvil se notaba muchísimo.
       const staticLayer = getStaticLayer(level);
+      const sx = Math.max(0, Math.floor(view.x));
+      const sy = Math.max(0, Math.floor(view.y));
+      const sw = Math.min(staticLayer.width - sx, Math.ceil(view.w) + 2);
+      const sh = Math.min(staticLayer.height - sy, Math.ceil(view.h) + 2);
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(staticLayer, 0, 0);
+      if (sw > 0 && sh > 0) ctx.drawImage(staticLayer, sx, sy, sw, sh, sx, sy, sw, sh);
       ctx.imageSmoothingEnabled = true;
 
       if (live) drawConveyors(ctx, live.factory, time, now);
@@ -748,7 +822,8 @@ export function GameCanvas() {
       const sortables: { y: number; draw: () => void }[] = [];
 
       if (live) {
-        for (const v of computeMachineVisuals(live.factory.machines, level, now)) {
+        const liveFactory = live.factory;
+        for (const v of computeMachineVisuals(liveFactory.machines, level, now)) {
           sortables.push({
             y: (v.def.ty + v.def.th - 1) * TILE,
             draw: () => drawMachine(ctx, v, time, fx),
@@ -756,7 +831,7 @@ export function GameCanvas() {
         }
         sortables.push({
           y: 1e8,
-          draw: () => drawRobots(ctx, live.factory, brains, time),
+          draw: () => drawRobots(ctx, liveFactory, brains, time),
         });
       }
       sortables.push({ y: -1e9, draw: () => drawProps(ctx, time) });
@@ -963,6 +1038,10 @@ export function GameCanvas() {
           return false;
         },
         where: () => ({ x: Math.round(me.x), y: Math.round(me.y) }),
+        stamina: () => ({
+          /** Gasto de sprint aún sin consolidar. Debe volver a 0 al persistir. */
+          pendiente: +sprintDrain.pending.toFixed(2),
+        }),
         petState: () => ({
           x: Math.round(pet.x),
           y: Math.round(pet.y),

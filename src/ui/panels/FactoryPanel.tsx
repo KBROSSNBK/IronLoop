@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Panel } from './Panel';
 import { useSessionStore } from '../../state/useSessionStore';
+import { useGameplayStore } from '../../state/useGameplayStore';
+import { nearMachine } from '../../game/world/geometry';
 import { getFactoryLevel } from '../../config/factoryLevels';
 import { MACHINE_LIST, MACHINE_UPGRADE, machineUpgradeCost } from '../../config/machines';
 import { getItem } from '../../config/items';
@@ -19,6 +21,10 @@ export function FactoryPanel() {
   const busy = useSessionStore((s) => s.busy);
   const [now] = useState(() => Date.now());
   const [withdraw, setWithdraw] = useState<(QuantityRequest & { machineId: string }) | null>(null);
+  // Retirar material exige estar delante de la máquina: el panel se puede
+  // abrir desde cualquier sitio, pero meter la mano dentro no.
+  const x = useGameplayStore((s) => s.x);
+  const y = useGameplayStore((s) => s.y);
   if (!player || !factory) return null;
 
   const fp = factoryProgress(factory);
@@ -137,10 +143,13 @@ export function FactoryPanel() {
                   if (list.length === 0) {
                     return <div className="stat">Sin material almacenado</div>;
                   }
+                  const cerca = nearMachine(x, y, m.id);
                   return (
                     <>
                       <div className="stat" style={{ marginTop: 2 }}>
-                        Material dentro de la máquina:
+                        {cerca
+                          ? 'Material dentro de la máquina:'
+                          : '📍 Acércate a la máquina para retirar material:'}
                       </div>
                       <div className="withdraw-row">
                         {list.map(([id, n]) => {
@@ -151,8 +160,8 @@ export function FactoryPanel() {
                               key={id}
                               className="withdraw-chip"
                               data-output={isOutput}
-                              disabled={busy}
-                              title={`Retirar ${it.name}`}
+                              disabled={busy || !cerca}
+                              title={cerca ? `Retirar ${it.name}` : 'Tienes que estar junto a la máquina'}
                               onClick={() =>
                                 setWithdraw({
                                   kind: 'withdraw',
@@ -200,7 +209,7 @@ export function FactoryPanel() {
           onConfirm={(qty) => {
             const { machineId, item } = withdraw;
             setWithdraw(null);
-            void op('withdraw', { machineId, item, qty });
+            void op('withdraw', { machineId, item, qty, at: { x, y } });
           }}
         />
       )}
