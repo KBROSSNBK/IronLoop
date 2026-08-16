@@ -314,6 +314,14 @@ export interface PetState {
   drones: number;
   /** Nivel de la escuadrilla: carga y velocidad de TODOS los drones. */
   droneLevel: number;
+  /**
+   * ¿Pueden los drones vaciarte a TI la mochila?
+   *
+   * Por defecto sí —es justo lo que ahorra los paseos— pero se puede apagar:
+   * a veces llevas material a propósito para venderlo o contribuirlo y no
+   * quieres que te lo lleven a una máquina.
+   */
+  droneTakesPlayer: boolean;
 }
 
 export const DEFAULT_PET: PetState = {
@@ -329,6 +337,7 @@ export const DEFAULT_PET: PetState = {
   zone: null,
   drones: 0,
   droneLevel: 1,
+  droneTakesPlayer: true,
 };
 
 /**
@@ -360,6 +369,7 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
     zone: typeof raw?.zone === 'string' ? raw.zone : null,
     drones: Math.max(0, Math.min(DRONE.max, Math.floor(raw?.drones ?? 0))),
     droneLevel: Math.max(1, Math.floor(raw?.droneLevel ?? 1)),
+    droneTakesPlayer: raw?.droneTakesPlayer ?? true,
   };
 }
 

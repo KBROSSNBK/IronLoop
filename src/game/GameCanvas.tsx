@@ -167,6 +167,10 @@ export function GameCanvas() {
     let petDrop: ReturnType<typeof dropOffFor> = null;
     let petDropAt = 0;
     let petDropItem: string | null = null;
+    /* Y el de lo que llevas tú, para los drones. */
+    let miDrop: ReturnType<typeof dropOffFor> = null;
+    let miDropAt = 0;
+    let miDropItem: string | null = null;
 
     /* Mascota: simulada en local, liquidada por tandas contra el servidor. */
     const pet = new PetBrain();
@@ -761,6 +765,20 @@ export function GameCanvas() {
         while (drones.length < squad.count) drones.push(new DroneBrain(drones.length));
         drones.length = squad.count;
 
+        // También te vacían a TI la mochila. Se calcula a ritmo lento porque
+        // recorre todas las cintas y máquinas para elegir destino.
+        const miTop =
+          player.pet?.droneTakesPlayer === false ? null : heaviestItem(player.inventory);
+        if (!miTop || !factory || squad.count === 0) {
+          miDrop = null;
+          miDropItem = null;
+        } else if (miTop !== miDropItem || nowMs >= miDropAt) {
+          miDropItem = miTop;
+          miDropAt = nowMs + 500;
+          miDrop = dropOffFor(miTop, factory.level, { x: me.x, y: me.y });
+        }
+        const misUnidades = miTop ? (player.inventory[miTop] ?? 0) : 0;
+
         for (const d of drones) {
           // Cada dron va a por lo que el perro tenga confirmado y sin reservar.
           const reservado = drones.reduce((a, o) => a + (o === d ? 0 : o.load), 0);
@@ -770,6 +788,8 @@ export function GameCanvas() {
             dogY: pet.y,
             dogUnits: Math.max(0, petStored - reservado),
             dropOff: petDrop,
+            playerUnits: Math.max(0, misUnidades - reservado),
+            playerDrop: miDrop,
             carry: squad.carry,
             speed: squad.speed,
             ownerX: me.x,
@@ -778,9 +798,13 @@ export function GameCanvas() {
           });
           if (dev.deliver && !petBusy && !droneBusy) {
             droneBusy = true;
-            const { bay, units } = dev.deliver;
+            const { bay, units, source } = dev.deliver;
             void session
-              .op('petDeposit', { machineId: bay.machineId, beltId: bay.beltId, limit: units })
+              .op(source === 'pet' ? 'petDeposit' : 'droneHaul', {
+                machineId: bay.machineId,
+                beltId: bay.beltId,
+                limit: units,
+              })
               .then((out) => {
                 if (out.ok) {
                   fx.burst(d.x, d.y + 12, '#38bdf8', 8, 60, 'spark');
@@ -997,7 +1021,10 @@ export function GameCanvas() {
                 color: player.pet?.color ?? '#c7ced8',
                 accent: player.pet?.accent ?? '#22d3ee',
                 load: d.load,
-                loadIcon: petTop ? getItem(petTop).icon : null,
+                loadIcon: (() => {
+                  const id = d.source === 'pet' ? petTop : heaviestItem(player.inventory);
+                  return id ? getItem(id).icon : null;
+                })(),
               }),
           });
         }

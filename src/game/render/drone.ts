@@ -46,7 +46,7 @@ function roundRect(
 
 const LED: Record<DroneStateName, string> = {
   ESPERA: '#4ade80',
-  AL_PERRO: '#fbbf24',
+  AL_ORIGEN: '#fbbf24',
   CARGANDO: '#f59e0b',
   AL_DESTINO: '#38bdf8',
   SOLTANDO: '#a78bfa',

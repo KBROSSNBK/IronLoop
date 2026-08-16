@@ -42,6 +42,7 @@ import {
   PET_MODES,
   PET_STAT_MAP,
   DRONE,
+  deriveDrones,
   droneCost,
   droneUpgradeCost,
   getChassis,
@@ -1419,11 +1420,119 @@ export function opBuyDrone(
   };
 }
 
+/**
+ * Un dron te vacía a TI la mochila y lleva el material a su máquina.
+ *
+ * Es la misma idea que con la mascota, pero cogiendo de tu inventario: dejas
+ * de tener que hacer el viaje hasta la cinta cada vez que te llenas. No lleva
+ * comprobación de posición a propósito — el que ha volado hasta la máquina es
+ * el dron, no tú; lo que sí se comprueba es que tengas drones, que la máquina
+ * esté abierta y que el material sea el que acepta.
+ */
+export function opDroneHaul(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { machineId: string; beltId?: string; limit?: number; now: number },
+): OpOutcome<{ deposited: Record<string, number> }> {
+  const pet = normalizePet(player.pet, args.now);
+  if (pet.drones <= 0) return fail('No tienes drones');
+  if (!pet.droneTakesPlayer) return fail('Los drones no cogen de tu mochila');
+
+  const def = getMachine(args.machineId);
+  const cur = factory.machines[args.machineId];
+  if (!cur) return fail('Máquina no encontrada');
+  if (factory.level < def.unlockFactoryLevel) return fail('Máquina bloqueada');
+
+  let belt: ReturnType<typeof getBelt> | undefined;
+  if (args.beltId) {
+    belt = getBelt(args.beltId);
+    if (!belt || belt.feeds !== args.machineId) return fail('Cinta inválida');
+    if (factory.level < belt.fromLevel) return fail('Cinta sin energía');
+  }
+
+  // Nunca más de lo que la escuadrilla puede cargar en un viaje.
+  const squad = deriveDrones(pet);
+  const pedido =
+    typeof args.limit === 'number' && Number.isFinite(args.limit)
+      ? Math.max(0, Math.floor(args.limit))
+      : squad.carry;
+  let room = Math.min(pedido, squad.carry);
+
+  const allowed = belt?.accepts?.length ? belt.accepts : Object.keys(def.input);
+  const deposited: Record<string, number> = {};
+  let inventory = player.inventory;
+  let units = 0;
+  for (const item of allowed) {
+    if (room <= 0) break;
+    const have = Math.max(0, Math.floor(inventory[item] ?? 0));
+    if (have <= 0) continue;
+    const take = Math.min(have, room);
+    inventory = addToInventory(inventory, item, -take);
+    deposited[item] = take;
+    units += take;
+    room -= take;
+  }
+  if (units === 0) return fail('No llevas material para ahí');
+
+  const settled = settleMachine(cur, args.machineId, factory.level, args.now);
+  let machine: MachineState = settled.state;
+  let belts = factory.belts ?? {};
+  for (const [item, qty] of Object.entries(deposited)) {
+    if (belt) belts = pushToBelt(belts, belt.id, item, qty, args.now);
+    else
+      machine = {
+        ...machine,
+        input: { ...machine.input, [item]: (machine.input[item] ?? 0) + qty },
+      };
+  }
+  if (!belt) machine = settleMachine(machine, args.machineId, factory.level, args.now).state;
+
+  // Mismo premio que llevarlo tú, pero sin gastar estamina: la ha puesto el
+  // dron. Es la ventaja de haberlo comprado.
+  const events: OpEvent[] = [];
+  let p: PlayerState = { ...player, inventory };
+  p = stat(p, { deposited: units });
+  p = grantXp(p, def.xpPerDeposit * units, events, args.now);
+  p = bumpMissions(
+    p,
+    Object.entries(deposited).map(([item, amount]) => ({
+      metric: 'deposit' as const,
+      item,
+      amount,
+    })),
+    events,
+  );
+
+  for (const [item, n] of Object.entries(deposited)) {
+    events.push({ kind: 'item', item, amount: -n });
+  }
+
+  return {
+    ok: true,
+    player: p,
+    factory: {
+      ...factory,
+      machines: { ...factory.machines, [args.machineId]: machine },
+      belts,
+      updatedAt: args.now,
+    },
+    events,
+    data: { deposited },
+  };
+}
+
 /** Color, detalles y orden de trabajo. Es configuración: no cuesta nada. */
 export function opSetPetLook(
   player: PlayerState,
   factory: FactoryState,
-  args: { color?: string; accent?: string; mode?: string; zone?: string | null; now: number },
+  args: {
+    color?: string;
+    accent?: string;
+    mode?: string;
+    zone?: string | null;
+    droneTakesPlayer?: boolean;
+    now: number;
+  },
 ): OpOutcome<{ ok: true }> {
   const pet = normalizePet(player.pet, args.now);
   const color =
@@ -1452,9 +1561,18 @@ export function opSetPetLook(
   }
   if (modeDef) events.push({ kind: 'info', text: `Mascota: ${modeDef.label}` });
 
+  const droneTakesPlayer =
+    typeof args.droneTakesPlayer === 'boolean' ? args.droneTakesPlayer : pet.droneTakesPlayer;
+  if (typeof args.droneTakesPlayer === 'boolean') {
+    events.push({
+      kind: 'info',
+      text: droneTakesPlayer ? 'Los drones también te vacían a ti' : 'Los drones no te tocan la mochila',
+    });
+  }
+
   return {
     ok: true,
-    player: { ...player, pet: { ...pet, color, accent, mode, zone } },
+    player: { ...player, pet: { ...pet, color, accent, mode, zone, droneTakesPlayer } },
     factory,
     events,
     data: { ok: true },
@@ -1821,6 +1939,7 @@ export type OpName =
   | 'buyPetChassis'
   | 'buyPetStat'
   | 'buyDrone'
+  | 'droneHaul'
   | 'setPetLook'
   | 'petMine'
   | 'petDeposit'
@@ -1851,6 +1970,7 @@ export const OPS = {
   buyPetChassis: opBuyPetChassis,
   buyPetStat: opBuyPetStat,
   buyDrone: opBuyDrone,
+  droneHaul: opDroneHaul,
   setPetLook: opSetPetLook,
   petMine: opPetMine,
   petDeposit: opPetDeposit,

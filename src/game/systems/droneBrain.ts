@@ -12,7 +12,10 @@
 
 import type { DropOff } from '../logic/pet';
 
-export type DroneStateName = 'ESPERA' | 'AL_PERRO' | 'CARGANDO' | 'AL_DESTINO' | 'SOLTANDO';
+export type DroneStateName = 'ESPERA' | 'AL_ORIGEN' | 'CARGANDO' | 'AL_DESTINO' | 'SOLTANDO';
+
+/** De quién ha cogido la carga: cambia a qué operación se liquida. */
+export type DroneSource = 'pet' | 'player';
 
 /** Altura de vuelo en píxeles sobre el suelo. */
 export const DRONE_ALTITUDE = 30;
@@ -29,6 +32,10 @@ export interface DroneTickInput {
   dogUnits: number;
   /** A dónde va el material que carga el perro. */
   dropOff: DropOff | null;
+  /** Unidades tuyas que un dron podría llevarse (0 si no quieres que lo hagan). */
+  playerUnits: number;
+  /** A dónde va lo que llevas tú. */
+  playerDrop: DropOff | null;
   /** Unidades por viaje y velocidad, según el nivel de la escuadrilla. */
   carry: number;
   speed: number;
@@ -41,7 +48,7 @@ export interface DroneTickInput {
 
 export interface DroneTickResult {
   /** Ha llegado al destino: hay que ejecutar el traspaso de verdad. */
-  deliver: { bay: DropOff; units: number } | null;
+  deliver: { bay: DropOff; units: number; source: DroneSource } | null;
 }
 
 const NOTHING: DroneTickResult = { deliver: null };
@@ -57,6 +64,8 @@ export class DroneBrain {
   load = 0;
   /** Material que lleva, para pintar el icono correcto. */
   item: string | null = null;
+  /** De dónde ha cogido la carga del viaje actual. */
+  source: DroneSource = 'pet';
 
   /** Puesto en la formación alrededor del dueño (para no amontonarse). */
   private readonly slot: number;
@@ -103,7 +112,20 @@ export class DroneBrain {
   }
 
   update(input: DroneTickInput): DroneTickResult {
-    const { dt, dogX, dogY, dogUnits, dropOff, carry, speed, ownerX, ownerY, now } = input;
+    const {
+      dt,
+      dogX,
+      dogY,
+      dogUnits,
+      dropOff,
+      playerUnits,
+      playerDrop,
+      carry,
+      speed,
+      ownerX,
+      ownerY,
+      now,
+    } = input;
     if (!this.spawned) this.reset(ownerX, ownerY);
 
     this.phase += dt * 6;
@@ -112,9 +134,17 @@ export class DroneBrain {
     switch (this.state) {
       case 'ESPERA': {
         // Sólo arranca si de verdad hay carga que mover Y sitio donde dejarla.
+        // El perro va primero: es el que se queda parado si nadie le releva.
         if (dogUnits > 0 && dropOff) {
           this.bay = dropOff;
-          this.state = 'AL_PERRO';
+          this.source = 'pet';
+          this.state = 'AL_ORIGEN';
+          break;
+        }
+        if (playerUnits > 0 && playerDrop) {
+          this.bay = playerDrop;
+          this.source = 'player';
+          this.state = 'AL_ORIGEN';
           break;
         }
         const p = this.idlePoint(ownerX, ownerY);
@@ -122,13 +152,17 @@ export class DroneBrain {
         break;
       }
 
-      case 'AL_PERRO': {
-        if (dogUnits <= 0) {
-          // Se lo ha llevado otro dron (o el propio perro): a esperar.
+      case 'AL_ORIGEN': {
+        const mio = this.source === 'pet';
+        const quedan = mio ? dogUnits : playerUnits;
+        if (quedan <= 0) {
+          // Se lo ha llevado otro dron (o su dueño): a esperar.
           this.state = 'ESPERA';
           break;
         }
-        if (this.flyTo(dogX, dogY - DRONE_ALTITUDE, speed, dt)) {
+        const ox = mio ? dogX : ownerX;
+        const oy = mio ? dogY : ownerY;
+        if (this.flyTo(ox, oy - DRONE_ALTITUDE, speed, dt)) {
           this.state = 'CARGANDO';
           this.until = now + 450;
         }
@@ -137,7 +171,7 @@ export class DroneBrain {
 
       case 'CARGANDO': {
         if (now < this.until) break;
-        this.load = Math.min(carry, dogUnits);
+        this.load = Math.min(carry, this.source === 'pet' ? dogUnits : playerUnits);
         this.item = this.bay ? this.bay.machineId : null;
         this.state = this.load > 0 && this.bay ? 'AL_DESTINO' : 'ESPERA';
         break;
@@ -151,7 +185,7 @@ export class DroneBrain {
         if (this.flyTo(this.bay.x, this.bay.y - DRONE_ALTITUDE, speed, dt)) {
           this.state = 'SOLTANDO';
           this.until = now + 400;
-          return { deliver: { bay: this.bay, units: this.load } };
+          return { deliver: { bay: this.bay, units: this.load, source: this.source } };
         }
         break;
       }

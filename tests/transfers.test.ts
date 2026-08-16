@@ -6,7 +6,7 @@ import { createFactoryState, createPlayerState } from '../src/game/logic/default
 import { conveyorLoadPoint, CONVEYORS } from '../src/config/world';
 import { ROBOTS, robotRate } from '../src/config/robots';
 import { getMachine, MACHINE_LIST } from '../src/config/machines';
-import { DEFAULT_PET } from '../src/config/pets';
+import { DEFAULT_PET, DRONE } from '../src/config/pets';
 import type { FactoryState, PlayerState } from '../src/types';
 
 const T0 = 1_700_000_000_000;
@@ -255,6 +255,78 @@ describe('drones de apoyo', () => {
     });
     expect(out.player!.pet.inventory.ore).toBeUndefined();
     expect(beltCount(out.factory!.belts.c1, 'c1', T0 + 10)).toBe(50);
+  });
+
+  it('también te vacían a TI la mochila y lo llevan a la máquina', () => {
+    const p = player({
+      inventory: { ore: 40 },
+      upgrades: { capacity: 60 },
+      pet: { ...DEFAULT_PET, drones: 2, droneLevel: 1, lastAt: T0 },
+    });
+    const out = runOp('droneHaul', p, nivel(6), {
+      machineId: 'smelter',
+      beltId: 'c1',
+      limit: 18,
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.inventory.ore).toBe(22);
+    expect(beltCount(out.factory!.belts.c1, 'c1', T0 + 10)).toBe(18);
+    // Ni una unidad de más ni de menos.
+    expect((out.player!.inventory.ore ?? 0) + 18).toBe(40);
+  });
+
+  it('sin drones comprados no te tocan nada', () => {
+    const p = player({ inventory: { ore: 40 }, pet: { ...DEFAULT_PET, lastAt: T0 } });
+    expect(
+      runOp('droneHaul', p, nivel(6), { machineId: 'smelter', beltId: 'c1', now: T0 }).ok,
+    ).toBe(false);
+  });
+
+  it('si apagas el interruptor, dejan tu mochila en paz', () => {
+    const p = player({
+      inventory: { ore: 40 },
+      pet: { ...DEFAULT_PET, drones: 2, droneTakesPlayer: false, lastAt: T0 },
+    });
+    const out = runOp('droneHaul', p, nivel(6), {
+      machineId: 'smelter',
+      beltId: 'c1',
+      now: T0,
+    });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/mochila/i);
+  });
+
+  it('nunca se llevan más de lo que cabe en un viaje, pidan lo que pidan', () => {
+    const p = player({
+      inventory: { ore: 500 },
+      upgrades: { capacity: 200 },
+      pet: { ...DEFAULT_PET, drones: 1, droneLevel: 1, lastAt: T0 },
+    });
+    const out = runOp('droneHaul', p, nivel(6), {
+      machineId: 'smelter',
+      beltId: 'c1',
+      limit: 99_999,
+      now: T0,
+    });
+    // El tope real es la carga de la escuadrilla, no lo que pida el cliente.
+    expect(beltCount(out.factory!.belts.c1, 'c1', T0 + 10)).toBe(DRONE.carry);
+  });
+
+  it('sólo se llevan lo que esa máquina consume', () => {
+    const p = player({
+      inventory: { copper: 30 },
+      upgrades: { capacity: 60 },
+      pet: { ...DEFAULT_PET, drones: 2, lastAt: T0 },
+    });
+    // La Fundidora come mineral, no cobre.
+    const out = runOp('droneHaul', p, nivel(6), {
+      machineId: 'smelter',
+      beltId: 'c1',
+      now: T0,
+    });
+    expect(out.ok).toBe(false);
+    expect(p.inventory.copper).toBe(30);
   });
 
   it('un límite absurdo no crea material de la nada', () => {
