@@ -48,20 +48,22 @@ import {
   droneCost,
   droneSlots,
   droneUpgradeCost,
-  getChassis,
   normalizePet,
   petStatCost,
 } from '../../config/pets';
 import {
   addToPet,
+  bagFree,
+  bagUsed,
   getPetTarget,
   isPetStation,
   petAccepts,
-  petFree,
+  petBag,
   petMineCap,
   petUsed,
   stationYield,
   unloadPet,
+  withBag,
 } from '../../game/logic/pet';
 
 /**
@@ -1688,7 +1690,7 @@ export function opSetPetLook(
 export function opPetMine(
   player: PlayerState,
   factory: FactoryState,
-  args: { stationId: string; qty: number; now: number },
+  args: { stationId: string; qty: number; dog?: number; now: number },
 ): OpOutcome<{ item: string; qty: number }> {
   const station = STATIONS.find((s) => s.id === args.stationId);
   if (!station || !isPetStation(station.id)) return fail('Estación inválida');
@@ -1714,7 +1716,9 @@ export function opPetMine(
   const ritmo = derived.minePerSec * derived.dogs;
   const elapsed = args.now - (pet.lastAt || player.createdAt);
   const byTime = petMineCap(pet, elapsed, PET_RATE_TOLERANCE) * amount;
-  const qty = Math.min(asked, byTime, petFree(pet));
+  // Qué perro pica, y en SU mochila: lo que lleve otro no le quita hueco.
+  const dog = Math.max(0, Math.min(derived.dogs - 1, Math.floor(args.dog ?? 0)));
+  const qty = Math.min(asked, byTime, bagFree(pet, dog));
   if (qty <= 0) {
     return {
       ok: true,
@@ -1725,14 +1729,14 @@ export function opPetMine(
     };
   }
 
-  const { inventory, added } = addToPet(pet, item, qty);
+  const { inventory, added } = addToPet(pet, item, qty, dog);
   const usedMs = ritmo > 0 ? (added / amount / ritmo) * 1000 : 0;
   const events: OpEvent[] = [];
   let p: PlayerState = {
     ...player,
     pet: {
       ...pet,
-      inventory,
+      bags: withBag(pet, dog, inventory),
       lastAt: Math.min(args.now, (pet.lastAt || player.createdAt) + usedMs),
       mined: (pet.mined ?? 0) + added,
     },
@@ -1769,11 +1773,14 @@ export function opPetDeposit(
     limit?: number;
     /** Manifiesto exacto del viaje del dron: material → unidades. */
     items?: Record<string, number>;
+    /** Perro que descarga. Cada uno lleva SU mochila. */
+    dog?: number;
     now: number;
   },
 ): OpOutcome<{ deposited: Record<string, number> }> {
   const pet = normalizePet(player.pet, args.now);
   if (pet.mode !== 'gather') return fail('La mascota no está extrayendo');
+  const dog = Math.max(0, Math.min(derivePet(pet).dogs - 1, Math.floor(args.dog ?? 0)));
 
   const def = getMachine(args.machineId);
   const cur = factory.machines[args.machineId];
@@ -1793,7 +1800,7 @@ export function opPetDeposit(
     ? Object.keys(args.items).filter((i) => allowed.includes(i))
     : allowed;
   const moving: Record<string, number> = {};
-  const inventory = { ...pet.inventory };
+  const inventory = { ...petBag(pet, dog) };
   // Un dron se lleva sólo lo que le cabe en el viaje; la mascota, todo.
   let room =
     typeof args.limit === 'number' && Number.isFinite(args.limit)
@@ -1833,11 +1840,11 @@ export function opPetDeposit(
   const events: OpEvent[] = [
     {
       kind: 'info',
-      text: `${getChassis(pet.chassis).name}: ${units} → ${belt?.label ?? def.short}`,
+      text: `Perro ${dog + 1}: ${units} → ${belt?.label ?? def.short}`,
     },
   ];
 
-  let p: PlayerState = { ...player, pet: { ...pet, inventory } };
+  let p: PlayerState = { ...player, pet: { ...pet, bags: withBag(pet, dog, inventory) } };
   p = stat(p, { deposited: units });
   p = bumpMissions(
     p,
@@ -1866,7 +1873,7 @@ export function opPetDeposit(
 export function opPetUnload(
   player: PlayerState,
   factory: FactoryState,
-  args: { now: number },
+  args: { dog?: number; now: number },
 ): OpOutcome<{ moved: Record<string, number>; units: number }> {
   const pet = normalizePet(player.pet, args.now);
   if (petUsed(pet) <= 0) return fail('La mascota no lleva nada');
@@ -1874,7 +1881,15 @@ export function opPetUnload(
   const free = inventoryFree(player);
   if (free <= 0) return fail('Inventario lleno');
 
-  const out = unloadPet(pet.inventory, player.inventory, free);
+  // Descarga el perro que te lo entrega; sin decir cuál, el que más lleve.
+  const dogs = derivePet(pet).dogs;
+  let dog = Math.max(0, Math.min(dogs - 1, Math.floor(args.dog ?? -1)));
+  if (typeof args.dog !== 'number') {
+    dog = 0;
+    for (let i = 1; i < dogs; i++) if (bagUsed(pet, i) > bagUsed(pet, dog)) dog = i;
+  }
+
+  const out = unloadPet(petBag(pet, dog), player.inventory, free);
   if (out.units <= 0) return fail('Inventario lleno');
 
   const events: OpEvent[] = Object.entries(out.moved).map(([item, amount]) => ({
@@ -1888,7 +1903,7 @@ export function opPetUnload(
     player: {
       ...player,
       inventory: out.player,
-      pet: { ...pet, inventory: out.pet },
+      pet: { ...pet, bags: withBag(pet, dog, out.pet) },
     },
     factory,
     events,

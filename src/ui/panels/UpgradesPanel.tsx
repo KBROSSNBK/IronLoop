@@ -21,6 +21,7 @@ import {
   PET_MODES,
   PET_STATS,
   PACK,
+  bagUsed,
   derivePet,
   deriveDrones,
   dogCost,
@@ -298,9 +299,9 @@ function PetTab() {
       {/* La jauría: más perros = más ritmo y más mochila. */}
       <div className="section-title">JAURÍA</div>
       <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-        Cada perro va <b>a su mineral</b>: uno al cobre, otro al titanio, otro a la
-        chatarra. Comparten mochila, así que sumar perros multiplica el ritmo y la carga.
-        Cada uno lleva su dron, más otro que se queda contigo.
+        Cada perro va <b>a su mineral</b> y lleva <b>su propia mochila</b>: lo que pica
+        es suyo y su dron le vacía a él. Sumar perros multiplica el ritmo y la carga sin
+        que se estorben.
       </div>
       <div className="pet-stats">
         <Metric label="Perros" value={`${derived.dogs}/${PACK.max}`} accent="var(--amber-soft)" />
@@ -309,7 +310,11 @@ function PetTab() {
           value={`${derived.dogs + 1}`}
           accent={squad.count >= derived.dogs + 1 ? 'var(--green)' : 'var(--red)'}
         />
-        <Metric label="Mochila total" value={`${derived.capacity}`} accent="var(--blue)" />
+        <Metric
+          label="Mochila total"
+          value={`${carried}/${derived.packCapacity}`}
+          accent="var(--blue)"
+        />
       </div>
       <div className="robot-modes">
         <button
@@ -394,7 +399,12 @@ function PetTab() {
         return (
           <div className="dog-row" key={i}>
             <div className="dog-head">
-              <span className="dog-tag">🐕 Perro {i + 1}</span>
+              <span className="dog-tag">
+                🐕 Perro {i + 1}{' '}
+                <b className="dog-bag">
+                  {bagUsed(pet, i)}/{derived.capacity}
+                </b>
+              </span>
               <span className="dog-now">
                 {def
                   ? `${getItem(def.item).icon} ${getItem(def.item).name}`
@@ -448,7 +458,11 @@ function PetTab() {
       </div>
 
       <div className="pet-stats">
-        <Metric label="Mochila" value={`${carried}/${derived.capacity}`} accent="var(--blue)" />
+        <Metric
+          label="Mochila (cada uno)"
+          value={`${derived.capacity}`}
+          accent="var(--blue)"
+        />
         <Metric
           label="Extracción"
           value={`${(derived.minePerSec * 60).toFixed(0)}/min`}

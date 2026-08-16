@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { factoryNeeds, shareNeeds } from '../src/game/logic/needs';
-import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
+import { createFactoryState } from '../src/game/logic/defaults';
 import { PetBrain } from '../src/game/systems/petBrain';
 import { derivePet, DEFAULT_PET } from '../src/config/pets';
 import { stationWorkPoint, stationYield } from '../src/game/logic/pet';
@@ -194,5 +194,46 @@ describe('la mascota extrae lo que se le pide', () => {
     expect(minado!.item).toBe('copper');
     expect(minado!.stationId).toBe('vein_copper_a');
     expect(isOffworld(start.y)).toBe(false);
+  });
+});
+
+/* ─────────────── NINGÚN PERRO SE QUEDA CLAVADO ─────────────── */
+
+/**
+ * Cada perro pica desplazado a un lado para no montarse encima del de al
+ * lado. Medir la llegada al CENTRO de la veta los dejaba clavados: ya estaban
+ * en su sitio —así que dejaban de andar— pero seguían creyendo que no habían
+ * llegado, y no empezaban a picar nunca. Le pasaba al 2 y al 3, no al 1.
+ */
+describe('la jauría entera acaba picando', () => {
+  it('los tres perros llegan a MINAR, no sólo el primero', () => {
+    const derived = derivePet(DEFAULT_PET);
+    const start = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_a')!);
+    for (let slot = 0; slot < 3; slot++) {
+      const b = new PetBrain(slot);
+      b.reset(start.x, start.y);
+      b.x = start.x;
+      b.y = start.y;
+      let estado = '';
+      for (let i = 0; i < 240; i++) {
+        b.update(T0 + i * 50, {
+          dt: 0.05,
+          ownerX: start.x,
+          ownerY: start.y,
+          derived,
+          storedUnits: 0,
+          otherPending: 0,
+          mode: 'gather',
+          target: 'ore',
+          autoTarget: null,
+          hasDrones: false,
+          ownerHasRoom: true,
+          dropOff: null,
+        });
+        estado = b.state;
+        if (estado === 'MINAR') break;
+      }
+      expect(estado, `el perro ${slot + 1} no llega a picar`).toBe('MINAR');
+    }
   });
 });

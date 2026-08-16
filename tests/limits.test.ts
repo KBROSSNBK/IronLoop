@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   BALANCE,
+  MAX_FACTORY_LEVELS_PER_WRITE,
+  MAX_LEVELS_PER_WRITE,
   LEVELUP_TOTAL_MONEY_CAP,
   MAX_MONEY_PER_WRITE,
   OFFLINE_MONEY_CAP,
   OFFLINE_XP_CAP,
   SALE_CLAIM_CAP,
 } from '../src/config/balance';
-import { applyXp, computeOfflineReport } from '../src/game/logic/progression';
+import {
+  applyFactoryContribution,
+  applyXp,
+  computeOfflineReport,
+} from '../src/game/logic/progression';
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { getMachine } from '../src/config/machines';
@@ -17,6 +23,9 @@ import { ROBOTS } from '../src/config/robots';
 import type { FactoryState, PlayerState } from '../src/types';
 
 const T0 = 1_700_000_000_000;
+
+/** Mochila del primer perro: cada uno lleva la suya. */
+const bag0 = (p: { bags?: Record<string, number>[] } | undefined) => p?.bags?.[0] ?? {};
 
 const player = (over: Partial<PlayerState> = {}): PlayerState => ({
   ...createPlayerState({ uid: 'a', displayName: 'A', photoURL: null, email: null }, T0),
@@ -224,7 +233,7 @@ describe('cargar y retirar exige estar junto a la máquina', () => {
       now: T0 + 60_000,
     });
     expect(out.ok).toBe(true);
-    expect(out.player!.pet.inventory.titanium).toBeGreaterThan(0);
+    expect(bag0(out.player!.pet).titanium).toBeGreaterThan(0);
   });
 
   it('una persona no puede ni entrar en la zona prohibida', () => {
@@ -265,5 +274,45 @@ describe('cargar y retirar exige estar junto a la máquina', () => {
         now: T0,
       }).ok,
     ).toBe(true);
+  });
+});
+
+/* ─────────────── NINGÚN SALTO DE NIVEL IMPOSIBLE ─────────────── */
+
+/**
+ * Las reglas rechazan una escritura que suba el nivel del jugador más de 50 o
+ * el de la fábrica más de 5. Si una recompensa se pasara, la escritura entera
+ * se cae y la partida se queda bloqueada reintentándola. Es el mismo fallo del
+ * dinero, con otro campo.
+ */
+describe('los niveles tampoco se pasan del techo por escritura', () => {
+  it('el jugador nunca sube más de lo que admiten las reglas', () => {
+    for (const xp of [200_000, 5_000_000, 50_000_000, 1e12]) {
+      const r = applyXp(1, 0, xp);
+      expect(r.levelsGained).toBeLessThanOrEqual(MAX_LEVELS_PER_WRITE);
+      // Y el resto tampoco puede dispararse, que también lleva tope.
+      expect(r.xp).toBeLessThan(BALANCE.leveling.xpForLevel(r.level));
+    }
+    expect(MAX_LEVELS_PER_WRITE).toBeLessThan(50);
+  });
+
+  it('la fábrica tampoco, y lo que sobra NO se pierde', () => {
+    const enorme = 5_000_000;
+    const r = applyFactoryContribution(1, 0, enorme);
+    expect(r.levelsGained).toBeLessThanOrEqual(MAX_FACTORY_LEVELS_PER_WRITE);
+    expect(MAX_FACTORY_LEVELS_PER_WRITE).toBeLessThan(5);
+    // Lo no consumido sigue ahí: la siguiente acción sube el resto.
+    expect(r.contribution).toBeGreaterThan(0);
+
+    // Encadenando acciones se acaba llegando igual, sin perder un punto: el
+    // resto se queda en la fábrica y sube el siguiente nivel a la próxima.
+    let lv = 1;
+    let con = 0;
+    for (let i = 0; i < 12; i++) {
+      const paso = applyFactoryContribution(lv, con, i === 0 ? enorme : 0);
+      lv = paso.level;
+      con = paso.contribution;
+    }
+    expect(lv).toBeGreaterThan(1 + MAX_FACTORY_LEVELS_PER_WRITE);
   });
 });

@@ -4,11 +4,12 @@ import {
   PET_BASE,
   PET_CHASSIS,
   PET_RATE_TOLERANCE,
+  bagFree,
+  bagUsed,
   derivePet,
   dogTarget,
   getChassis,
   normalizePet,
-  petFree,
   petStatCost,
   PET_STATS,
   type PetState,
@@ -39,11 +40,14 @@ import type { FactoryState, PlayerState } from '../src/types';
 
 const T0 = 1_700_000_000_000;
 
+/** Mochila del primer perro: cada uno lleva la suya. */
+const bag0 = (p: { bags?: Record<string, number>[] } | undefined) => p?.bags?.[0] ?? {};
+
 const pet = (over: Partial<PetState> = {}): PetState => ({
   ...DEFAULT_PET,
   owned: [...DEFAULT_PET.owned],
   stats: {},
-  inventory: {},
+  bags: [{}, {}, {}],
   lastAt: T0,
   ...over,
 });
@@ -109,7 +113,9 @@ describe('mochila de la mascota', () => {
     const { inventory, added } = addToPet(p, 'ore', cap + 500);
     expect(added).toBe(cap);
     expect(inventory.ore).toBe(cap);
-    expect(petFree({ ...p, inventory })).toBe(0);
+    // Su mochila queda a tope; las de los otros perros, intactas.
+    expect(bagFree({ ...p, bags: [inventory] }, 0)).toBe(0);
+    expect(bagFree({ ...p, bags: [inventory] }, 1)).toBe(cap);
   });
 
   it('descargar respeta el hueco del jugador y no destruye nada', () => {
@@ -816,7 +822,7 @@ describe('operaciones de la mascota', () => {
       now: T0 + 60_000,
     });
     expect(out.ok).toBe(true);
-    expect(out.player!.pet.inventory.ore).toBe(3);
+    expect(bag0(out.player!.pet).ore).toBe(3);
     expect(out.player!.inventory.ore).toBeUndefined();
     expect(out.player!.stats.petMined).toBe(3);
   });
@@ -827,8 +833,8 @@ describe('operaciones de la mascota', () => {
       qty: 2,
       now: T0 + 60_000,
     });
-    expect(out.player!.pet.inventory.copper).toBe(2);
-    expect(out.player!.pet.inventory.ore).toBeUndefined();
+    expect(bag0(out.player!.pet).copper).toBe(2);
+    expect(bag0(out.player!.pet).ore).toBeUndefined();
   });
 
   it('no se puede reclamar más de lo que da el tiempo transcurrido', () => {
@@ -839,7 +845,7 @@ describe('operaciones de la mascota', () => {
       qty: 99_999,
       now: T0 + elapsed,
     });
-    expect(out.player!.pet.inventory.ore).toBe(techo);
+    expect(bag0(out.player!.pet).ore).toBe(techo);
   });
 
   it('nunca supera la capacidad de la mochila por mucho tiempo que pase', () => {
@@ -850,7 +856,7 @@ describe('operaciones de la mascota', () => {
       qty: 99_999,
       now: T0 + 3600_000,
     });
-    expect(out.player!.pet.inventory.ore).toBe(cap);
+    expect(bag0(out.player!.pet).ore).toBe(cap);
   });
 
   it('rechaza estaciones que no son de extracción', () => {
@@ -869,23 +875,23 @@ describe('operaciones de la mascota', () => {
   });
 
   it('entregar pasa el material de la mascota al jugador', () => {
-    const p = player({ pet: pet({ inventory: { ore: 6 } }) });
+    const p = player({ pet: pet({ bags: [{ ore: 6 }] }) });
     const out = runOp('petUnload', p, factory(), { now: T0 });
     expect(out.ok).toBe(true);
     expect(out.player!.inventory.ore).toBe(6);
-    expect(out.player!.pet.inventory.ore).toBeUndefined();
+    expect(bag0(out.player!.pet).ore).toBeUndefined();
   });
 
   it('con el inventario lleno se queda el material: no se pierde', () => {
     const p = player();
     const cap = inventoryCapacity(p);
-    const lleno = player({ inventory: { ore: cap }, pet: pet({ inventory: { copper: 5 } }) });
+    const lleno = player({ inventory: { ore: cap }, pet: pet({ bags: [{ copper: 5 }] }) });
     const out = runOp('petUnload', lleno, factory(), { now: T0 });
     expect(out.ok).toBe(false);
     // El estado no cambia: la mascota sigue con sus 5.
     const sigue = runOp('petUnload', lleno, factory(), { now: T0 });
     expect(sigue.ok).toBe(false);
-    expect(lleno.pet.inventory.copper).toBe(5);
+    expect(bag0(lleno.pet).copper).toBe(5);
   });
 
   it('entrega sólo lo que cabe y conserva el resto', () => {
@@ -893,12 +899,12 @@ describe('operaciones de la mascota', () => {
     const cap = inventoryCapacity(p);
     const casi = player({
       inventory: { ore: cap - 2 },
-      pet: pet({ inventory: { copper: 9 } }),
+      pet: pet({ bags: [{ copper: 9 }] }),
     });
     const out = runOp('petUnload', casi, factory(), { now: T0 });
     expect(out.ok).toBe(true);
     expect(out.player!.inventory.copper).toBe(2);
-    expect(out.player!.pet.inventory.copper).toBe(7);
+    expect(bag0(out.player!.pet).copper).toBe(7);
   });
 
   it('sin nada encima no hay nada que entregar', () => {
@@ -906,7 +912,7 @@ describe('operaciones de la mascota', () => {
   });
 
   it('la mascota nunca recibe consumibles, ni en su mochila', () => {
-    const p = player({ pet: pet({ inventory: {} }) });
+    const p = player({ pet: pet({ bags: [{}] }) });
     expect(addToPet(p.pet, 'ore', 5).added).toBe(5);
   });
 });
@@ -915,7 +921,7 @@ describe('operaciones de la mascota', () => {
 
 describe('descarga en cinta o máquina', () => {
   const conCarga = (inv: Record<string, number>, mode: PetState['mode'] = 'gather') =>
-    player({ pet: pet({ inventory: inv, mode }) });
+    player({ pet: pet({ bags: [inv], mode }) });
 
   const nivel = (n: number): FactoryState => ({ ...factory(), level: n });
 
@@ -926,7 +932,7 @@ describe('descarga en cinta o máquina', () => {
       now: T0,
     });
     expect(out.ok).toBe(true);
-    expect(out.player!.pet.inventory.ore).toBeUndefined();
+    expect(bag0(out.player!.pet).ore).toBeUndefined();
     expect(beltCount(out.factory!.belts.c1, 'c1', T0)).toBe(12);
     expect(out.factory!.machines.smelter.input.ore ?? 0).toBe(0);
   });
@@ -937,7 +943,7 @@ describe('descarga en cinta o máquina', () => {
       now: T0,
     });
     expect(out.ok).toBe(true);
-    expect(out.player!.pet.inventory.scrap).toBeUndefined();
+    expect(bag0(out.player!.pet).scrap).toBeUndefined();
     expect(out.factory!.machines.recycler.cycleStartAt).toBeGreaterThan(0);
   });
 
@@ -948,8 +954,8 @@ describe('descarga en cinta o máquina', () => {
       now: T0,
     });
     expect(out.ok).toBe(true);
-    expect(out.player!.pet.inventory.copper).toBe(7);
-    expect(out.player!.pet.inventory.ore).toBeUndefined();
+    expect(bag0(out.player!.pet).copper).toBe(7);
+    expect(bag0(out.player!.pet).ore).toBeUndefined();
   });
 
   it('respeta el filtro de la cinta', () => {
@@ -960,7 +966,7 @@ describe('descarga en cinta o máquina', () => {
       now: T0,
     });
     expect(out.ok).toBe(true);
-    expect(out.player!.pet.inventory.gear).toBe(4);
+    expect(bag0(out.player!.pet).gear).toBe(4);
     expect(beltCount(out.factory!.belts.c6, 'c6', T0)).toBe(3);
   });
 
@@ -1005,5 +1011,81 @@ describe('descarga en cinta o máquina', () => {
         now: T0,
       }).ok,
     ).toBe(false);
+  });
+});
+
+/* ─────────────── CADA PERRO, SU MOCHILA ─────────────── */
+
+/**
+ * La jauría compartía UNA mochila y no había manera de que funcionase: los
+ * tres competían por el mismo hueco, el que llegaba tarde se creía lleno y se
+ * plantaba, y un dron podía llevarse lo que acababa de picar otro perro al
+ * otro lado del mapa. Ahora lo que pica cada uno es suyo.
+ */
+describe('mochilas individuales de la jauría', () => {
+  const conJauria = (bags: Record<string, number>[]) =>
+    player({ pet: pet({ dogs: 3, bags, mode: 'gather' }) });
+
+  it('llenar la de uno no le quita hueco a los demás', () => {
+    const cap = derivePet(pet()).capacity;
+    const p = conJauria([{ ore: cap }, {}, {}]);
+    expect(bagFree(p.pet, 0)).toBe(0);
+    expect(bagFree(p.pet, 1)).toBe(cap);
+    expect(bagFree(p.pet, 2)).toBe(cap);
+    // Y el total de la jauría es la suma de las tres.
+    expect(derivePet(p.pet).packCapacity).toBe(cap * 3);
+  });
+
+  it('lo que pica el perro 2 entra en la mochila del perro 2', () => {
+    const f: FactoryState = { ...factory(), level: 12 };
+    const out = runOp('petMine', conJauria([{}, {}, {}]), f, {
+      stationId: 'vein_copper_a',
+      qty: 4,
+      dog: 1,
+      now: T0 + 60_000,
+    });
+    expect(out.ok).toBe(true);
+    expect(bagUsed(out.player!.pet, 1)).toBeGreaterThan(0);
+    expect(bagUsed(out.player!.pet, 0)).toBe(0);
+    expect(bagUsed(out.player!.pet, 2)).toBe(0);
+  });
+
+  it('lo que descarga el perro 2 sale de SU mochila', () => {
+    const p = conJauria([{ ore: 10 }, { ore: 7 }, {}]);
+    const out = runOp('petDeposit', p, { ...factory(), level: 6 }, {
+      machineId: 'smelter',
+      dog: 1,
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    // El primero no ha soltado nada: no era su viaje.
+    expect(bagUsed(out.player!.pet, 0)).toBe(10);
+    expect(bagUsed(out.player!.pet, 1)).toBe(0);
+    expect(out.factory!.machines.smelter.input.ore).toBe(7);
+  });
+
+  it('al entregarte a ti, vacía la del perro que más lleva', () => {
+    const p = conJauria([{ ore: 2 }, { copper: 9 }, {}]);
+    const out = runOp('petUnload', p, factory(), { now: T0 });
+    expect(out.ok).toBe(true);
+    expect(out.player!.inventory.copper).toBe(9);
+    expect(bagUsed(out.player!.pet, 1)).toBe(0);
+    expect(bagUsed(out.player!.pet, 0)).toBe(2);
+  });
+
+  it('una partida vieja no pierde lo que llevaba la jauría', () => {
+    const migrada = normalizePet(
+      { inventory: { ore: 12, crystal: 1 } } as never,
+      T0,
+    );
+    expect(migrada.bags[0]).toEqual({ ore: 12, crystal: 1 });
+    expect(migrada.bags[1]).toEqual({});
+  });
+
+  it('los perros recogen todo tipo de material, menos consumibles', () => {
+    const p = pet();
+    for (const item of ['ore', 'scrap', 'copper', 'titanium', 'crystal', 'voidOre']) {
+      expect(addToPet(p, item, 3).added, item).toBe(3);
+    }
   });
 });

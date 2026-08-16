@@ -33,9 +33,11 @@ import { RobotBrain } from './systems/robotBrain';
 import { PetBrain, RemotePet } from './systems/petBrain';
 import { drawPet } from './render/pet';
 import {
+  bagUsed,
   derivePet,
   deriveDrones,
   dogTarget,
+  petBag,
   petUsed,
   PET_FLUSH_MS,
 } from '../config/pets';
@@ -784,13 +786,10 @@ export function GameCanvas() {
       /* — jauría: cada perro a lo suyo, y deja el material donde sirve — */
       let petDerived = derivePet(undefined);
       let petStored = 0;
-      let petPending = 0;
-      let petTop: string | null = null;
       if (player && session.phase === 'ready') {
         petDerived = derivePet(player.pet);
+        // Una mochila por perro: lo que lleva cada uno es suyo y sólo suyo.
         petStored = petUsed(player.pet);
-        const packInv = player.pet?.inventory ?? {};
-        petTop = heaviestItem(packInv);
 
         // Un cerebro por perro: se crean y se retiran según la jauría.
         while (pets.length < petDerived.dogs) pets.push(new PetBrain(pets.length));
@@ -814,9 +813,6 @@ export function GameCanvas() {
         let autoSlot = 0;
         // Lo que acaba buscando cada perro, encargado o automático.
         const dogBusca: (string | null)[] = [];
-        // La mochila es común: lo que uno lleva picado sin liquidar le quita
-        // sitio a los demás, así que todos necesitan el total.
-        petPending = pets.reduce((a, p) => a + p.pending, 0);
 
         for (let i = 0; i < pets.length; i++) {
           const dog = pets[i];
@@ -832,7 +828,8 @@ export function GameCanvas() {
            * común. Recorre cintas y máquinas, así que se recalcula sólo al
            * cambiar de material o cada medio segundo.
            */
-          const suyo = busca && (packInv[busca] ?? 0) > 0 ? busca : petTop;
+          const bolsa = petBag(player.pet, i);
+          const suyo = busca && (bolsa[busca] ?? 0) > 0 ? busca : heaviestItem(bolsa);
           if (!suyo || !factory) {
             petDrops[i] = null;
             petDropItem[i] = null;
@@ -847,8 +844,8 @@ export function GameCanvas() {
             ownerX: me.x,
             ownerY: me.y,
             derived: petDerived,
-            storedUnits: petStored,
-            otherPending: petPending - dog.pending,
+            storedUnits: bagUsed(player.pet, i),
+            otherPending: 0,
             mode: modo,
             target: encargo,
             autoTarget: auto,
@@ -866,13 +863,14 @@ export function GameCanvas() {
           if (
             ev.mined &&
             !petBusy[i] &&
-            (nowMs >= (petFlushAt[i] ?? 0) || petStored + petPending >= petDerived.capacity)
+            (nowMs >= (petFlushAt[i] ?? 0) ||
+              bagUsed(player.pet, i) + dog.pending >= petDerived.capacity)
           ) {
             petFlushAt[i] = nowMs + PET_FLUSH_MS;
             petBusy[i] = true;
             const qty = ev.mined.qty;
             void session
-              .op('petMine', { stationId: ev.mined.stationId, qty })
+              .op('petMine', { stationId: ev.mined.stationId, qty, dog: i })
               .then((out) => {
                 // Confirmado o rechazado, deja de contarse como pendiente: el
                 // servidor es quien manda sobre lo que hay en la mochila.
@@ -888,7 +886,7 @@ export function GameCanvas() {
             petBusy[i] = true;
             const bay = ev.deposit;
             void session
-              .op('petDeposit', { machineId: bay.machineId, beltId: bay.beltId })
+              .op('petDeposit', { machineId: bay.machineId, beltId: bay.beltId, dog: i })
               .then((out) => {
                 if (out.ok) {
                   fx.burst(dog.x, dog.y - 12, '#38bdf8', 10, 70, 'spark');
@@ -904,7 +902,7 @@ export function GameCanvas() {
           if (ev.unload && !petBusy[i]) {
             petBusy[i] = true;
             void session
-              .op('petUnload', {})
+              .op('petUnload', { dog: i })
               .then((out) => {
                 if (out.ok) {
                   fx.burst(dog.x, dog.y - 12, '#a78bfa', 10, 70, 'spark');
@@ -959,7 +957,7 @@ export function GameCanvas() {
                 ? {}
                 : sinReservar(player.inventory, 'player', d);
           } else {
-            const libre = sinReservar(packInv, 'pet', d);
+            const libre = sinReservar(petBag(player.pet, i - 1), 'pet', d);
             /*
              * Se lleva lo de SU perro —lo que le hayas encargado, o lo que
              * esté sacando en automático— si hay de eso en la mochila: así se
@@ -993,6 +991,7 @@ export function GameCanvas() {
                 beltId: bay.beltId,
                 items: carga,
                 limit: units,
+                dog: Math.max(0, i - 1),
               })
               .then((out) => {
                 if (out.ok) {
@@ -1116,8 +1115,7 @@ export function GameCanvas() {
         });
       }
       if (player && player.pet?.mode !== 'off') {
-        // Carga de la jauría: confirmada más lo picado sin liquidar.
-        const carried = petStored + Math.floor(petPending);
+
         /*
          * Cada perro se dibuja donde de verdad está: van cada uno a su veta,
          * así que no hay formación calcada. El contador de la mochila lo
@@ -1127,9 +1125,9 @@ export function GameCanvas() {
           const dog = pets[i];
           // Lo que enseña en la espalda: su material encargado si lleva, y
           // si no, lo que más pese de la mochila común.
-          const encargo = dogTarget(player.pet, i);
-          const suyo =
-            encargo && (player.pet?.inventory?.[encargo] ?? 0) > 0 ? encargo : petTop;
+          const bolsa = petBag(player.pet, i);
+          const suyo = heaviestItem(bolsa);
+          const carried = bagUsed(player.pet, i) + Math.floor(dog.pending);
           sortables.push({
             y: dog.y,
             draw: () =>
@@ -1143,7 +1141,7 @@ export function GameCanvas() {
                 chassis: player.pet?.chassis ?? 'spot',
                 color: player.pet?.color ?? '#f2c015',
                 accent: player.pet?.accent ?? '#22d3ee',
-                carried: i === 0 ? carried : 0,
+                carried,
                 capacity: petDerived.capacity,
                 carryIcon: suyo ? itemGlyph(suyo) : null,
                 carryColor: suyo ? getItem(suyo).color : null,

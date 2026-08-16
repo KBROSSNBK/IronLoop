@@ -331,8 +331,16 @@ export interface PetState {
   accent: string;
   /** statId → nivel comprado. */
   stats: Record<string, number>;
-  /** Mochila propia de la mascota: itemId → unidades. */
-  inventory: Record<string, number>;
+  /**
+   * UNA MOCHILA POR PERRO. `bags[i]` es lo que lleva encima el perro `i`.
+   *
+   * Antes era una sola mochila compartida por la jauría y no había forma de
+   * que aquello funcionase bien: los tres perros competían por el mismo hueco,
+   * el que llegaba tarde se creía lleno y se plantaba, y un dron podía
+   * llevarse el titanio que acababa de picar OTRO perro al otro lado del mapa.
+   * Cada uno con la suya: lo que pica es suyo, y su dron le vacía a él.
+   */
+  bags: Record<string, number>[];
   /** Última liquidación de su trabajo (acota cuánto puede reclamar). */
   lastAt: number;
   /** Unidades extraídas en total. */
@@ -370,7 +378,7 @@ export const DEFAULT_PET: PetState = {
   color: '#f2c015',
   accent: '#22d3ee',
   stats: {},
-  inventory: {},
+  bags: [{}],
   lastAt: 0,
   mined: 0,
   mode: 'gather',
@@ -411,7 +419,18 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
     color: raw?.color ?? DEFAULT_PET.color,
     accent: raw?.accent ?? DEFAULT_PET.accent,
     stats: { ...(raw?.stats ?? {}) },
-    inventory: { ...(raw?.inventory ?? {}) },
+    // Partidas viejas guardaban UNA mochila para toda la jauría: se le queda
+    // al primer perro y los demás empiezan vacíos. Nada se pierde.
+    bags: (() => {
+      const legacy = (raw as { inventory?: Record<string, number> } | undefined)?.inventory;
+      const list = Array.isArray(raw?.bags)
+        ? raw.bags.slice(0, PACK.max).map((b) => ({ ...(b ?? {}) }))
+        : legacy
+          ? [{ ...legacy }]
+          : [];
+      while (list.length < PACK.max) list.push({});
+      return list;
+    })(),
     lastAt: raw?.lastAt || now,
     mined: raw?.mined ?? 0,
     mode,
@@ -443,8 +462,10 @@ export interface DerivedPet {
   def: PetChassisDef;
   /** Perros que trabajan a la vez. */
   dogs: number;
-  /** Unidades que caben en su mochila. */
+  /** Unidades que caben en la mochila de CADA perro. */
   capacity: number;
+  /** Suma de todas las mochilas de la jauría. Sólo para enseñarlo. */
+  packCapacity: number;
   /** Unidades por segundo que extrae. */
   minePerSec: number;
   /** Velocidad de desplazamiento en px/s. */
@@ -457,14 +478,17 @@ export function derivePet(pet: PetState | undefined): DerivedPet {
   const p = { ...DEFAULT_PET, ...(pet ?? {}) };
   const def = getChassis(p.chassis);
   const lvl = (id: PetStat) => Math.max(0, Math.floor(p.stats?.[id] ?? 0));
-  // Mochila COMPARTIDA por toda la jauría: cada perro que sumas la agranda.
   const dogs = Math.max(1, Math.min(PACK.max, Math.floor(p.dogs ?? 1)));
+  // Mochila de UN perro. Cada uno lleva la suya, así que la carga total de la
+  // jauría es ésta multiplicada por los perros que tengas.
+  const capacity = Math.round(
+    (PET_BASE.capacity + PET_BASE.capacityPerLevel * lvl('capacity')) * def.bonus.capacity,
+  );
   return {
     def,
     dogs,
-    capacity: Math.round(
-      (PET_BASE.capacity + PET_BASE.capacityPerLevel * lvl('capacity')) * def.bonus.capacity * dogs,
-    ),
+    capacity,
+    packCapacity: capacity * dogs,
     // Ritmo de UN perro. Cada uno pica por su cuenta, así que el caudal
     // total sale de multiplicar por los que tengas.
     minePerSec:
@@ -474,14 +498,32 @@ export function derivePet(pet: PetState | undefined): DerivedPet {
   };
 }
 
-/** Unidades que la mascota lleva encima ahora mismo. */
-export function petUsed(pet: PetState | undefined): number {
-  return Object.values(pet?.inventory ?? {}).reduce((a, b) => a + Math.max(0, b), 0);
+/** Mochila del perro `dog`. Nunca devuelve undefined. */
+export function petBag(pet: PetState | undefined, dog = 0): Record<string, number> {
+  return pet?.bags?.[Math.max(0, Math.floor(dog))] ?? {};
 }
 
-/** Hueco libre en su mochila. */
+/** Unidades que lleva encima UN perro. */
+export function bagUsed(pet: PetState | undefined, dog = 0): number {
+  return Object.values(petBag(pet, dog)).reduce((a, b) => a + Math.max(0, b), 0);
+}
+
+/** Hueco libre en la mochila de UN perro. */
+export function bagFree(pet: PetState | undefined, dog = 0): number {
+  return Math.max(0, derivePet(pet).capacity - bagUsed(pet, dog));
+}
+
+/** Unidades que lleva la jauría entera, sumando todas las mochilas. */
+export function petUsed(pet: PetState | undefined): number {
+  const { dogs } = derivePet(pet);
+  let total = 0;
+  for (let i = 0; i < dogs; i++) total += bagUsed(pet, i);
+  return total;
+}
+
+/** Hueco libre en toda la jauría. */
 export function petFree(pet: PetState | undefined): number {
-  return Math.max(0, derivePet(pet).capacity - petUsed(pet));
+  return Math.max(0, derivePet(pet).packCapacity - petUsed(pet));
 }
 
 /**

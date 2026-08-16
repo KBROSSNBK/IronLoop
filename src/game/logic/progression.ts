@@ -6,6 +6,8 @@
 import {
   BALANCE,
   LEVELUP_TOTAL_MONEY_CAP,
+  MAX_FACTORY_LEVELS_PER_WRITE,
+  MAX_LEVELS_PER_WRITE,
   OFFLINE_MONEY_CAP,
   OFFLINE_XP_CAP,
   SALE_CLAIM_CAP,
@@ -39,18 +41,31 @@ export interface LevelUpResult {
   moneyReward: number;
 }
 
-/** Aplica XP y resuelve todas las subidas de nivel encadenadas. */
+/**
+ * Aplica XP y resuelve todas las subidas de nivel encadenadas.
+ *
+ * CON TECHO DE NIVELES POR ESCRITURA. Las reglas de seguridad rechazan una
+ * escritura que suba el nivel más de 50 de golpe, y una cifra de XP absurda
+ * (un documento manipulado, un cambio de balance) podía subir 300. La
+ * escritura se rechazaría entera y el jugador se quedaría SIN PODER JUGAR:
+ * cada acción reintentaría el mismo salto imposible. Es exactamente lo que ya
+ * pasó una vez con la recompensa de dinero.
+ */
 export function applyXp(level: number, xp: number, gained: number): LevelUpResult {
   let lv = level;
   let cur = xp + gained;
   let gainedLevels = 0;
   let money = 0;
-  let guard = 0;
-  while (cur >= xpForLevel(lv) && guard++ < 500) {
+  while (cur >= xpForLevel(lv) && gainedLevels < MAX_LEVELS_PER_WRITE) {
     cur -= xpForLevel(lv);
     lv += 1;
     gainedLevels += 1;
     money += BALANCE.leveling.moneyPerLevel(lv);
+  }
+  // Al tocar techo, lo que sobra no se arrastra: un resto gigante también
+  // reventaría el límite de XP por escritura.
+  if (gainedLevels >= MAX_LEVELS_PER_WRITE && cur >= xpForLevel(lv)) {
+    cur = Math.max(0, xpForLevel(lv) - 1);
   }
   return {
     level: lv,
@@ -330,6 +345,15 @@ export function factoryProgress(f: Pick<FactoryState, 'level' | 'contribution'>)
 }
 
 /** Aplica contribución a la fábrica resolviendo subidas de nivel encadenadas. */
+/**
+ * Sube el nivel de la fábrica con lo contribuido.
+ *
+ * CON TECHO POR ESCRITURA, igual que el nivel del jugador: las reglas no
+ * admiten que la fábrica suba más de 5 niveles de golpe, y en los primeros
+ * niveles —que son baratísimos— una donación grande se los comía de una
+ * tacada. Lo que sobra NO se pierde: se queda como contribución y sube el
+ * siguiente nivel en la acción siguiente.
+ */
 export function applyFactoryContribution(
   level: number,
   contribution: number,
@@ -338,8 +362,7 @@ export function applyFactoryContribution(
   let lv = level;
   let cur = contribution + points;
   let gained = 0;
-  let guard = 0;
-  while (cur >= getFactoryLevel(lv).xpToNext && guard++ < 200) {
+  while (cur >= getFactoryLevel(lv).xpToNext && gained < MAX_FACTORY_LEVELS_PER_WRITE) {
     cur -= getFactoryLevel(lv).xpToNext;
     lv += 1;
     gained += 1;

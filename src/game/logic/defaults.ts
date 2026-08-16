@@ -41,7 +41,7 @@ export function createPlayerState(user: AuthUser, now = Date.now()): PlayerState
     stamina: BALANCE.player.startingStamina,
     staminaAt: now,
     upgrades: {},
-    pet: { ...DEFAULT_PET, owned: [...DEFAULT_PET.owned], stats: {}, inventory: {}, lastAt: now },
+    pet: { ...DEFAULT_PET, owned: [...DEFAULT_PET.owned], stats: {}, bags: [{}], lastAt: now },
     inventory: {},
     missions: rollMissions(1, [], ACTIVE_MISSION_SLOTS).map((id) => ({
       id,

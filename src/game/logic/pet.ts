@@ -19,7 +19,15 @@ import { MACHINE_LIST, getMachine } from '../../config/machines';
 import { beltAccepts } from './belts';
 import { getItem } from '../../config/items';
 import { machineFrontPoint } from '../world/geometry';
-import { derivePet, petFree, petUsed, type PetState } from '../../config/pets';
+import {
+  bagFree,
+  bagUsed,
+  derivePet,
+  petBag,
+  petFree,
+  petUsed,
+  type PetState,
+} from '../../config/pets';
 
 /** Estaciones de las que una mascota puede sacar material. */
 export const PET_STATIONS: StationDef[] = STATIONS.filter(
@@ -275,15 +283,30 @@ export function addToPet(
   pet: PetState,
   item: string,
   qty: number,
+  dog = 0,
 ): { inventory: Record<string, number>; added: number } {
-  if (!petAccepts(item)) return { inventory: pet.inventory ?? {}, added: 0 };
-  const room = petFree(pet);
+  const bag = petBag(pet, dog);
+  if (!petAccepts(item)) return { inventory: bag, added: 0 };
+  // El tope es el de SU mochila: lo que lleve otro perro no le quita hueco.
+  const room = bagFree(pet, dog);
   const added = Math.max(0, Math.min(Math.floor(qty), room));
-  if (added <= 0) return { inventory: pet.inventory ?? {}, added: 0 };
+  if (added <= 0) return { inventory: bag, added: 0 };
   return {
-    inventory: { ...(pet.inventory ?? {}), [item]: (pet.inventory?.[item] ?? 0) + added },
+    inventory: { ...bag, [item]: (bag[item] ?? 0) + added },
     added,
   };
+}
+
+/** Deja la mochila `dog` con este contenido, sin tocar las demás. */
+export function withBag(
+  pet: PetState,
+  dog: number,
+  bag: Record<string, number>,
+): Record<string, number>[] {
+  const bags = (pet.bags ?? []).map((b) => ({ ...(b ?? {}) }));
+  while (bags.length <= dog) bags.push({});
+  bags[dog] = bag;
+  return bags;
 }
 
 /**
@@ -339,4 +362,4 @@ export function petMineCap(pet: PetState, elapsedMs: number, tolerance: number):
   return Math.floor(minePerSec * dogs * seconds * tolerance) + 1;
 }
 
-export { derivePet, petFree, petUsed };
+export { bagFree, bagUsed, derivePet, petBag, petFree, petUsed };

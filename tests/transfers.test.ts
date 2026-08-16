@@ -17,6 +17,9 @@ import type { FactoryState, PlayerState } from '../src/types';
 
 const T0 = 1_700_000_000_000;
 
+/** Mochila del primer perro: cada uno lleva la suya. */
+const bag0 = (p: { bags?: Record<string, number>[] } | undefined) => p?.bags?.[0] ?? {};
+
 const player = (over: Partial<PlayerState> = {}): PlayerState => ({
   ...createPlayerState({ uid: 'a', displayName: 'A', photoURL: null, email: null }, T0),
   ...over,
@@ -241,7 +244,7 @@ describe('traspaso de los robots', () => {
 
 describe('drones de apoyo', () => {
   const conCarga = (inv: Record<string, number>): PlayerState =>
-    player({ pet: { ...DEFAULT_PET, inventory: inv, lastAt: T0, mode: 'gather' } });
+    player({ pet: { ...DEFAULT_PET, bags: [inv], lastAt: T0, mode: 'gather' } });
 
   const nivel = (n: number): FactoryState => ({ ...createFactoryState('f1', 1, T0), level: n });
 
@@ -253,7 +256,7 @@ describe('drones de apoyo', () => {
       now: T0,
     });
     expect(out.ok).toBe(true);
-    expect(out.player!.pet.inventory.ore).toBe(32);
+    expect(bag0(out.player!.pet).ore).toBe(32);
     expect(beltCount(out.factory!.belts.c1, 'c1', T0 + 10)).toBe(18);
   });
 
@@ -274,7 +277,7 @@ describe('drones de apoyo', () => {
       f = out.factory!;
     }
     expect(entregado).toBe(50);
-    expect(p.pet.inventory.ore).toBeUndefined();
+    expect(bag0(p.pet).ore).toBeUndefined();
     expect(beltCount(f.belts.c1, 'c1', T0 + 1200)).toBe(50);
   });
 
@@ -284,7 +287,7 @@ describe('drones de apoyo', () => {
       beltId: 'c1',
       now: T0,
     });
-    expect(out.player!.pet.inventory.ore).toBeUndefined();
+    expect(bag0(out.player!.pet).ore).toBeUndefined();
     expect(beltCount(out.factory!.belts.c1, 'c1', T0 + 10)).toBe(50);
   });
 
@@ -364,9 +367,11 @@ describe('drones de apoyo', () => {
     const uno = derivePet({ ...DEFAULT_PET, dogs: 1, lastAt: T0 });
     const tres = derivePet({ ...DEFAULT_PET, dogs: 3, lastAt: T0 });
     expect(tres.dogs).toBe(3);
-    // El ritmo derivado es el de UN perro: cada uno pica por su cuenta.
+    // Todo lo derivado es de UN perro: cada uno pica por su cuenta y lleva su
+    // propia mochila. Lo que multiplica la jauría es el total.
     expect(tres.minePerSec).toBeCloseTo(uno.minePerSec, 5);
-    expect(tres.capacity).toBe(uno.capacity * 3);
+    expect(tres.capacity).toBe(uno.capacity);
+    expect(tres.packCapacity).toBe(uno.capacity * 3);
     // Ni por documentos manipulados se pasa del tope.
     expect(derivePet({ ...DEFAULT_PET, dogs: 99, lastAt: T0 }).dogs).toBe(PACK.max);
     expect(derivePet({ ...DEFAULT_PET, dogs: 0, lastAt: T0 }).dogs).toBe(1);
@@ -399,7 +404,7 @@ describe('drones de apoyo', () => {
       qty: 9999,
       now: T0 + 10_000,
     });
-    expect(tres.player!.pet.inventory.ore).toBeGreaterThan(uno.player!.pet.inventory.ore!);
+    expect(bag0(tres.player!.pet).ore).toBeGreaterThan(bag0(uno.player!.pet).ore!);
   });
 
   it('un límite absurdo no crea material de la nada', () => {

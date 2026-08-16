@@ -36,6 +36,20 @@ export const SALE_CLAIM_CAP = 1_000_000;
 export const OFFLINE_MONEY_CAP = 1_000_000;
 export const OFFLINE_XP_CAP = 100_000;
 
+/**
+ * TECHO DE NIVELES POR ESCRITURA.
+ *
+ * Las reglas rechazan una escritura que suba el nivel del jugador más de 50, o
+ * el de la fábrica más de 5. Si una recompensa legítima se pasara, Firestore
+ * tumbaría la escritura entera y el jugador se quedaría SIN PODER JUGAR,
+ * reintentando el mismo salto imposible en cada acción. Ya pasó una vez con el
+ * dinero; estos topes cierran la misma puerta para los niveles.
+ *
+ * Si cambias estos valores, cámbialos también en `firestore.rules`.
+ */
+export const MAX_LEVELS_PER_WRITE = 40;
+export const MAX_FACTORY_LEVELS_PER_WRITE = 4;
+
 export const BALANCE = {
   player: {
     startingMoney: 500,

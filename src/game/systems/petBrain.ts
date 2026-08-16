@@ -251,9 +251,21 @@ export class PetBrain {
     if (this.state === 'DESCARGAR') {
       if (now >= this.unloadUntil) this.state = 'SEGUIR';
     } else if (found) {
-      // Hay veta y hay hueco: la minería siempre tiene prioridad.
+      /*
+       * Hay veta y hay hueco: la minería siempre tiene prioridad.
+       *
+       * La distancia se mide a SU hueco de la veta, no al centro. Cada perro
+       * pica desplazado a un lado para no montarse encima del de al lado, y
+       * medir al centro los dejaba clavados: ya estaban en su sitio —así que
+       * dejaban de andar— pero seguían creyendo que no habían llegado, y no
+       * empezaban a picar nunca.
+       */
       this.station = found.station;
-      this.state = found.dist <= ARRIVE + 6 ? 'MINAR' : 'IR_A_VETA';
+      const mio = Math.hypot(
+        found.point.x + this.lateral - this.x,
+        found.point.y - this.y,
+      );
+      this.state = mio <= ARRIVE + 6 ? 'MINAR' : 'IR_A_VETA';
     } else if (bay) {
       // Llena, o sin veta cerca: el material va a su cinta o máquina.
       this.station = null;
