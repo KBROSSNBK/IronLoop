@@ -2,7 +2,9 @@
  * DRON DE APOYO — cuadricóptero dibujado por capas.
  *
  * Vuela, así que lleva su sombra separada en el suelo: es lo que hace que se
- * lea la altura de un vistazo, sin necesidad de más artificios.
+ * lea la altura de un vistazo, sin necesidad de más artificios. El chasis se
+ * inclina hacia donde tira y las hélices se difuminan con el giro, que es lo
+ * que separa un dron de un icono moviéndose por la pantalla.
  */
 
 import { DRONE_ALTITUDE, type DroneStateName } from '../systems/droneBrain';
@@ -16,6 +18,8 @@ export interface DroneDrawArgs {
   facing: number;
   /** Balanceo vertical. */
   bob: number;
+  /** Inclinación del chasis, en radianes. */
+  tilt?: number;
   t: number;
   state: DroneStateName;
   color: string;
@@ -23,6 +27,7 @@ export interface DroneDrawArgs {
   /** Unidades colgando y su icono. */
   load: number;
   loadIcon?: string | null;
+  loadColor?: string | null;
   alpha?: number;
 }
 
@@ -52,92 +57,142 @@ const LED: Record<DroneStateName, string> = {
   SOLTANDO: '#a78bfa',
 };
 
+/** Posiciones de los cuatro rotores, en el sistema local del chasis. */
+const ROTORES: [number, number][] = [
+  [-11, -4.5],
+  [11, -4.5],
+  [-11, 4.5],
+  [11, 4.5],
+];
+
 export function drawDrone(ctx: CanvasRenderingContext2D, a: DroneDrawArgs): void {
   const y = a.y + a.bob;
   const suelo = a.y + DRONE_ALTITUDE;
+  const alpha = a.alpha ?? 1;
+  const tilt = a.tilt ?? 0;
 
   ctx.save();
-  ctx.globalAlpha = a.alpha ?? 1;
+  ctx.globalAlpha = alpha;
 
-  // Sombra en el suelo, pequeña y difusa: está alto.
-  ctx.fillStyle = 'rgba(0,0,0,0.26)';
+  /* — sombra: se encoge y se aclara con la altura — */
+  ctx.fillStyle = 'rgba(0,0,0,0.24)';
   ctx.beginPath();
-  ctx.ellipse(a.x, suelo, 9, 3, 0, 0, TAU);
+  ctx.ellipse(a.x, suelo, 9.5, 3.2, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  ctx.beginPath();
+  ctx.ellipse(a.x, suelo, 14, 4.6, 0, 0, TAU);
   ctx.fill();
 
-  // Brazos y hélices
-  const spin = a.t * 40;
-  for (let i = 0; i < 4; i++) {
-    const dx = i % 2 === 0 ? -11 : 11;
-    const dy = i < 2 ? -4 : 4;
-    ctx.strokeStyle = '#475569';
-    ctx.lineWidth = 2;
+  /* — todo el chasis gira con la inclinación — */
+  ctx.save();
+  ctx.translate(a.x, y);
+  ctx.rotate(tilt);
+
+  const spin = a.t * 46;
+  for (let i = 0; i < ROTORES.length; i++) {
+    const [dx, dy] = ROTORES[i];
+
+    // Brazo con reborde: se lee incluso sobre suelo claro.
+    ctx.strokeStyle = 'rgba(8,12,20,0.75)';
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(a.x, y);
-    ctx.lineTo(a.x + dx, y + dy);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(dx * 0.92, dy * 0.92);
+    ctx.stroke();
+    ctx.strokeStyle = '#64748b';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(dx * 0.92, dy * 0.92);
     ctx.stroke();
 
-    // Disco de la hélice: girando muy rápido se ve como un borrón.
-    ctx.save();
-    ctx.globalAlpha *= 0.5;
-    ctx.strokeStyle = a.accent;
-    ctx.lineWidth = 1.4;
+    // Góndola del motor.
+    ctx.fillStyle = '#334155';
     ctx.beginPath();
-    ctx.ellipse(a.x + dx, y + dy, 6.5, 2 + Math.sin(spin + i) * 0.6, 0, 0, TAU);
+    ctx.ellipse(dx, dy, 2.6, 2, 0, 0, TAU);
+    ctx.fill();
+
+    // Disco de la hélice: dos aros desfasados dan la sensación de borrón.
+    const fase = spin + i * 1.7;
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.42;
+    ctx.strokeStyle = a.accent;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(dx, dy, 6.8, 2.1 + Math.sin(fase) * 0.5, 0, 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = alpha * 0.2;
+    ctx.beginPath();
+    ctx.ellipse(dx, dy, 5.2, 1.5 + Math.cos(fase * 0.8) * 0.4, 0, 0, TAU);
     ctx.stroke();
     ctx.restore();
   }
 
-  // Cuerpo
-  ctx.fillStyle = a.color;
-  roundRect(ctx, a.x - 8, y - 5, 16, 10, 3);
+  /* — cuerpo — */
+  const grad = ctx.createLinearGradient(0, -6, 0, 6);
+  grad.addColorStop(0, a.color);
+  grad.addColorStop(1, 'rgba(8,12,22,0.85)');
+  ctx.fillStyle = grad;
+  roundRect(ctx, -8.5, -5.5, 17, 11, 3.5);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(4,8,16,0.55)';
+  ctx.strokeStyle = 'rgba(4,8,16,0.65)';
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Óptica frontal
+  // Franja de color del dueño, para distinguir escuadrillas de un vistazo.
+  ctx.fillStyle = a.accent;
+  ctx.globalAlpha = alpha * 0.85;
+  roundRect(ctx, -8.5, -1.2, 17, 2.2, 1);
+  ctx.fill();
+  ctx.globalAlpha = alpha;
+
+  // Óptica frontal con destello.
+  const fx = a.facing * 5.2;
   ctx.fillStyle = '#0b1120';
   ctx.beginPath();
-  ctx.arc(a.x + a.facing * 5, y + 1, 2.6, 0, TAU);
+  ctx.arc(fx, 1, 2.8, 0, TAU);
   ctx.fill();
   ctx.fillStyle = a.accent;
-  ctx.globalAlpha = (a.alpha ?? 1) * (0.55 + Math.sin(a.t * 5) * 0.35);
+  ctx.globalAlpha = alpha * (0.55 + Math.sin(a.t * 5) * 0.35);
   ctx.beginPath();
-  ctx.arc(a.x + a.facing * 5, y + 1, 1.3, 0, TAU);
+  ctx.arc(fx, 1, 1.4, 0, TAU);
   ctx.fill();
-  ctx.globalAlpha = a.alpha ?? 1;
+  ctx.globalAlpha = alpha;
 
-  // LED de estado
+  // LED de estado, atrás.
   ctx.fillStyle = LED[a.state] ?? '#4ade80';
   ctx.beginPath();
-  ctx.arc(a.x - a.facing * 5, y - 3, 1.6, 0, TAU);
+  ctx.arc(-a.facing * 5.4, -3.2, 1.7, 0, TAU);
   ctx.fill();
 
-  // Carga colgando de un cable
+  ctx.restore(); // fin de la inclinación
+
+  /* — carga colgando: cuelga en vertical aunque el chasis se incline — */
   if (a.load > 0) {
-    ctx.strokeStyle = 'rgba(148,163,184,0.7)';
+    const cuelga = Math.sin(a.t * 3.1) * 1.6;
+    ctx.strokeStyle = 'rgba(148,163,184,0.65)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(a.x, y + 5);
-    ctx.lineTo(a.x, y + 11);
+    ctx.lineTo(a.x + cuelga * 0.4, y + 12);
     ctx.stroke();
 
-    ctx.fillStyle = '#b45309';
-    roundRect(ctx, a.x - 6, y + 11, 12, 8, 2);
+    const cx = a.x + cuelga * 0.4;
+    const cy = y + 12;
+    ctx.fillStyle = 'rgba(8,12,22,0.9)';
+    roundRect(ctx, cx - 8.5, cy, 17, 10, 2.5);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(2,6,23,0.7)';
+    ctx.strokeStyle = a.loadColor ?? '#94a3b8';
+    ctx.lineWidth = 1.2;
     ctx.stroke();
 
-    ctx.font = '800 9px "Rajdhani", system-ui, sans-serif';
+    ctx.font = '700 9px "Rajdhani", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(2,6,23,0.9)';
-    const txt = `${a.loadIcon ?? ''}${a.load}`;
-    ctx.strokeText(txt, a.x, y + 24);
     ctx.fillStyle = '#e2e8f0';
-    ctx.fillText(txt, a.x, y + 24);
+    ctx.fillText(`${a.loadIcon ?? '📦'}${a.load}`, cx, cy + 5.4);
   }
 
   ctx.restore();

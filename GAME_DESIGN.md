@@ -76,14 +76,52 @@ cintas delante de ti, no.
 | Yacimiento | — | 1× Mineral | 0,9 s (jugador) | nivel 1 |
 | Fundidora MK-I | 2× Mineral | 1× Lingote | 4,2 s | nivel 1 |
 | Ensambladora A-7 | 2× Lingote | 1× Engranaje | 7,0 s | nivel 3 |
+| Recicladora R-3 | 4× Chatarra | 1× Lingote | 5,0 s | nivel 4 |
+| Fundición de Aleaciones | 2× Cobre + 1× Lingote | 1× Aleación | 9,0 s | nivel 5 |
 | Laboratorio Q | 2× Engranaje + 1× Cristal | 1× Circuito | 12,0 s | nivel 6 |
+| Planta de Baterías | 1× Circuito + 2× Cobre | 1× Batería | 14,0 s | nivel 7 |
+| Reactor de Núcleos | 2× Aleación + 1× Batería + 2× Titanio | 1× Núcleo | 22,0 s | nivel 10 |
+| Cámara de Singularidad | 1× Núcleo + 2× Circuito + 2× Aleación | 1× Célula de Singularidad | 34,0 s | nivel 12 |
 
-Precios de venta: Mineral $4 · Chatarra $2 · Lingote $18 · Engranaje $58 ·
-Cristal $95 · Circuito $190.
+Y en el otro planeta, con material que aquí no existe:
 
-El margen crece con la profundidad de la cadena: 2 minerales ($8) → 1 lingote
-($18) → 2 lingotes ($36) → 1 engranaje ($58). Refinar siempre gana, pero exige
-más tiempo de máquina, que es el recurso realmente escaso.
+| Paso | Entrada | Salida | Ciclo base | Desbloqueo |
+|---|---|---|---|---|
+| Refinería de Vacío | 2× Mineral de Vacío + 1× Gas Estelar | 1× Aleación de Vacío | 11,0 s | nivel 15 |
+| Forja Estelar | 3× Aleación de Vacío | 1× Célula Estelar | 26,0 s | nivel 16 |
+
+Precios de venta: Chatarra $2 · Mineral $4 · Cobre $9 · Titanio $42 ·
+Cristal $95 · Lingote $26 · Engranaje $140 · Aleación $155 · Circuito $900 ·
+Batería $2.100 · Núcleo $6.500 · Célula de Singularidad $24.000.
+Del planeta: Mineral de Vacío $70 · Gas Estelar $110 · Aleación de Vacío $700 ·
+Célula Estelar $4.800.
+
+**Regla de precios: un producto vale ~2,5× la suma de lo que consume.** No es
+un capricho: con los números viejos salía más a cuenta vender el diamante en
+bruto que fabricar con él, y entonces media fábrica sobraba. Refinar tiene que
+ganar SIEMPRE, y por goleada; lo que se paga a cambio es tiempo de máquina,
+que es el recurso de verdad escaso.
+
+**Techo por venta.** Con la mochila mejorable sin tope y los productos finales
+valiendo miles, un cargamento entero podía superar el máximo de dinero que
+admiten las reglas de seguridad en una escritura — y eso deja la partida
+bloqueada rechazando acciones. `computeSale` corta la venta en `SALE_CLAIM_CAP`
+y lo que no cabe se queda en la mochila.
+
+### La expedición al otro planeta
+
+Al sur del mapa, separado por una franja de vacío que no se cruza a pie, hay un
+segundo mundo. Se llega por la **plataforma de despegue** de la Zona Avanzada
+(fábrica nivel 15) y allí hay dos materiales que en la estación no existen.
+
+Lo que se refina allí no se trae a mano: lo carga la **Lanzadera** y se vende
+en la estación, repartiendo el dinero entre toda la tripulación conectada, como
+cualquier robot en modo vender. Es la traducción literal del pilar —la fábrica
+es de todos— a una zona en la que puede no haber nadie mirando.
+
+Los dos mundos no se mezclan: una mascota de la estación no ve las vetas del
+planeta y un dron no lleva material a una máquina del otro lado. Sin esa regla
+se quedaban empujando contra el vacío para siempre.
 
 ### Fuentes de contribución a la fábrica
 
@@ -182,7 +220,22 @@ entienda mirándola dos segundos:
 
 El destino se deriva de las recetas, no de una tabla escrita a mano: añadir una
 máquina que consuma titanio hace que la mascota empiece a llevárselo sola.
-No toca consumibles: no le hacen falta.
+Puede sacar exactamente lo mismo que tú; lo único que no toca son consumibles,
+porque no le hacen falta.
+
+**La jauría: hasta tres perros, cada uno a su mineral.** Comparten mochila
+—una sola, más grande por cada perro— pero cada uno tiene su encargo, su veta y
+su ruta. Ahí está la gracia: uno al cobre, otro al titanio del filón inestable
+(donde una persona no puede entrar) y otro a la chatarra, alimentando tres
+ramas de la cadena a la vez sin que muevas un dedo.
+
+**Los drones van en dúo: uno por perro y uno para ti.** No extraen; quitan la
+carga *donde estés* y la reparten por las cintas y máquinas. Cada viaje se
+lleva **de todo lo que haya, al menos una unidad de cada material**, y hace
+tantas paradas como haga falta: sin esa regla, un diamante suelto entre
+trescientas piedras no salía nunca de la mochila. Su nivel sube carga y
+velocidad, y en cuanto te hacen hueco la extracción automática **se reanuda
+sola**, sin volver a pulsar nada.
 
 Su extracción se simula en cliente y se liquida por tandas contra el servidor,
 acotada por el ritmo real de la mascota: automatiza el paseo, no la progresión

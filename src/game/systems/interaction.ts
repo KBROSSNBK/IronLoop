@@ -6,6 +6,7 @@
 
 import { getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
+import { TILE, isOffworld } from '../../config/world';
 import type { FactoryState, PlayerState } from '../../types';
 import type { Interactable } from '../world/geometry';
 import { inputRoom, settleMachine } from '../logic/production';
@@ -16,6 +17,7 @@ export type ActionKind =
   | 'deposit'
   | 'collect'
   | 'sell'
+  | 'teleport'
   | 'openFactory'
   | 'openUpgrades'
   | 'openMachine';
@@ -106,6 +108,24 @@ export function resolveActions(ctx: ActionContext): ActionOption[] {
           holdable: false,
         });
         break;
+      case 'teleport': {
+        // La nave a la expedición. No cuesta nada usarla: lo que cuesta es
+        // llegar al nivel de fábrica que la pone en marcha.
+        const need = s.fromLevel ?? 1;
+        const locked = factory.level < need;
+        const vuelta = isOffworld(s.ty * TILE);
+        options.push({
+          kind: 'teleport',
+          targetId: s.id,
+          label: vuelta ? 'VOLVER A LA ESTACIÓN' : 'DESPEGAR',
+          sub: vuelta ? 'Estación principal' : 'Planeta exterior',
+          icon: vuelta ? '🛰️' : '🚀',
+          color: s.accent,
+          holdable: false,
+          disabled: locked ? `Requiere fábrica nivel ${need}` : undefined,
+        });
+        break;
+      }
     }
     return options;
   }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { settleFactory, settleRobots, robotStatuses } from '../src/game/logic/robots';
-import { beltCount, beltTravelMs, getBelt } from '../src/game/logic/belts';
+import {
+  BELT_ITEM_GAP_MS,
+  beltCount,
+  beltTravelMs,
+  getBelt,
+} from '../src/game/logic/belts';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { runOp } from '../src/services/backend/ops';
 import { ROBOTS, robotCarry, robotCost, robotRate, robotTripMs } from '../src/config/robots';
@@ -23,7 +28,12 @@ const enCinta = (f: FactoryState, now: number) => beltCount(f.belts?.[BELT], BEL
 
 /** Adelanta hasta que la cinta ha terminado de entregar. */
 const trasLaCinta = (f: FactoryState, now: number) =>
-  settleFactory(f, now + beltTravelMs(getBelt(BELT)!) + 500);
+  settleFactory(
+    f,
+    // Los bultos entran en la máquina de uno en uno, tal como se ven llegar:
+    // hay que dejar pasar la hilera entera para tenerlos todos dentro.
+    now + beltTravelMs(getBelt(BELT)!) + 200 * BELT_ITEM_GAP_MS + 500,
+  );
 
 function factoryWithRobot(level = 1, opts: Partial<FactoryState> = {}): FactoryState {
   const f = createFactoryState('f1', 1, T0);
@@ -57,9 +67,11 @@ describe('robots logísticos', () => {
     const oneMinute = T0 + 60_000;
     const { factory } = settleRobots(factoryWithRobot(), oneMinute);
     const llegada = trasLaCinta(factory, oneMinute);
-    expect(
-      llegada.deliveries.some((d) => d.beltId === BELT && d.qty === robotRate(HAULER, 1)),
-    ).toBe(true);
+    // Entra bulto a bulto, así que se suma todo lo entregado por esa cinta.
+    const entregado = llegada.deliveries
+      .filter((d) => d.beltId === BELT)
+      .reduce((a, d) => a + d.qty, 0);
+    expect(entregado).toBe(robotRate(HAULER, 1));
   });
 
   it('nunca mueven más de lo que hay disponible', () => {

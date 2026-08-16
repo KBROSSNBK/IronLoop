@@ -8,6 +8,7 @@ import {
   LEVELUP_TOTAL_MONEY_CAP,
   OFFLINE_MONEY_CAP,
   OFFLINE_XP_CAP,
+  SALE_CLAIM_CAP,
   deriveStats,
 } from '../../config/balance';
 import { getItem } from '../../config/items';
@@ -147,22 +148,52 @@ export function computeSale(
   inventory: Record<string, number>,
   items: Record<string, number>,
   upgrades: Record<string, number>,
+  /**
+   * Techo de dinero de UNA venta. Las reglas de seguridad rechazan cualquier
+   * escritura que suba el dinero más de `MAX_MONEY_PER_WRITE`, y con la
+   * mochila mejorable sin tope y los productos finales valiendo miles, un
+   * cargamento entero podía pasarse y dejar la partida bloqueada. Lo que no
+   * cabe simplemente no se vende: se queda en la mochila.
+   */
+  moneyCap = SALE_CLAIM_CAP,
 ): SaleResult {
   const mult = deriveStats(upgrades).sellMultiplier;
   const breakdown: SaleResult['breakdown'] = [];
   let money = 0;
   let units = 0;
-  for (const [id, qtyRaw] of Object.entries(items)) {
-    const qty = Math.min(qtyRaw, inventory[id] ?? 0);
+  // Lo barato primero: así el techo sólo recorta las piezas gordas y nunca
+  // deja al jugador con la mochila llena de chatarra sin vender.
+  const lineas = Object.entries(items).sort(
+    (a, b) => precio(a[0]) - precio(b[0]),
+  );
+  for (const [id, qtyRaw] of lineas) {
+    let qty = Math.min(qtyRaw, inventory[id] ?? 0);
     if (qty <= 0) continue;
-    const def = getItem(id);
-    if (def.sellPrice <= 0) continue;
+    const def = itemOrNull(id);
+    if (!def || def.sellPrice <= 0) continue;
+    const unidad = Math.max(1, Math.round(def.sellPrice * mult));
+    const caben = Math.floor((moneyCap - money) / unidad);
+    if (caben <= 0) continue;
+    qty = Math.min(qty, caben);
     const value = Math.round(def.sellPrice * qty * mult);
     money += value;
     units += qty;
     breakdown.push({ item: id, qty, value });
   }
   return { money, xp: Math.round(units * 3 + money * 0.05), units, breakdown };
+}
+
+/** Material del catálogo, o null si el documento trae uno desconocido. */
+function itemOrNull(id: string): ReturnType<typeof getItem> | null {
+  try {
+    return getItem(id);
+  } catch {
+    return null;
+  }
+}
+
+function precio(id: string): number {
+  return itemOrNull(id)?.sellPrice ?? 0;
 }
 
 /** Todo lo vendible que lleva encima el jugador. */

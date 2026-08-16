@@ -239,7 +239,7 @@ describe('cargar y retirar exige estar junto a la máquina', () => {
 
     // Una máquina entra sin problema.
     let m = { ...fuera };
-    for (let i = 0; i < 200; i++) m = moveWithCollision(m.x, m.y, 0, 12);
+    for (let i = 0; i < 20; i++) m = moveWithCollision(m.x, m.y, 0, 12);
     expect(isHumanForbidden(m.x, m.y)).toBe(true);
   });
 

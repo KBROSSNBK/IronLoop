@@ -6,7 +6,7 @@
 
 import { MACHINE_LIST, MACHINE_UPGRADE, type MachineDef } from '../../config/machines';
 import { TILE } from '../../config/world';
-import { getItem } from '../../config/items';
+import { getItem, itemGlyph } from '../../config/items';
 import { ROBOTS } from '../../config/robots';
 import type { FactoryState, MachineState } from '../../types';
 import {settleMachine, type SettleResult } from '../logic/production';
@@ -142,6 +142,30 @@ export function drawMachine(
     roundRect(ctx, coreX - 12, coreY - 5 * squash, 24, 10 * squash, 2);
     ctx.fill();
     ctx.globalAlpha = 1;
+  } else if (def.kind === 'fusion') {
+    /*
+     * Cámara de Singularidad: tres anillos que se cierran sobre un punto
+     * blanco y un destello que late. Es la última máquina de la cadena, así
+     * que se nota que ahí dentro pasa algo distinto.
+     */
+    for (let i = 0; i < 3; i++) {
+      const cierre = running ? (time * 0.9 + i * 0.33) % 1 : 0.5;
+      const r = 24 * (1 - cierre) + 3;
+      ctx.strokeStyle = hexA(i === 1 ? '#ffffff' : def.accent, running ? 0.85 - cierre * 0.6 : 0.22);
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.ellipse(coreX, coreY, r, r * 0.55, time * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    const nucleo = running ? 3 + Math.sin(time * 12) * 1.6 : 2;
+    const gg = ctx.createRadialGradient(coreX, coreY, 0, coreX, coreY, nucleo * 4);
+    gg.addColorStop(0, hexA('#ffffff', running ? 1 : 0.4));
+    gg.addColorStop(0.4, hexA(def.accent, running ? 0.8 : 0.25));
+    gg.addColorStop(1, hexA(def.accent, 0));
+    ctx.fillStyle = gg;
+    ctx.beginPath();
+    ctx.arc(coreX, coreY, nucleo * 4, 0, Math.PI * 2);
+    ctx.fill();
   } else {
     // Laboratorio: partículas orbitando
     ctx.strokeStyle = hexA(def.accent, running ? 0.9 : 0.3);
@@ -254,7 +278,7 @@ function drawRecipeLine(
   if (ins.length === 0 || outs.length === 0) return;
 
   const part = (list: [string, number | undefined][]) =>
-    list.map(([id, n]) => `${n ?? 1}×${getItem(id).icon}`).join(' + ');
+    list.map(([id, n]) => `${n ?? 1}×${itemGlyph(id)}`).join(' + ');
   const text = `${part(ins)} = ${part(outs)}`;
 
   ctx.save();
@@ -304,7 +328,7 @@ function drawIngredients(
   for (const [id, need] of ins) {
     const have = live.input[id] ?? 0;
     const ok = have >= (need ?? 1);
-    chip(ctx, cx, y, chipW, getItem(id).icon, `${have}/${need}`, ok ? '#4ade80' : '#f87171', ok);
+    chip(ctx, cx, y, chipW, itemGlyph(id), `${have}/${need}`, ok ? '#4ade80' : '#f87171', ok);
     cx += chipW + gap;
   }
 
@@ -316,7 +340,7 @@ function drawIngredients(
 
   for (const [id] of outs) {
     const have = live.output[id] ?? 0;
-    chip(ctx, cx, y, chipW, getItem(id).icon, String(have), '#38bdf8', have > 0);
+    chip(ctx, cx, y, chipW, itemGlyph(id), String(have), '#38bdf8', have > 0);
     cx += chipW + gap;
   }
   ctx.restore();

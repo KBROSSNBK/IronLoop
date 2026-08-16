@@ -267,8 +267,13 @@ export const DRONE = {
   /** Segundos enganchado al perro y descargando. */
   loadMs: 450,
   dropMs: 400,
-  /** Máximo de drones por jugador: uno por perro más tu escolta. */
-  max: 6,
+  /**
+   * Máximo absoluto: uno por perro de la jauría más el tuyo.
+   *
+   * Es un DÚO: cada perro tiene su dron y tú el tuyo, ni uno más. Así se ve
+   * de un vistazo quién trabaja con quién en vez de tener un enjambre suelto.
+   */
+  max: PACK.max + 1,
   /** Coste del primer dron y crecimiento por cada uno más. */
   baseCost: 18_000,
   costGrowth: 2.15,
@@ -294,8 +299,19 @@ export interface DerivedDrone {
   speed: number;
 }
 
+/** Material encargado a un perro concreto de la jauría. */
+export function dogTarget(pet: PetState | undefined, index: number): string | null {
+  return pet?.targets?.[index] ?? null;
+}
+
+/** Drones que caben con la jauría que tienes: uno por perro, más el tuyo. */
+export function droneSlots(pet: PetState | undefined): number {
+  const dogs = Math.max(1, Math.min(PACK.max, Math.floor(pet?.dogs ?? 1)));
+  return Math.min(DRONE.max, dogs + 1);
+}
+
 export function deriveDrones(pet: PetState | undefined): DerivedDrone {
-  const count = Math.max(0, Math.min(DRONE.max, Math.floor(pet?.drones ?? 0)));
+  const count = Math.max(0, Math.min(droneSlots(pet), Math.floor(pet?.drones ?? 0)));
   const level = Math.max(1, Math.floor(pet?.droneLevel ?? 1));
   return {
     count,
@@ -324,13 +340,14 @@ export interface PetState {
   /** Qué le has mandado hacer. */
   mode: PetMode;
   /**
-   * Material que le has encargado (id de item). `null` = automático: lo que
-   * pille más cerca dentro del radio de su sensor.
+   * Material encargado A CADA PERRO (id de item), por índice de la jauría.
+   * `null` = automático: lo que pille más cerca dentro de su radio.
    *
    * Se elige el MINERAL y no la zona: lo que importa es qué te falta para la
-   * cadena, no en qué esquina del mapa está. Ella ya busca la veta.
+   * cadena, no en qué esquina del mapa está. Cada perro va a lo suyo, así que
+   * puedes tener uno en el cobre, otro en el titanio y otro en la chatarra.
    */
-  target: string | null;
+  targets: (string | null)[];
   /** Drones de apoyo comprados. */
   drones: number;
   /** Perros de la jauría (1..PACK.max). */
@@ -357,7 +374,7 @@ export const DEFAULT_PET: PetState = {
   lastAt: 0,
   mined: 0,
   mode: 'gather',
-  target: null,
+  targets: [],
   dogs: 1,
   drones: 0,
   droneLevel: 1,
@@ -398,13 +415,23 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
     lastAt: raw?.lastAt || now,
     mined: raw?.mined ?? 0,
     mode,
-    // Partidas viejas guardaban una ZONA; se traduce al material que daba.
-    target:
-      typeof raw?.target === 'string'
-        ? raw.target
-        : typeof (raw as { zone?: string } | undefined)?.zone === 'string'
-          ? LEGACY_ZONE_ITEM[(raw as { zone: string }).zone] ?? null
-          : null,
+    // Partidas viejas guardaban UNA zona o UN material para toda la jauría;
+    // se traduce al primer perro y los demás quedan en automático.
+    targets: (() => {
+      const viejo = raw as { target?: string; zone?: string } | undefined;
+      if (Array.isArray(raw?.targets)) {
+        return raw.targets
+          .slice(0, PACK.max)
+          .map((t) => (typeof t === 'string' ? t : null));
+      }
+      const uno =
+        typeof viejo?.target === 'string'
+          ? viejo.target
+          : typeof viejo?.zone === 'string'
+            ? (LEGACY_ZONE_ITEM[viejo.zone] ?? null)
+            : null;
+      return uno ? [uno] : [];
+    })(),
     drones: Math.max(0, Math.min(DRONE.max, Math.floor(raw?.drones ?? 0))),
     dogs: Math.max(1, Math.min(PACK.max, Math.floor(raw?.dogs ?? 1))),
     droneLevel: Math.max(1, Math.floor(raw?.droneLevel ?? 1)),
@@ -430,7 +457,7 @@ export function derivePet(pet: PetState | undefined): DerivedPet {
   const p = { ...DEFAULT_PET, ...(pet ?? {}) };
   const def = getChassis(p.chassis);
   const lvl = (id: PetStat) => Math.max(0, Math.floor(p.stats?.[id] ?? 0));
-  // La jauría trabaja junta: más perros = más ritmo y más mochila.
+  // Mochila COMPARTIDA por toda la jauría: cada perro que sumas la agranda.
   const dogs = Math.max(1, Math.min(PACK.max, Math.floor(p.dogs ?? 1)));
   return {
     def,
@@ -438,8 +465,10 @@ export function derivePet(pet: PetState | undefined): DerivedPet {
     capacity: Math.round(
       (PET_BASE.capacity + PET_BASE.capacityPerLevel * lvl('capacity')) * def.bonus.capacity * dogs,
     ),
+    // Ritmo de UN perro. Cada uno pica por su cuenta, así que el caudal
+    // total sale de multiplicar por los que tengas.
     minePerSec:
-      (PET_BASE.mining + PET_BASE.miningPerLevel * lvl('mining')) * def.bonus.mining * dogs,
+      (PET_BASE.mining + PET_BASE.miningPerLevel * lvl('mining')) * def.bonus.mining,
     speed: Math.round((PET_BASE.speed + PET_BASE.speedPerLevel * lvl('speed')) * def.bonus.speed),
     radius: PET_BASE.radius + PET_BASE.radiusPerLevel * lvl('radius'),
   };

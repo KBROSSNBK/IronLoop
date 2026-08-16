@@ -48,6 +48,18 @@ export class Camera {
     }
   }
 
+  /**
+   * Salto instantáneo. Lo usa el teletransporte: sin esto la cámara viajaría
+   * suavemente por el vacío hasta el otro planeta, que dura un mundo y no se
+   * entiende nada por el camino.
+   */
+  snapTo(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+    this.offsetX = 0;
+    this.offsetY = 0;
+  }
+
   shake(power: number): void {
     this.shakePower = Math.max(this.shakePower, power);
     this.shakeTime = 0.4;

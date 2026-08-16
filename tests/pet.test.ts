@@ -5,6 +5,7 @@ import {
   PET_CHASSIS,
   PET_RATE_TOLERANCE,
   derivePet,
+  dogTarget,
   getChassis,
   normalizePet,
   petFree,
@@ -33,7 +34,7 @@ import { PetBrain } from '../src/game/systems/petBrain';
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { inventoryCapacity } from '../src/game/logic/progression';
-import { STATIONS } from '../src/config/world';
+import { STATIONS, isOffworld } from '../src/config/world';
 import type { FactoryState, PlayerState } from '../src/types';
 
 const T0 = 1_700_000_000_000;
@@ -228,6 +229,7 @@ describe('material encargado a la mascota', () => {
       ownerY: start.y,
       derived,
       storedUnits: 0,
+      otherPending: 0,
       mode: 'gather',
       target: 'copper',
       hasDrones: false,
@@ -243,10 +245,67 @@ describe('material encargado a la mascota', () => {
     const f: FactoryState = { ...factory(), level: 14 };
     const asignado = runOp('setPetLook', player(), f, { target: 'copper', now: T0 });
     expect(asignado.ok).toBe(true);
-    expect(asignado.player!.pet.target).toBe('copper');
+    expect(dogTarget(asignado.player!.pet, 0)).toBe('copper');
 
     const auto = runOp('setPetLook', asignado.player!, f, { target: null, now: T0 });
-    expect(auto.player!.pet.target).toBeNull();
+    expect(dogTarget(auto.player!.pet, 0)).toBeNull();
+  });
+
+  /*
+   * CADA PERRO A LO SUYO. Es lo que hace útil tener jauría: uno al cobre,
+   * otro al titanio y otro a la chatarra, sin pisarse.
+   */
+  it('cada perro puede ir a un mineral distinto', () => {
+    const f: FactoryState = { ...factory(), level: 14 };
+    let p = { ...player(), pet: { ...player().pet, dogs: 3 } };
+
+    p = runOp('setPetLook', p, f, { dog: 0, target: 'copper', now: T0 }).player!;
+    p = runOp('setPetLook', p, f, { dog: 1, target: 'titanium', now: T0 }).player!;
+    p = runOp('setPetLook', p, f, { dog: 2, target: 'scrap', now: T0 }).player!;
+
+    expect(dogTarget(p.pet, 0)).toBe('copper');
+    expect(dogTarget(p.pet, 1)).toBe('titanium');
+    expect(dogTarget(p.pet, 2)).toBe('scrap');
+
+    // Y volver uno solo a automático no toca a los demás.
+    p = runOp('setPetLook', p, f, { dog: 1, target: null, now: T0 }).player!;
+    expect(dogTarget(p.pet, 0)).toBe('copper');
+    expect(dogTarget(p.pet, 1)).toBeNull();
+    expect(dogTarget(p.pet, 2)).toBe('scrap');
+  });
+
+  it('no se le puede dar orden a un perro que no tienes', () => {
+    const f: FactoryState = { ...factory(), level: 14 };
+    const out = runOp('setPetLook', player(), f, { dog: 2, target: 'copper', now: T0 });
+    expect(out.ok).toBe(false);
+  });
+
+  it('dos perros con encargos distintos van a vetas distintas', () => {
+    const derived = derivePet(pet());
+    const uno = new PetBrain(0);
+    const dos = new PetBrain(1);
+    const start = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_a')!);
+    for (const b of [uno, dos]) {
+      b.reset(start.x, start.y);
+      b.x = start.x;
+      b.y = start.y;
+    }
+    const base = {
+      dt: 0.016,
+      ownerX: start.x,
+      ownerY: start.y,
+      derived,
+      storedUnits: 0,
+      otherPending: 0,
+      mode: 'gather' as const,
+      hasDrones: false,
+      ownerHasRoom: true,
+      dropOff: null,
+    };
+    uno.update(T0, { ...base, target: 'copper' });
+    dos.update(T0, { ...base, target: 'scrap' });
+    expect(stationYield(uno.station!).item).toBe('copper');
+    expect(stationYield(dos.station!).item).toBe('scrap');
   });
 
   it('rechaza materiales inventados o aún bloqueados por nivel', () => {
@@ -265,9 +324,53 @@ describe('destino del material', () => {
   it('cada material que la mascota puede extraer tiene destino', () => {
     for (const s of PET_STATIONS) {
       const { item } = stationYield(s);
-      // Nivel 12: fábrica madura, todo desbloqueado.
-      expect(dropOffFor(item, 12, origen), `${item} no tiene dónde ir`).not.toBeNull();
+      // Se mira desde la propia veta: al otro planeta no se va andando, así
+      // que cada material tiene que tener salida EN SU MUNDO.
+      const desde = stationWorkPoint(s);
+      // Nivel 20: fábrica madura, todo desbloqueado en los dos mundos.
+      expect(dropOffFor(item, 20, desde), `${item} no tiene dónde ir`).not.toBeNull();
     }
+  });
+
+  /*
+   * LOS DOS MUNDOS NO SE MEZCLAN. No hay camino a pie entre la estación y el
+   * planeta, así que una máquina de allí no puede ser el destino de un perro
+   * de aquí — antes se quedaba empujando contra el vacío para siempre.
+   */
+  it('nunca manda material al otro mundo', () => {
+    const enLaEstacion = { x: 800, y: 600 };
+    const enElPlaneta = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_void_a')!);
+
+    // Desde la estación, el mineral de vacío no tiene a dónde ir.
+    expect(dropOffFor('voidOre', 20, enLaEstacion)).toBeNull();
+    // Desde el planeta, sí: su refinería.
+    expect(dropOffFor('voidOre', 20, enElPlaneta)).not.toBeNull();
+    // Y al revés: el hierro de la estación no se lleva a la refinería.
+    const bay = dropOffFor('ore', 20, enLaEstacion);
+    expect(bay).not.toBeNull();
+    expect(isOffworld(bay!.y)).toBe(false);
+  });
+
+  it('una mascota en la estación no ve las vetas del planeta', () => {
+    const enLaEstacion = { x: 800, y: 600 };
+    const enElPlaneta = stationWorkPoint(STATIONS.find((s) => s.id === 'vein_void_a')!);
+
+    // Encargarle mineral de vacío desde casa no la manda al vacío: como ahí
+    // no hay ninguna veta que lo dé, trabaja lo que pilla cerca.
+    const aquí = nearestStation(enLaEstacion.x, enLaEstacion.y, 99_999, 'voidOre');
+    if (aquí) {
+      expect(isOffworld(aquí.point.y)).toBe(false);
+      expect(stationYield(aquí.station).item).not.toBe('voidOre');
+    }
+
+    // En el planeta, en cambio, va derecha a la suya.
+    const allí = nearestStation(enElPlaneta.x, enElPlaneta.y, 99_999, 'voidOre');
+    expect(allí).not.toBeNull();
+    expect(stationYield(allí!.station).item).toBe('voidOre');
+
+    // Y estando allí, ninguna veta de casa entra en sus planes.
+    const casa = nearestStation(enElPlaneta.x, enElPlaneta.y, 99_999, 'ore');
+    if (casa) expect(isOffworld(casa.point.y)).toBe(true);
   });
 
   it('el destino es una máquina que de verdad consume ese material', () => {
@@ -303,18 +406,22 @@ describe('destino del material', () => {
   });
 
   it('los consumibles no le interesan y no tienen destino', () => {
-    const consumibles = ITEM_LIST.filter((i) => i.category === 'consumable');
-    expect(consumibles.length).toBeGreaterThan(0);
-    for (const c of consumibles) {
+    // Ahora mismo el catálogo no tiene ninguno, pero la regla sigue viva:
+    // si mañana vuelve una bebida, la mascota no la tocará.
+    for (const c of ITEM_LIST.filter((i) => i.category === 'consumable')) {
       expect(petAccepts(c.id)).toBe(false);
       expect(dropOffFor(c.id, 12, origen)).toBeNull();
     }
     expect(petAccepts('ore')).toBe(true);
+    // Y lo que sí puede sacar, TODO, tiene su sitio a fábrica madura.
+    for (const s of PET_STATIONS) {
+      expect(petAccepts(stationYield(s).item)).toBe(true);
+    }
   });
 
   it('decide con el material del que más lleva, ignorando consumibles', () => {
     expect(heaviestItem({ ore: 3, copper: 9 })).toBe('copper');
-    expect(heaviestItem({ energyDrink: 99, ore: 1 })).toBe('ore');
+    expect(heaviestItem({ ore: 1 })).toBe('ore');
     expect(heaviestItem({})).toBeNull();
   });
 });
@@ -342,6 +449,7 @@ describe('prioridades de la mascota', () => {
       ownerY: p.y,
       derived,
       storedUnits: 5, // lleva material, pero minar tiene prioridad
+      otherPending: 0,
       mode: 'gather',
       target: null,
       ownerHasRoom: true,
@@ -359,6 +467,7 @@ describe('prioridades de la mascota', () => {
       ownerY: p.y,
       derived,
       storedUnits: derived.capacity,
+      otherPending: 0,
       mode: 'gather',
       target: null,
       ownerHasRoom: true,
@@ -375,6 +484,7 @@ describe('prioridades de la mascota', () => {
       ownerY: 300,
       derived: { ...derived, radius: 1 },
       storedUnits: 4,
+      otherPending: 0,
       mode: 'gather',
       target: null,
       ownerHasRoom: true,
@@ -391,6 +501,7 @@ describe('prioridades de la mascota', () => {
       ownerY: 300,
       derived: { ...derived, radius: 1 },
       storedUnits: 0,
+      otherPending: 0,
       mode: 'gather',
       target: null,
       ownerHasRoom: true,
@@ -408,6 +519,7 @@ describe('prioridades de la mascota', () => {
       ownerY: p.y,
       derived,
       storedUnits: 0,
+      otherPending: 0,
       mode: 'follow',
       target: null,
       ownerHasRoom: true,
@@ -427,7 +539,8 @@ describe('prioridades de la mascota', () => {
         ownerY: p.y,
         derived,
         storedUnits: 0,
-        mode: 'gather',
+        otherPending: 0,
+      mode: 'gather',
         target: null,
         ownerHasRoom: true,
         dropOff: null,
@@ -450,6 +563,7 @@ describe('prioridades de la mascota', () => {
       ownerY: p.y,
       derived,
       storedUnits: derived.capacity,
+      otherPending: 0,
       mode: 'gather',
       target: null,
       ownerHasRoom: true,
@@ -468,6 +582,7 @@ describe('prioridades de la mascota', () => {
       ownerY: bay.y,
       derived: { ...derived, radius: 1 },
       storedUnits: 10,
+      otherPending: 0,
       mode: 'gather',
       target: null,
       ownerHasRoom: true,
@@ -486,6 +601,7 @@ describe('prioridades de la mascota', () => {
       ownerY: bay.y,
       derived,
       storedUnits: 10,
+      otherPending: 0,
       mode: 'follow',
       target: null,
       ownerHasRoom: true,
@@ -509,7 +625,8 @@ describe('prioridades de la mascota', () => {
         ownerY: p.y,
         derived: rapida,
         storedUnits: 0, // nada liquidado todavía: todo está pendiente
-        mode: 'gather',
+        otherPending: 0,
+      mode: 'gather',
         target: null,
         hasDrones: false,
         ownerHasRoom: true,
@@ -528,6 +645,7 @@ describe('prioridades de la mascota', () => {
       ownerX: p.x,
       ownerY: p.y,
       derived: rapida,
+      otherPending: 0,
       mode: 'gather' as const,
       target: null,
       hasDrones: true,
@@ -561,6 +679,7 @@ describe('prioridades de la mascota', () => {
       ownerX: p.x + 400,
       ownerY: p.y,
       derived,
+      otherPending: 0,
       mode: 'gather' as const,
       target: null,
       hasDrones: true,
@@ -589,6 +708,7 @@ describe('prioridades de la mascota', () => {
       ownerY: p.y,
       derived,
       storedUnits: derived.capacity,
+      otherPending: 0,
       mode: 'gather' as const,
       target: null,
       hasDrones: true,
@@ -613,7 +733,8 @@ describe('prioridades de la mascota', () => {
         ownerY: 800,
         derived,
         storedUnits: 0,
-        mode: 'gather',
+        otherPending: 0,
+      mode: 'gather',
         target: null,
         ownerHasRoom: true,
         dropOff: null,
@@ -786,7 +907,7 @@ describe('operaciones de la mascota', () => {
 
   it('la mascota nunca recibe consumibles, ni en su mochila', () => {
     const p = player({ pet: pet({ inventory: {} }) });
-    expect(addToPet(p.pet, 'energyDrink', 5).added).toBe(0);
+    expect(addToPet(p.pet, 'ore', 5).added).toBe(5);
   });
 });
 

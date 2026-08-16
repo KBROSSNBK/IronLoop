@@ -10,11 +10,13 @@ import {
   TILE,
   ZONES,
   conveyorLoadPoint,
+  sameRealm,
   type ConveyorDef,
   type StationDef,
   type ZoneDef,
 } from '../../config/world';
 import { MACHINE_LIST, getMachine } from '../../config/machines';
+import { beltAccepts } from './belts';
 import { getItem } from '../../config/items';
 import { machineFrontPoint } from '../world/geometry';
 import { derivePet, petFree, petUsed, type PetState } from '../../config/pets';
@@ -148,12 +150,23 @@ export function nearestStation(
   item: string | null = null,
 ): StationChoice | null {
   const target = getPetTarget(item);
-  const pool = target ? target.stations : PET_STATIONS;
+  // Si le has encargado un material que sólo hay en el OTRO mundo, aquí no
+  // puede hacer nada con esa orden: trabaja lo que pille cerca en vez de
+  // quedarse plantada. En cuanto te la lleves al planeta, vuelve a lo suyo.
+  const alcanzable =
+    target && target.stations.some((s) => sameRealm(stationWorkPoint(s).y, y))
+      ? target
+      : null;
+  const pool = alcanzable ? alcanzable.stations : PET_STATIONS;
   let best: StationChoice | null = null;
   for (const s of pool) {
     const point = stationWorkPoint(s);
+    // Ni cruzando el mapa: al otro planeta no se va andando. Si la mascota
+    // está en la estación, las vetas de allí no existen para ella (y al
+    // revés), que si no se quedaba empujando contra el vacío.
+    if (!sameRealm(point.y, y)) continue;
     const dist = Math.hypot(point.x - x, point.y - y);
-    if (!target && dist > radius) continue;
+    if (!alcanzable && dist > radius) continue;
     if (!best || dist < best.dist) best = { station: s, point, dist };
   }
   return best;
@@ -184,11 +197,10 @@ export interface DropOff {
   label: string;
 }
 
-/** ¿Admite esta cinta este material, contando su filtro propio? */
+/** ¿Admite esta cinta este material, contando su filtro y su repartidor? */
 function beltTakes(belt: ConveyorDef, item: string): boolean {
   if (!belt.feeds) return false;
-  if (belt.accepts?.length) return belt.accepts.includes(item);
-  return item in getMachine(belt.feeds).input;
+  return beltAccepts(belt).includes(item);
 }
 
 export function dropOffFor(
@@ -200,6 +212,8 @@ export function dropOffFor(
   let best: (DropOff & { dist: number }) | null = null;
 
   const consider = (candidate: DropOff, bonus: number) => {
+    // Una máquina del otro planeta no es un destino: no hay cómo llegar.
+    if (!sameRealm(candidate.y, from.y)) return;
     const dist = Math.hypot(candidate.x - from.x, candidate.y - from.y) - bonus;
     if (!best || dist < best.dist) best = { ...candidate, dist };
   };
@@ -318,9 +332,11 @@ export function unloadPet(
  * El cliente simula la extracción; esto acota lo que puede reclamar.
  */
 export function petMineCap(pet: PetState, elapsedMs: number, tolerance: number): number {
-  const { minePerSec } = derivePet(pet);
+  const { minePerSec, dogs } = derivePet(pet);
   const seconds = Math.max(0, elapsedMs) / 1000;
-  return Math.floor(minePerSec * seconds * tolerance) + 1;
+  // Cuenta la jauría entera: los perros liquidan por separado pero comparten
+  // el mismo reloj, así que el cupo también es común.
+  return Math.floor(minePerSec * dogs * seconds * tolerance) + 1;
 }
 
 export { derivePet, petFree, petUsed };

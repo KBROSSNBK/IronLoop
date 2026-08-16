@@ -20,12 +20,13 @@ import {
   PET_COLORS,
   PET_MODES,
   PET_STATS,
-  DRONE,
   PACK,
   derivePet,
   deriveDrones,
   dogCost,
+  dogTarget,
   droneCost,
+  droneSlots,
   droneUpgradeCost,
   isPetStatUnlimited,
   getChassis,
@@ -255,6 +256,7 @@ function PetTab() {
   const derived = derivePet(pet);
   const carried = petUsed(pet);
   const squad = deriveDrones(pet);
+  const slots = droneSlots(pet);
   const owned = new Set([...DEFAULT_PET.owned, ...(pet.owned ?? [])]);
   const mode = pet.mode ?? 'gather';
 
@@ -296,9 +298,9 @@ function PetTab() {
       {/* La jauría: más perros = más ritmo y más mochila. */}
       <div className="section-title">JAURÍA</div>
       <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-        Trabajan <b>juntos</b>: van a la misma veta, se reparten el trabajo y comparten
-        mochila. Cada perro que sumas multiplica la extracción y la carga. Lo suyo es que
-        cada uno lleve su dron, más otro que se quede contigo.
+        Cada perro va <b>a su mineral</b>: uno al cobre, otro al titanio, otro a la
+        chatarra. Comparten mochila, así que sumar perros multiplica el ritmo y la carga.
+        Cada uno lleva su dron, más otro que se queda contigo.
       </div>
       <div className="pet-stats">
         <Metric label="Perros" value={`${derived.dogs}/${PACK.max}`} accent="var(--amber-soft)" />
@@ -324,23 +326,26 @@ function PetTab() {
       {/* Drones: el complemento del perro, no un sustituto. */}
       <div className="section-title">ESCUADRILLA DE DRONES</div>
       <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-        Los drones <b>no extraen</b>: le quitan la carga a tu mascota <b>en la propia
-        veta</b> —y también a ti— y la llevan a su máquina, para que ninguno de los dos
-        pierda tiempo en el paseo. Cuantos más tengas, más caudal aguanta la cadena.
+        Van en <b>dúo</b>: uno por perro y uno para ti, ni más ni menos. No extraen — te
+        quitan la carga <b>donde estés</b> y la reparten por las cintas y máquinas, de
+        TODO lo que lleves y al menos una unidad de cada material, así que no se queda
+        nada atrás. Subir su nivel les da <b>más carga y más velocidad</b>.
       </div>
       <div className="pet-stats">
-        <Metric label="Drones" value={`${squad.count}/${DRONE.max}`} accent="var(--blue)" />
+        <Metric label="Drones" value={`${squad.count}/${slots}`} accent="var(--blue)" />
         <Metric label="Carga" value={`${squad.carry}/viaje`} accent="var(--amber-soft)" />
         <Metric label="Vuelo" value={`${squad.speed} px/s`} accent="var(--green)" />
       </div>
       <div className="robot-modes">
         <button
           className="mode-btn"
-          disabled={busy || squad.count >= DRONE.max || player.money < droneCost(squad.count)}
+          disabled={busy || squad.count >= slots || player.money < droneCost(squad.count)}
           onClick={() => void op('buyDrone', {})}
         >
-          {squad.count >= DRONE.max
-            ? '✅ Escuadrilla completa'
+          {squad.count >= slots
+            ? derived.dogs >= PACK.max
+              ? '✅ Escuadrilla completa'
+              : '🐕 Suma otro perro para otro dron'
             : `🛸 Comprar dron · ${moneyExact(droneCost(squad.count))}`}
         </button>
         <button
@@ -380,51 +385,62 @@ function PetTab() {
       )}
 
 
-      {/* QUÉ extrae. Se elige el material, no el sitio: lo que importa es
+      {/* QUÉ extrae CADA PERRO. Se elige el material, no el sitio: importa
           qué te falta para la cadena, no dónde está la veta. */}
-      <div className="section-title">QUÉ EXTRAE</div>
-      <div className="zone-grid">
-        <button
-          className="zone-btn"
-          data-on={!pet.target}
-          disabled={busy || mode !== 'gather'}
-          onClick={() => void op('setPetLook', { target: null })}
-        >
-          <span className="ico">🎯</span>
-          <span className="nm">Automático</span>
-          <span className="sub">Lo que pille más cerca</span>
-        </button>
-        {PET_TARGETS.map((t) => {
-          const locked = factory.level < t.fromLevel;
-          const it = getItem(t.item);
-          return (
-            <button
-              key={t.item}
-              className="zone-btn"
-              data-on={pet.target === t.item}
-              data-locked={locked}
-              disabled={busy || locked || mode !== 'gather'}
-              style={{ ['--z' as string]: it.color }}
-              onClick={() => void op('setPetLook', { target: t.item })}
-            >
-              <span className="ico">{it.icon}</span>
-              <span className="nm">{it.name}</span>
-              <span className="sub">
-                {locked
-                  ? `🔒 Fábrica nivel ${t.fromLevel}`
-                  : t.onlyRobots
-                    ? '☢️ Zona prohibida: sólo tu mascota'
-                    : `${t.stations.length} veta${t.stations.length === 1 ? '' : 's'}`}
+      <div className="section-title">QUÉ EXTRAE CADA PERRO</div>
+      {Array.from({ length: derived.dogs }, (_, i) => {
+        const actual = dogTarget(pet, i);
+        const def = actual ? PET_TARGETS.find((t) => t.item === actual) : null;
+        return (
+          <div className="dog-row" key={i}>
+            <div className="dog-head">
+              <span className="dog-tag">🐕 Perro {i + 1}</span>
+              <span className="dog-now">
+                {def ? `${getItem(def.item).icon} ${getItem(def.item).name}` : '🎯 Automático'}
               </span>
-            </button>
-          );
-        })}
+            </div>
+            <div className="dog-picks">
+              <button
+                className="pick"
+                data-on={!actual}
+                disabled={busy || mode !== 'gather'}
+                title="Trabaja la veta que pille más cerca"
+                onClick={() => void op('setPetLook', { dog: i, target: null })}
+              >
+                🎯
+              </button>
+              {PET_TARGETS.map((t) => {
+                const locked = factory.level < t.fromLevel;
+                const it = getItem(t.item);
+                return (
+                  <button
+                    key={t.item}
+                    className="pick"
+                    data-on={actual === t.item}
+                    data-locked={locked}
+                    disabled={busy || locked || mode !== 'gather'}
+                    style={{ ['--z' as string]: it.color }}
+                    title={
+                      locked
+                        ? `🔒 Fábrica nivel ${t.fromLevel}`
+                        : t.onlyRobots
+                          ? `${it.name} · ☢️ zona prohibida para personas`
+                          : `${it.name} · ${t.stations.length} veta${t.stations.length === 1 ? '' : 's'}`
+                    }
+                    onClick={() => void op('setPetLook', { dog: i, target: t.item })}
+                  >
+                    {locked ? '🔒' : it.icon}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      <div className="stat" style={{ fontSize: 11.5, color: 'var(--text-mute)' }}>
+        Con un material fijo cruza el mapa hasta su veta y no se queda contigo. El
+        ☢️ titanio del filón inestable sólo lo saca un robot: ahí no puedes entrar.
       </div>
-      {pet.target && (
-        <div className="stat" style={{ fontSize: 11.5, color: 'var(--amber-soft)' }}>
-          Con un material fijo cruza el mapa hasta su veta y no se queda contigo.
-        </div>
-      )}
 
       <div className="pet-stats">
         <Metric label="Mochila" value={`${carried}/${derived.capacity}`} accent="var(--blue)" />

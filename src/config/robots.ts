@@ -202,20 +202,93 @@ export const ROBOTS: RobotDef[] = [
     name: 'Custodio de Núcleos',
     icon: '💠',
     desc:
-      'Retira los Núcleos del Reactor. Al final de la cadena no hay a dónde ' +
-      'llevarlos: su trabajo es venderlos y repartir el dinero.',
+      'Retira los Núcleos del Reactor y los manda a la Cámara de Singularidad. ' +
+      'También puede venderlos, si prefieres el dinero ya.',
     from: 'reactor',
+    to: 'fusion',
     item: 'core',
     ratePerMin: 3,
     maxLevel: 10,
     baseCost: 400000,
     costGrowth: 1.85,
     unlockFactoryLevel: 12,
+    // Frente del Reactor → bordea su costado sur → carga de la cinta c14.
     path: [
-      { x: 920, y: 1220 },
-      { x: 1080, y: 1220 },
+      { x: 920, y: 1256 },
+      { x: 780, y: 1258 },
+      { x: 780, y: 1186 },
     ],
+    viaConveyor: 'c14',
     accent: '#22d3ee',
+  },
+  {
+    id: 'hauler_singularity',
+    name: 'Custodio de Singularidad',
+    icon: '💥',
+    desc:
+      'Retira las Células de Singularidad. Es el final de la cadena: no hay a ' +
+      'dónde llevarlas, así que su trabajo es venderlas y repartir el dinero.',
+    from: 'fusion',
+    item: 'singularity',
+    ratePerMin: 2,
+    maxLevel: 10,
+    baseCost: 900000,
+    costGrowth: 1.88,
+    unlockFactoryLevel: 14,
+    path: [
+      { x: 320, y: 1296 },
+      { x: 452, y: 1296 },
+    ],
+    accent: '#f472b6',
+  },
+
+  /*
+   * ── ROBOTS DE LA EXPEDICIÓN ──
+   *
+   * Trabajan en el otro planeta. El último no tiene a dónde llevar la carga
+   * allí: la mete en la lanzadera y la manda de vuelta a la estación, donde
+   * se vende y el dinero se reparte entre TODA la tripulación conectada.
+   */
+  {
+    id: 'hauler_voidalloy',
+    name: 'Portador de Vacío',
+    icon: '🔮',
+    desc: 'Saca la Aleación de Vacío de la Refinería y la lleva a la Forja Estelar.',
+    from: 'refinery',
+    to: 'starForge',
+    item: 'voidAlloy',
+    ratePerMin: 6,
+    maxLevel: 10,
+    baseCost: 260000,
+    costGrowth: 1.8,
+    unlockFactoryLevel: 16,
+    path: [
+      { x: 1380, y: 1856 },
+      { x: 1660, y: 1856 },
+      { x: 1660, y: 1852 },
+    ],
+    viaConveyor: 'c16',
+    accent: '#a78bfa',
+  },
+  {
+    id: 'shuttle_star',
+    name: 'Lanzadera de Carga',
+    icon: '🚀',
+    desc:
+      'Carga las Células Estelares y las manda a la estación principal. Allí se ' +
+      'venden y el dinero se reparte entre toda la tripulación conectada.',
+    from: 'starForge',
+    item: 'starCell',
+    ratePerMin: 2,
+    maxLevel: 10,
+    baseCost: 700000,
+    costGrowth: 1.86,
+    unlockFactoryLevel: 17,
+    path: [
+      { x: 1660, y: 2096 },
+      { x: 1790, y: 2096 },
+    ],
+    accent: '#fbbf24',
   },
 ];
 

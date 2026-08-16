@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { BALANCE, deriveStats } from '../config/balance';
 import { DEBUG_ENABLED } from '../config/env';
 import { MACHINE_LIST } from '../config/machines';
-import { SPAWN, STATIONS, TILE } from '../config/world';
+import { SPAWN, STATIONS, TILE, isOffworld } from '../config/world';
 import { factoryProgress, currentStamina } from './logic/progression';
 import { SprintDrain } from './logic/stamina';
 import { settleFactory } from './logic/robots';
@@ -32,7 +32,13 @@ import { ROBOTS as ROBOT_LIST } from '../config/robots';
 import { RobotBrain } from './systems/robotBrain';
 import { PetBrain, RemotePet } from './systems/petBrain';
 import { drawPet } from './render/pet';
-import { derivePet, deriveDrones, petUsed, PET_FLUSH_MS } from '../config/pets';
+import {
+  derivePet,
+  deriveDrones,
+  dogTarget,
+  petUsed,
+  PET_FLUSH_MS,
+} from '../config/pets';
 import { DroneBrain } from './systems/droneBrain';
 import { drawDrone } from './render/drone';
 import { dropOffFor, heaviestItem } from './logic/pet';
@@ -45,7 +51,7 @@ import {
   drawStations,
   getStaticLayer,
 } from './render/world';
-import { getItem } from '../config/items';
+import { getItem, itemGlyph } from '../config/items';
 import { inventoryFree } from './logic/progression';
 import { computeMachineVisuals, drawMachine, drawRobots } from './render/machines';
 import { drawCharacter, drawEmoteBubble, drawNameTag } from './render/character';
@@ -140,6 +146,8 @@ export function GameCanvas() {
     let nearGatherSince = 0;
     /** Si lo cancelas a mano, no vuelve a engancharse hasta que te alejes. */
     let gatherSuppressed = false;
+    /** Veta que hay que retomar en cuanto vuelva a haber sitio en la mochila. */
+    let resumeGather: string | null = null;
 
     /* Recogida del suelo: una petición a la vez y sin reintentar el mismo
        montón en bucle mientras la transacción viaja. */
@@ -163,24 +171,23 @@ export function GameCanvas() {
     let liveAt = 0;
     let actionsAt = 0;
     let lastTargetId: string | null = null;
-    /* Destino de la carga de la mascota: también se refresca a ritmo lento. */
-    let petDrop: ReturnType<typeof dropOffFor> = null;
-    let petDropAt = 0;
-    let petDropItem: string | null = null;
-    /* Y el de lo que llevas tú, para los drones. */
-    let miDrop: ReturnType<typeof dropOffFor> = null;
-    let miDropAt = 0;
-    let miDropItem: string | null = null;
+    /* Destino de la carga de CADA perro: se refresca a ritmo lento. */
+    const petDrops: (ReturnType<typeof dropOffFor> | null)[] = [];
+    const petDropAt: number[] = [];
+    const petDropItem: (string | null)[] = [];
 
-    /* Mascota: simulada en local, liquidada por tandas contra el servidor. */
-    const pet = new PetBrain();
+    /*
+     * JAURÍA. Un cerebro por perro: cada uno con su material encargado, su
+     * veta y su ruta. La mochila, en cambio, es común, así que todos miran lo
+     * que llevan los demás antes de seguir picando.
+     */
+    const pets: PetBrain[] = [new PetBrain(0)];
     const remotePets = new Map<string, RemotePet>();
-    let petFlushAt = 0;
-    let petBusy = false;
+    const petFlushAt: number[] = [];
+    const petBusy: boolean[] = [];
 
-    /* Escuadrilla de drones: le quitan la carga al perro y la reparten. */
+    /* Escuadrilla de drones: uno por perro, más tu escolta. Van en dúo. */
     const drones: DroneBrain[] = [];
-    let droneBusy = false;
 
     /* ── canvas / DPR ── */
     const resize = () => {
@@ -255,6 +262,38 @@ export function GameCanvas() {
         case 'openMachine':
           ui.setPanel('factory');
           return;
+        case 'teleport': {
+          /*
+           * LA NAVE. Es un salto puramente local: la posición ya viaja en la
+           * presencia y el servidor valida cada acción por coordenadas, así
+           * que no hace falta escribir nada para cambiar de mundo.
+           *
+           * Se lleva a la jauría y a la escuadrilla: son tuyos y no pueden
+           * cruzar el vacío por su cuenta.
+           */
+          const pad = STATIONS.find((s) => s.id === opt.targetId);
+          if (!pad?.to) return;
+          const vuelve = isOffworld(pad.to.y) === false;
+          fx.burst(me.x, me.y - 10, '#38bdf8', 26, 150, 'spark');
+          fx.ring(me.x, me.y, '#38bdf8', 14);
+          me.x = pad.to.x;
+          me.y = pad.to.y;
+          for (const p of pets) p.reset(me.x, me.y);
+          for (const d of drones) d.reset(me.x, me.y);
+          cam.snapTo(me.x, me.y);
+          fx.burst(me.x, me.y - 10, '#38bdf8', 26, 150, 'spark');
+          fx.ring(me.x, me.y, '#38bdf8', 16);
+          emit('sfx', { name: 'mission' });
+          emit('toast', {
+            title: vuelve ? 'DE VUELTA EN LA ESTACIÓN' : 'HAS LLEGADO AL PLANETA',
+            body: vuelve
+              ? 'La lanzadera sigue mandando lo que se refine allí.'
+              : 'Aquí sólo hay Mineral de Vacío y Gas Estelar. Lo refinado se manda solo.',
+            icon: vuelve ? '🛰️' : '🚀',
+            tone: 'good',
+          });
+          return;
+        }
       }
 
       const player = session.player;
@@ -617,10 +656,29 @@ export function GameCanvas() {
       if (!gatherOpt) {
         nearGatherSince = 0;
         gatherSuppressed = false; // al alejarse se rearma
+        resumeGather = null;
       } else if (!standingStill) {
         nearGatherSince = 0;
       } else if (nearGatherSince === 0) {
         nearGatherSince = nowMs;
+      }
+
+      /*
+       * REANUDACIÓN AUTOMÁTICA. Si la extracción se paró SÓLO porque tenías la
+       * mochila llena, en cuanto un dron te vacíe (o sueltes algo) se retoma
+       * sola. Antes había que volver a pulsar, y con drones trabajando eso era
+       * estar todo el rato pendiente del botón.
+       */
+      if (
+        resumeGather &&
+        !autoAction &&
+        gatherOpt &&
+        gatherOpt.targetId === resumeGather &&
+        !gatherOpt.disabled
+      ) {
+        autoAction = { kind: 'gather', targetId: gatherOpt.targetId, label: gatherOpt.label };
+        resumeGather = null;
+        emit('toast', { title: 'EXTRACCIÓN REANUDADA', icon: '⛏️', tone: 'good' });
       }
 
       if (
@@ -650,10 +708,22 @@ export function GameCanvas() {
         } else if (opt.disabled) {
           const reason = opt.disabled;
           const wasGather = autoAction.kind === 'gather';
+          const porLleno = /llen[oa]/i.test(reason);
           autoAction = null;
-          // Evita repetir el aviso mientras sigas plantado en la veta.
-          if (wasGather) gatherSuppressed = true;
-          emit('toast', { title: 'AUTOMÁTICO DETENIDO', body: reason, icon: '⏹️', tone: 'bad' });
+          if (wasGather && porLleno) {
+            // No es un fallo, es una pausa: alguien hará sitio enseguida.
+            resumeGather = opt.targetId;
+            emit('toast', {
+              title: 'MOCHILA LLENA',
+              body: 'Sigue sola en cuanto haya hueco.',
+              icon: '🎒',
+              tone: 'info',
+            });
+          } else {
+            // Evita repetir el aviso mientras sigas plantado en la veta.
+            if (wasGather) gatherSuppressed = true;
+            emit('toast', { title: 'AUTOMÁTICO DETENIDO', body: reason, icon: '⏹️', tone: 'bad' });
+          }
         } else if (!busyAction && !pendingOp) {
           void runAction(opt);
         }
@@ -703,108 +773,177 @@ export function GameCanvas() {
         }
       }
 
-      /* — mascota: extrae sola y deja el material donde sirve — */
+      /* — jauría: cada perro a lo suyo, y deja el material donde sirve — */
       let petDerived = derivePet(undefined);
       let petStored = 0;
+      let petPending = 0;
       let petTop: string | null = null;
       if (player && session.phase === 'ready') {
         petDerived = derivePet(player.pet);
         petStored = petUsed(player.pet);
-        petTop = heaviestItem(player.pet?.inventory ?? {});
-        // A dónde llevar lo que carga: se decide con el material del que más
-        // lleve y con el nivel de fábrica, que es lo que abre cintas y máquinas.
-        // Recorre cintas y máquinas, así que se recalcula sólo si cambia el
-        // material o cada medio segundo, no en cada fotograma.
-        if (!petTop || !factory) {
-          petDrop = null;
-          petDropItem = null;
-        } else if (petTop !== petDropItem || nowMs >= petDropAt) {
-          petDropItem = petTop;
-          petDropAt = nowMs + 500;
-          petDrop = dropOffFor(petTop, factory.level, { x: pet.x, y: pet.y });
-        }
-        const dropOff = petDrop;
-        const ev = pet.update(now, {
-          dt,
-          ownerX: me.x,
-          ownerY: me.y,
-          derived: petDerived,
-          storedUnits: petStored,
-          mode: player.pet?.mode ?? 'gather',
-          target: player.pet?.target ?? null,
-          hasDrones: (player.pet?.drones ?? 0) > 0,
-          ownerHasRoom: inventoryFree(player) > 0,
-          dropOff,
-        });
+        const packInv = player.pet?.inventory ?? {};
+        petTop = heaviestItem(packInv);
 
-        if (ev.strike) {
-          fx.burst(ev.strike.x, ev.strike.y, ev.strike.color, 2, 45, 'spark');
+        // Un cerebro por perro: se crean y se retiran según la jauría.
+        while (pets.length < petDerived.dogs) pets.push(new PetBrain(pets.length));
+        pets.length = Math.max(1, petDerived.dogs);
+
+        const modo = player.pet?.mode ?? 'gather';
+        const hayDrones = (player.pet?.drones ?? 0) > 0;
+        const conHueco = inventoryFree(player) > 0;
+        // La mochila es común: lo que uno lleva picado sin liquidar le quita
+        // sitio a los demás, así que todos necesitan el total.
+        petPending = pets.reduce((a, p) => a + p.pending, 0);
+
+        for (let i = 0; i < pets.length; i++) {
+          const dog = pets[i];
+          const encargo = dogTarget(player.pet, i);
+          /*
+           * A dónde lleva lo que carga: primero SU material —el que le has
+           * encargado— y si no lleva de ese, lo que más pese de la mochila
+           * común. Recorre cintas y máquinas, así que se recalcula sólo al
+           * cambiar de material o cada medio segundo.
+           */
+          const suyo = encargo && (packInv[encargo] ?? 0) > 0 ? encargo : petTop;
+          if (!suyo || !factory) {
+            petDrops[i] = null;
+            petDropItem[i] = null;
+          } else if (suyo !== petDropItem[i] || nowMs >= (petDropAt[i] ?? 0)) {
+            petDropItem[i] = suyo;
+            petDropAt[i] = nowMs + 500;
+            petDrops[i] = dropOffFor(suyo, factory.level, { x: dog.x, y: dog.y });
+          }
+
+          const ev = dog.update(now, {
+            dt,
+            ownerX: me.x,
+            ownerY: me.y,
+            derived: petDerived,
+            storedUnits: petStored,
+            otherPending: petPending - dog.pending,
+            mode: modo,
+            target: encargo,
+            hasDrones: hayDrones,
+            ownerHasRoom: conHueco,
+            dropOff: petDrops[i] ?? null,
+          });
+
+          if (ev.strike) {
+            fx.burst(ev.strike.x, ev.strike.y, ev.strike.color, 2, 45, 'spark');
+          }
+
+          // Lo minado se liquida por tandas: una escritura cada 5 s como
+          // mucho, o antes si la mochila ya está a tope.
+          if (
+            ev.mined &&
+            !petBusy[i] &&
+            (nowMs >= (petFlushAt[i] ?? 0) || petStored + petPending >= petDerived.capacity)
+          ) {
+            petFlushAt[i] = nowMs + PET_FLUSH_MS;
+            petBusy[i] = true;
+            const qty = ev.mined.qty;
+            void session
+              .op('petMine', { stationId: ev.mined.stationId, qty })
+              .then((out) => {
+                // Confirmado o rechazado, deja de contarse como pendiente: el
+                // servidor es quien manda sobre lo que hay en la mochila.
+                if (out.ok) dog.confirmMined(qty);
+                else dog.dropPending();
+              })
+              .finally(() => {
+                petBusy[i] = false;
+              });
+          }
+
+          if (ev.deposit && !petBusy[i]) {
+            petBusy[i] = true;
+            const bay = ev.deposit;
+            void session
+              .op('petDeposit', { machineId: bay.machineId, beltId: bay.beltId })
+              .then((out) => {
+                if (out.ok) {
+                  fx.burst(dog.x, dog.y - 12, '#38bdf8', 10, 70, 'spark');
+                  fx.ring(bay.x, bay.y, '#38bdf8', 8);
+                  emit('sfx', { name: 'machine', volume: 0.5 });
+                }
+              })
+              .finally(() => {
+                petBusy[i] = false;
+              });
+          }
+
+          if (ev.unload && !petBusy[i]) {
+            petBusy[i] = true;
+            void session
+              .op('petUnload', {})
+              .then((out) => {
+                if (out.ok) {
+                  fx.burst(dog.x, dog.y - 12, '#a78bfa', 10, 70, 'spark');
+                  fx.ring(me.x, me.y, '#a78bfa', 7);
+                  emit('sfx', { name: 'pickup', volume: 0.5 });
+                }
+              })
+              .finally(() => {
+                petBusy[i] = false;
+              });
+          }
         }
 
-        // Lo minado se liquida por tandas: una escritura cada 5 s como mucho,
-        // o antes si ya tiene la mochila llena y va a dejar de trabajar.
-        if (ev.mined && !petBusy && (nowMs >= petFlushAt || petStored + ev.mined.qty >= petDerived.capacity)) {
-          petFlushAt = nowMs + PET_FLUSH_MS;
-          petBusy = true;
-          const qty = ev.mined.qty;
-          void session
-            .op('petMine', { stationId: ev.mined.stationId, qty })
-            .then((out) => {
-              // Confirmado o rechazado, deja de contarse como pendiente: el
-              // servidor es quien manda sobre lo que hay en la mochila.
-              if (out.ok) pet.confirmMined(qty);
-              else pet.dropPending();
-            })
-            .finally(() => {
-              petBusy = false;
-            });
-        }
-
-        /* — escuadrilla de drones — */
-        // Le quitan la carga al perro en la propia veta y la llevan ellos, de
-        // modo que él no interrumpe la extracción para hacer el paseo.
+        /*
+         * ESCUADRILLA. Van en DÚO: el dron 0 es tu escolta y cada uno de los
+         * demás trabaja con su perro. En cada viaje se llevan de TODO lo que
+         * haya —al menos una unidad de cada material— y reparten por varias
+         * paradas si hace falta, así que nada se queda criando polvo.
+         */
         const squad = deriveDrones(player.pet);
         while (drones.length < squad.count) drones.push(new DroneBrain(drones.length));
         drones.length = squad.count;
 
-        // También te vacían a TI la mochila. Se calcula a ritmo lento porque
-        // recorre todas las cintas y máquinas para elegir destino.
-        const miTop =
-          player.pet?.droneTakesPlayer === false ? null : heaviestItem(player.inventory);
-        if (!miTop || !factory || squad.count === 0) {
-          miDrop = null;
-          miDropItem = null;
-        } else if (miTop !== miDropItem || nowMs >= miDropAt) {
-          miDropItem = miTop;
-          miDropAt = nowMs + 500;
-          miDrop = dropOffFor(miTop, factory.level, { x: me.x, y: me.y });
-        }
-        const misUnidades = miTop ? (player.inventory[miTop] ?? 0) : 0;
+        const sinReservar = (
+          inv: Record<string, number>,
+          fuente: 'pet' | 'player',
+          salvo: DroneBrain,
+        ) => {
+          const out: Record<string, number> = {};
+          for (const [item, qty] of Object.entries(inv)) {
+            let libre = Math.floor(qty);
+            for (const o of drones) {
+              if (o === salvo || o.source !== fuente) continue;
+              libre -= o.cargo[item] ?? 0;
+            }
+            if (libre > 0) out[item] = libre;
+          }
+          return out;
+        };
 
-        for (const d of drones) {
-          // Cada dron va a por lo que el perro tenga confirmado y sin reservar.
-          const reservado = drones.reduce((a, o) => a + (o === d ? 0 : o.load), 0);
+        for (let i = 0; i < drones.length; i++) {
+          const d = drones[i];
+          // Su pareja: el dron 0 va contigo, el resto con su perro.
+          const pareja = pets[Math.min(pets.length - 1, Math.max(0, i - 1))];
           const dev = d.update({
             dt,
-            dogX: pet.x,
-            dogY: pet.y,
-            dogUnits: Math.max(0, petStored - reservado),
-            dropOff: petDrop,
-            playerUnits: Math.max(0, misUnidades - reservado),
-            playerDrop: miDrop,
+            dogX: pareja.x,
+            dogY: pareja.y,
+            dogItems: sinReservar(packInv, 'pet', d),
+            playerItems:
+              player.pet?.droneTakesPlayer === false
+                ? {}
+                : sinReservar(player.inventory, 'player', d),
+            prefer: i === 0 ? 'player' : 'pet',
             carry: squad.carry,
             speed: squad.speed,
             ownerX: me.x,
             ownerY: me.y,
+            factoryLevel: factory?.level ?? 1,
             now,
           });
-          if (dev.deliver && !petBusy && !droneBusy) {
-            droneBusy = true;
-            const { bay, units, source } = dev.deliver;
+          if (dev.deliver) {
+            const { bay, items, units, source } = dev.deliver;
             void session
               .op(source === 'pet' ? 'petDeposit' : 'droneHaul', {
                 machineId: bay.machineId,
                 beltId: bay.beltId,
+                items,
                 limit: units,
               })
               .then((out) => {
@@ -813,44 +952,8 @@ export function GameCanvas() {
                   fx.ring(bay.x, bay.y, '#38bdf8', 7);
                   emit('sfx', { name: 'machine', volume: 0.4 });
                 }
-              })
-              .finally(() => {
-                droneBusy = false;
               });
           }
-        }
-
-        if (ev.deposit && !petBusy) {
-          petBusy = true;
-          const bay = ev.deposit;
-          void session
-            .op('petDeposit', { machineId: bay.machineId, beltId: bay.beltId })
-            .then((out) => {
-              if (out.ok) {
-                fx.burst(pet.x, pet.y - 12, '#38bdf8', 10, 70, 'spark');
-                fx.ring(bay.x, bay.y, '#38bdf8', 8);
-                emit('sfx', { name: 'machine', volume: 0.5 });
-              }
-            })
-            .finally(() => {
-              petBusy = false;
-            });
-        }
-
-        if (ev.unload && !petBusy) {
-          petBusy = true;
-          void session
-            .op('petUnload', {})
-            .then((out) => {
-              if (out.ok) {
-                fx.burst(pet.x, pet.y - 12, '#a78bfa', 10, 70, 'spark');
-                fx.ring(me.x, me.y, '#a78bfa', 7);
-                emit('sfx', { name: 'pickup', volume: 0.5 });
-              }
-            })
-            .finally(() => {
-              petBusy = false;
-            });
         }
       }
 
@@ -962,41 +1065,37 @@ export function GameCanvas() {
         });
       }
       if (player && player.pet?.mode !== 'off') {
-        // Material predominante en su mochila: lo que enseña en la espalda.
-        const topItem = petTop;
-        const carried = pet.carried(petStored);
+        // Carga de la jauría: confirmada más lo picado sin liquidar.
+        const carried = petStored + Math.floor(petPending);
         /*
-         * La jauría se mueve como una unidad: un solo cerebro decide y los
-         * demás perros trabajan a su lado, escalonados y con el paso
-         * desfasado para que no parezcan copias calcadas. La carga y el
-         * ritmo ya van multiplicados por el número de perros.
+         * Cada perro se dibuja donde de verdad está: van cada uno a su veta,
+         * así que no hay formación calcada. El contador de la mochila lo
+         * enseña sólo el primero, porque la mochila es una y es de todos.
          */
-        for (let i = 0; i < petDerived.dogs; i++) {
-          const lado = i === 0 ? 0 : i % 2 === 1 ? -1 : 1;
-          const fila = Math.ceil(i / 2);
-          const ox = lado * (18 + fila * 4);
-          const oy = fila * 9;
-          const px = pet.x + ox;
-          const py = pet.y + oy;
+        for (let i = 0; i < pets.length; i++) {
+          const dog = pets[i];
+          // Lo que enseña en la espalda: su material encargado si lleva, y
+          // si no, lo que más pese de la mochila común.
+          const encargo = dogTarget(player.pet, i);
+          const suyo =
+            encargo && (player.pet?.inventory?.[encargo] ?? 0) > 0 ? encargo : petTop;
           sortables.push({
-            y: py,
+            y: dog.y,
             draw: () =>
               drawPet(ctx, {
-                x: px,
-                y: py,
-                facing: pet.facing,
-                gait: pet.gait + i * 0.37,
+                x: dog.x,
+                y: dog.y,
+                facing: dog.facing,
+                gait: dog.gait,
                 t: time + i * 0.9,
-                state: pet.state,
+                state: dog.state,
                 chassis: player.pet?.chassis ?? 'spot',
                 color: player.pet?.color ?? '#f2c015',
                 accent: player.pet?.accent ?? '#22d3ee',
-                // Sólo el que lleva la voz cantante muestra el contador: es
-                // una mochila compartida, no una por perro.
                 carried: i === 0 ? carried : 0,
                 capacity: petDerived.capacity,
-                carryIcon: topItem ? getItem(topItem).icon : null,
-                carryColor: topItem ? getItem(topItem).color : null,
+                carryIcon: suyo ? itemGlyph(suyo) : null,
+                carryColor: suyo ? getItem(suyo).color : null,
               }),
           });
         }
@@ -1038,11 +1137,10 @@ export function GameCanvas() {
                 state: d.state,
                 color: player.pet?.color ?? '#c7ced8',
                 accent: player.pet?.accent ?? '#22d3ee',
+                tilt: d.tilt,
                 load: d.load,
-                loadIcon: (() => {
-                  const id = d.source === 'pet' ? petTop : heaviestItem(player.inventory);
-                  return id ? getItem(id).icon : null;
-                })(),
+                loadIcon: d.item ? itemGlyph(d.item) : null,
+                loadColor: d.item ? getItem(d.item).color : null,
               }),
           });
         }
@@ -1122,7 +1220,7 @@ export function GameCanvas() {
           debug: DEBUG_ENABLED
             ? {
                 robots: [...brains.values()].map((b) => b.debug()),
-                pet: pet.debug(petDerived.capacity, petStored),
+                pet: pets[0].debug(petDerived.capacity, petStored),
                 belts: CONVEYORS.filter((c) => c.feeds).map((c) => ({
                   id: c.id,
                   count: beltCount(live?.factory.belts?.[c.id], c.id, now),
@@ -1166,13 +1264,22 @@ export function GameCanvas() {
           /** Gasto de sprint aún sin consolidar. Debe volver a 0 al persistir. */
           pendiente: +sprintDrain.pending.toFixed(2),
         }),
-        petState: () => ({
-          x: Math.round(pet.x),
-          y: Math.round(pet.y),
-          state: pet.state,
-          pending: pet.pending,
-          station: pet.station?.id ?? null,
-        }),
+        petState: () =>
+          pets.map((p, i) => ({
+            perro: i + 1,
+            x: Math.round(p.x),
+            y: Math.round(p.y),
+            state: p.state,
+            pending: p.pending,
+            station: p.station?.id ?? null,
+          })),
+        droneState: () =>
+          drones.map((d, i) => ({
+            dron: i + 1,
+            state: d.state,
+            source: d.source,
+            cargo: { ...d.cargo },
+          })),
         emoteState: () => ({
           id: me.emote,
           elapsed: me.emote ? (Date.now() - me.emoteAt) / 1000 : 0,

@@ -16,7 +16,10 @@ export type MachineKind =
   | 'recycler'
   | 'alloy'
   | 'battery'
-  | 'reactor';
+  | 'reactor'
+  | 'fusion'
+  | 'refinery'
+  | 'starforge';
 
 export interface MachineDef {
   id: string;
@@ -202,6 +205,79 @@ export const MACHINES = {
     th: 4,
     accent: '#22d3ee',
     desc: 'Ensambla Aleación, Batería y Titanio en 1 Núcleo de Energía.',
+  },
+
+  // ── Final de la cadena: la Zona Final, al suroeste de la nave ──
+  fusion: {
+    id: 'fusion',
+    kind: 'fusion',
+    name: 'Cámara de Singularidad',
+    short: 'SINGULARIDAD',
+    icon: '🔳',
+    input: { core: 1, circuit: 2, alloy: 2 },
+    output: { singularity: 1 },
+    cycleMs: 34000,
+    inputCap: 20,
+    outputCap: 12,
+    unlockFactoryLevel: 12,
+    xpPerDeposit: 40,
+    xpPerCollect: 240,
+    tx: 5,
+    ty: 28,
+    tw: 6,
+    th: 4,
+    accent: '#f472b6',
+    desc: 'Comprime Núcleo, Circuitos y Aleación en 1 Célula de Singularidad.',
+  },
+
+  /*
+   * ── EXPEDICIÓN: máquinas del otro planeta ──
+   *
+   * Trabajan con material que en la estación no existe, así que la cadena de
+   * allí es independiente. Lo que sale se manda de vuelta en la lanzadera y
+   * se vende para toda la tripulación.
+   */
+  refinery: {
+    id: 'refinery',
+    kind: 'refinery',
+    name: 'Refinería de Vacío',
+    short: 'REFINERÍA',
+    icon: '🔮',
+    input: { voidOre: 2, stellarGas: 1 },
+    output: { voidAlloy: 1 },
+    cycleMs: 11000,
+    inputCap: 40,
+    outputCap: 30,
+    unlockFactoryLevel: 15,
+    xpPerDeposit: 14,
+    xpPerCollect: 40,
+    tx: 32,
+    ty: 42,
+    tw: 5,
+    th: 4,
+    accent: '#a78bfa',
+    desc: 'Refina 2 Mineral de Vacío con 1 Gas Estelar en 1 Aleación de Vacío.',
+  },
+  starForge: {
+    id: 'starForge',
+    kind: 'starforge',
+    name: 'Forja Estelar',
+    short: 'FORJA ESTELAR',
+    icon: '⭐',
+    input: { voidAlloy: 3 },
+    output: { starCell: 1 },
+    cycleMs: 26000,
+    inputCap: 24,
+    outputCap: 16,
+    unlockFactoryLevel: 16,
+    xpPerDeposit: 30,
+    xpPerCollect: 150,
+    tx: 39,
+    ty: 48,
+    tw: 5,
+    th: 4,
+    accent: '#fbbf24',
+    desc: 'Funde 3 Aleaciones de Vacío en 1 Célula Estelar.',
   },
 } as const satisfies Record<string, MachineDef>;
 

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { beltCount, beltTravelMs, getBelt, pushToBelt } from '../src/game/logic/belts';
+import {
+  BELT_ITEM_GAP_MS,
+  beltCount,
+  beltTravelMs,
+  getBelt,
+  pushToBelt,
+} from '../src/game/logic/belts';
 import { settleFactory, settleRobots } from '../src/game/logic/robots';
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
@@ -99,13 +105,38 @@ describe('el material se acumula, nunca se pisa', () => {
   });
 
   it('la cinta entrega en la máquina exactamente lo que llevaba', () => {
-    const travel = beltTravelMs(getBelt('c1')!);
+    const belt = getBelt('c1')!;
+    const travel = beltTravelMs(belt);
     const f: FactoryState = {
       ...conCinta(),
       belts: pushToBelt(pushToBelt({}, 'c1', 'ore', 10, T0), 'c1', 'ore', 34, T0 + 500),
     };
-    const llegada = settleFactory(f, T0 + travel + 1000);
+    // Los bultos entran en la máquina de uno en uno, como se ven llegar: hay
+    // que dejar pasar la hilera entera para tenerlos todos dentro.
+    const fin = T0 + travel + 44 * BELT_ITEM_GAP_MS + 1000;
+    const llegada = settleFactory(f, fin);
     const entregado = llegada.deliveries.reduce((a, d) => a + d.qty, 0);
+    expect(entregado).toBe(44);
+    expect(beltCount(llegada.factory.belts.c1, 'c1', fin)).toBe(0);
+  });
+
+  it('la entrega es gradual: ni un item se pierde a medio camino', () => {
+    const belt = getBelt('c1')!;
+    const travel = beltTravelMs(belt);
+    let f: FactoryState = {
+      ...conCinta(),
+      belts: pushToBelt({}, 'c1', 'ore', 44, T0),
+    };
+    // Se liquida muchas veces, como hace el juego de verdad. En CUALQUIER
+    // instante, lo entregado más lo que sigue encima suma exactamente 44.
+    const fin = T0 + travel + 44 * BELT_ITEM_GAP_MS + 500;
+    let entregado = 0;
+    for (let t = T0; t <= fin; t += 137) {
+      const paso = settleFactory(f, t);
+      entregado += paso.deliveries.reduce((a, d) => a + d.qty, 0);
+      f = paso.factory;
+      expect(entregado + beltCount(f.belts.c1, 'c1', t)).toBe(44);
+    }
     expect(entregado).toBe(44);
   });
 });
@@ -333,7 +364,8 @@ describe('drones de apoyo', () => {
     const uno = derivePet({ ...DEFAULT_PET, dogs: 1, lastAt: T0 });
     const tres = derivePet({ ...DEFAULT_PET, dogs: 3, lastAt: T0 });
     expect(tres.dogs).toBe(3);
-    expect(tres.minePerSec).toBeCloseTo(uno.minePerSec * 3, 5);
+    // El ritmo derivado es el de UN perro: cada uno pica por su cuenta.
+    expect(tres.minePerSec).toBeCloseTo(uno.minePerSec, 5);
     expect(tres.capacity).toBe(uno.capacity * 3);
     // Ni por documentos manipulados se pasa del tope.
     expect(derivePet({ ...DEFAULT_PET, dogs: 99, lastAt: T0 }).dogs).toBe(PACK.max);

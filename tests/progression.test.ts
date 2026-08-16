@@ -12,7 +12,7 @@ import {
   xpForLevel,
 } from '../src/game/logic/progression';
 import { createPlayerState } from '../src/game/logic/defaults';
-import { BALANCE, deriveStats } from '../src/config/balance';
+import { BALANCE, SALE_CLAIM_CAP, deriveStats } from '../src/config/balance';
 import { getFactoryLevel } from '../src/config/factoryLevels';
 import type { MissionProgress } from '../src/types';
 
@@ -99,9 +99,28 @@ describe('venta', () => {
   });
 
   it('ignora objetos sin precio de venta', () => {
-    const sale = computeSale({ energyDrink: 5 }, { energyDrink: 5 }, {});
+    // Ningún material del catálogo es invendible ahora mismo, así que se
+    // comprueba con uno inventado: la regla debe seguir en pie.
+    const sale = computeSale({ chatarrilla: 5 }, { chatarrilla: 5 }, {});
     expect(sale.units).toBe(0);
     expect(sale.money).toBe(0);
+  });
+
+  /*
+   * TECHO POR ESCRITURA. Con la mochila mejorable sin tope y los productos
+   * finales valiendo miles, un cargamento entero podía superar lo que admiten
+   * las reglas de seguridad y dejar la partida bloqueada rechazando acciones.
+   * Lo que no cabe simplemente no se vende.
+   */
+  it('una venta enorme se corta en el techo, sin perder ni regalar nada', () => {
+    const inv = { singularity: 5000 };
+    const sale = computeSale(inv, inv, {});
+    expect(sale.money).toBeGreaterThan(0);
+    expect(sale.money).toBeLessThanOrEqual(SALE_CLAIM_CAP);
+    expect(sale.units).toBeLessThan(5000);
+    // Y lo cobrado cuadra exactamente con lo que sale de la mochila.
+    const esperado = sale.breakdown.reduce((a, l) => a + l.value, 0);
+    expect(sale.money).toBe(esperado);
   });
 });
 

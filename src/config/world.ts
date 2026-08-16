@@ -8,8 +8,33 @@
 export const TILE = 40;
 // El mapa creció hacia el este y el sur para alojar la Zona Minera, la
 // Tecnológica, la Peligrosa y la Avanzada sin apretar las zonas originales.
+//
+// Y hacia el sur del todo, separado por una franja de vacío que NO se puede
+// cruzar a pie, está el otro planeta: sólo se llega por el teletransporte.
 export const WORLD_COLS = 48;
-export const WORLD_ROWS = 34;
+export const WORLD_ROWS = 58;
+
+/** Franja de vacío entre la estación y el planeta, en tiles. */
+export const VOID_BAND = { ty: 34, th: 3 } as const;
+
+/** Todo lo que esté por debajo de esto pertenece al planeta exterior. */
+export const PLANET_TOP = (VOID_BAND.ty + VOID_BAND.th) * TILE;
+
+/**
+ * ¿Están estos dos puntos en el MISMO mundo?
+ *
+ * La estación y el planeta comparten cuadrícula pero no hay camino entre
+ * ellos: una mascota no puede "ir andando" de una a otro, ni un dron llevar
+ * material a una máquina del otro lado. Todo lo que busca destinos se apoya
+ * en esto.
+ */
+export function isOffworld(y: number): boolean {
+  return y >= PLANET_TOP;
+}
+
+export function sameRealm(y1: number, y2: number): boolean {
+  return isOffworld(y1) === isOffworld(y2);
+}
 export const WORLD_W = WORLD_COLS * TILE;
 export const WORLD_H = WORLD_ROWS * TILE;
 
@@ -20,7 +45,7 @@ export interface Rect {
   h: number;
 }
 
-export type FloorStyle = 'concrete' | 'grate' | 'hazard' | 'tech' | 'dirt';
+export type FloorStyle = 'concrete' | 'grate' | 'hazard' | 'tech' | 'dirt' | 'regolith';
 
 export interface ZoneDef {
   id: string;
@@ -61,9 +86,20 @@ export const ZONES: ZoneDef[] = [
   { id: 'tech', label: 'ZONA TECNOLÓGICA', icon: '🔬', tx: 36, ty: 13, tw: 11, th: 9, floor: 'tech', accent: '#a3e635', liveAtLevel: 6 },
   { id: 'danger', label: 'ZONA PELIGROSA', icon: '☢️', tx: 36, ty: 23, tw: 11, th: 10, floor: 'hazard', accent: '#f87171', liveAtLevel: 8, noHumans: true },
   { id: 'advanced', label: 'ZONA AVANZADA', icon: '💠', tx: 14, ty: 26, tw: 20, th: 7, floor: 'tech', accent: '#22d3ee', liveAtLevel: 10 },
+  // Cierre de la cadena: lo último que la fábrica sabe fabricar.
+  { id: 'final', label: 'ZONA FINAL', icon: '🔳', tx: 2, ty: 26, tw: 11, th: 7, floor: 'tech', accent: '#f472b6', liveAtLevel: 12 },
+
+  /*
+   * ── EL OTRO PLANETA ──
+   * Al sur del vacío. No se llega andando: hay que coger la nave desde la
+   * plataforma de la Zona Avanzada.
+   */
+  { id: 'landing', label: 'BASE ORBITAL', icon: '🚀', tx: 18, ty: 38, tw: 10, th: 6, floor: 'hazard', accent: '#38bdf8', liveAtLevel: 15 },
+  { id: 'voidfield', label: 'CAMPO DE VACÍO', icon: '🌑', tx: 3, ty: 40, tw: 13, th: 12, floor: 'regolith', accent: '#818cf8', liveAtLevel: 15 },
+  { id: 'starworks', label: 'PLANTA ESTELAR', icon: '⭐', tx: 30, ty: 40, tw: 16, th: 13, floor: 'tech', accent: '#fbbf24', liveAtLevel: 15 },
 ];
 
-export type StationType = 'oreVein' | 'sell' | 'core' | 'shop' | 'salvage';
+export type StationType = 'oreVein' | 'sell' | 'core' | 'shop' | 'salvage' | 'teleport';
 
 export interface StationDef {
   id: string;
@@ -77,6 +113,10 @@ export interface StationDef {
   accent: string;
   /** Si es un yacimiento: qué produce. */
   yields?: { item: string; amount: number }[];
+  /** Si es un teletransporte: a dónde deja, en píxeles de mundo. */
+  to?: { x: number; y: number };
+  /** Nivel de fábrica necesario para usarla. */
+  fromLevel?: number;
   desc: string;
 }
 
@@ -238,6 +278,83 @@ export const STATIONS: StationDef[] = [
     yields: [{ item: 'crystal', amount: 1 }],
     desc: 'Cristal resonante entre los escombros radiactivos.',
   },
+
+  /* ────────────────────── EXPEDICIÓN AL PLANETA ──────────────────────
+   *
+   * Dos plataformas, una a cada lado. La nave sale de la estación con toda
+   * la tripulación que quiera subir y deja en la BASE ORBITAL; desde allí se
+   * vuelve por la misma vía. Lo que se refina allí no se trae a mano: lo
+   * manda la lanzadera y se vende para todos.
+   */
+  {
+    id: 'pad_earth',
+    type: 'teleport',
+    label: 'PLATAFORMA DE DESPEGUE',
+    icon: '🚀',
+    tx: 30,
+    ty: 28,
+    tw: 3,
+    th: 2,
+    accent: '#38bdf8',
+    // Justo debajo de la plataforma de llegada del planeta.
+    to: { x: 23 * TILE, y: 41.6 * TILE },
+    fromLevel: 15,
+    desc: 'Sube a la nave y baja al planeta exterior a extraer material.',
+  },
+  {
+    id: 'pad_planet',
+    type: 'teleport',
+    label: 'PLATAFORMA DE REGRESO',
+    icon: '🛰️',
+    tx: 21.5,
+    ty: 39,
+    tw: 3,
+    th: 2,
+    accent: '#38bdf8',
+    // De vuelta, delante de la plataforma de la estación.
+    to: { x: 31.5 * TILE, y: 30.6 * TILE },
+    fromLevel: 15,
+    desc: 'Vuelve a la estación principal.',
+  },
+  {
+    id: 'vein_void_a',
+    type: 'oreVein',
+    label: 'AFLORAMIENTO DE VACÍO',
+    icon: '🌑',
+    tx: 5,
+    ty: 42,
+    tw: 3,
+    th: 2,
+    accent: '#818cf8',
+    yields: [{ item: 'voidOre', amount: 1 }],
+    desc: 'Mineral de Vacío. Sólo existe en este planeta.',
+  },
+  {
+    id: 'vein_void_b',
+    type: 'oreVein',
+    label: 'AFLORAMIENTO DE VACÍO',
+    icon: '🌑',
+    tx: 11,
+    ty: 46,
+    tw: 3,
+    th: 2,
+    accent: '#818cf8',
+    yields: [{ item: 'voidOre', amount: 1 }],
+    desc: 'Mineral de Vacío. Sólo existe en este planeta.',
+  },
+  {
+    id: 'geyser_gas',
+    type: 'oreVein',
+    label: 'GRIETA DE GAS',
+    icon: '💨',
+    tx: 6,
+    ty: 49,
+    tw: 3,
+    th: 2,
+    accent: '#67e8f9',
+    yields: [{ item: 'stellarGas', amount: 1 }],
+    desc: 'Gas Estelar a presión. La otra mitad de la receta de la refinería.',
+  },
 ];
 
 /** Punto de aparición (centro de la entrada). */
@@ -253,6 +370,8 @@ export const WALL_RECTS: Rect[] = [
   // Muro de separación de la entrada
   { x: 13, y: 3, w: 2, h: 1 },
   { x: 21, y: 3, w: 2, h: 1 },
+  // El VACÍO. Ni se anda ni se vuela: al planeta se va en nave o no se va.
+  { x: 0, y: VOID_BAND.ty, w: WORLD_COLS, h: VOID_BAND.th },
 ];
 
 /** Props decorativos: cajas, barriles, palés, señales. Sólidos si `solid`. */
@@ -313,6 +432,16 @@ export interface ConveyorDef {
    * aunque la máquina de destino admita más cosas en su receta.
    */
   accepts?: string[];
+  /**
+   * REPARTIDOR. Máquinas que se reparten la carga con `feeds`, a partes
+   * iguales, siempre que su receta también use ese material.
+   *
+   * Existe porque el cobre lo piden DOS máquinas: si toda la bajante iba a
+   * Aleaciones, la Planta de Baterías se quedaba seca y la cadena se paraba
+   * a la mitad. Ahora de cada 10 que entran, 5 y 5, y las dos siguen vivas.
+   * Un material que sólo consuma una de ellas no se reparte: va entero.
+   */
+  splits?: string[];
   /** Nombre corto para la UI de interacción. */
   label?: string;
 }
@@ -375,7 +504,9 @@ export const CONVEYORS: ConveyorDef[] = [
    * las cintas dedicadas (la bajante de cristal), que son un extra.
    */
 
-  // Zona Minera → ALEACIONES. Baja desde las vetas y entra por arriba.
+  // Zona Minera → ALEACIONES, con REPARTIDOR a la Planta de Baterías.
+  // El cobre lo piden las dos, así que se va a medias; el resto entra entero
+  // en Aleaciones, que es la única que lo usa.
   {
     id: 'c9',
     tx: 40.15,
@@ -384,6 +515,7 @@ export const CONVEYORS: ConveyorDef[] = [
     dir: 'down',
     fromLevel: 5,
     feeds: 'alloy',
+    splits: ['batteryPlant'],
     label: 'BAJANTE DE LA MINA',
   },
   // Laboratorio → PLANTA DE BATERÍAS: cruza la nave y entra por su izquierda.
@@ -431,6 +563,43 @@ export const CONVEYORS: ConveyorDef[] = [
     fromLevel: 10,
     feeds: 'reactor',
     label: 'CINTA AL REACTOR',
+  },
+  // REACTOR → CÁMARA DE SINGULARIDAD. Cruza la nave por el sur y entra por el
+  // costado derecho de la última máquina de la cadena.
+  {
+    id: 'c14',
+    tx: 11.15,
+    ty: 29.2,
+    len: 8.6,
+    dir: 'left',
+    fromLevel: 12,
+    feeds: 'fusion',
+    label: 'LÍNEA DE SINGULARIDAD',
+  },
+
+  // ── Cintas del planeta ──
+  // De la base orbital a la refinería: por aquí entra todo lo que se saca
+  // del campo, sin tener que rodear media planta.
+  {
+    id: 'c15',
+    tx: 25,
+    ty: 44.2,
+    len: 6.9,
+    dir: 'right',
+    fromLevel: 15,
+    feeds: 'refinery',
+    label: 'LÍNEA DE LA BASE',
+  },
+  // Refinería → Forja Estelar.
+  {
+    id: 'c16',
+    tx: 41.15,
+    ty: 46.3,
+    len: 1.6,
+    dir: 'down',
+    fromLevel: 16,
+    feeds: 'starForge',
+    label: 'BAJANTE DE LA FORJA',
   },
 ];
 

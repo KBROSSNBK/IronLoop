@@ -76,11 +76,17 @@ export interface PetTickInput {
   ownerY: number;
   /** Stats derivadas (capacidad, velocidad, ritmo de minado, radio). */
   derived: DerivedPet;
-  /** Unidades ya confirmadas por el servidor en su mochila. */
+  /** Unidades ya confirmadas por el servidor en la mochila COMPARTIDA. */
   storedUnits: number;
+  /**
+   * Lo que los OTROS perros llevan picado y sin liquidar. La mochila es de la
+   * jauría entera, así que sin esto cada uno se creería que le queda todo el
+   * hueco libre y liquidarían de más.
+   */
+  otherPending: number;
   /** Qué le has mandado hacer. */
   mode: PetMode;
-  /** Material encargado, o null para que elija la veta más cercana ella sola. */
+  /** Material encargado a ESTE perro, o null para que busque él la veta. */
   target: string | null;
   /** ¿Hay drones de apoyo? Entonces no interrumpe la extracción para el paseo. */
   hasDrones: boolean;
@@ -139,10 +145,25 @@ export class PetBrain {
   /** Última carga confirmada vista, para detectar cuándo la relevan. */
   private lastStored = 0;
 
+  /**
+   * Puesto en la jauría. Separa el sitio de trabajo de cada perro para que no
+   * se monten unos encima de otros picando en la misma piedra.
+   */
+  private readonly slot: number;
+
+  constructor(slot = 0) {
+    this.slot = slot;
+  }
+
+  /** Desvío lateral de este perro respecto al punto de trabajo común. */
+  private get lateral(): number {
+    return this.slot === 0 ? 0 : this.slot % 2 === 1 ? -27 : 27;
+  }
+
   /** Coloca la mascota junto a su dueño sin animación (al entrar al juego). */
   reset(x: number, y: number): void {
-    this.x = x - 34;
-    this.y = y + 8;
+    this.x = x - 34 + this.lateral;
+    this.y = y + 8 + this.slot * 6;
     this.lastX = this.x;
     this.lastY = this.y;
     this.state = 'SEGUIR';
@@ -160,10 +181,24 @@ export class PetBrain {
   }
 
   update(now: number, input: PetTickInput): PetTickResult {
-    const { dt, ownerX, ownerY, derived, storedUnits, mode, target, ownerHasRoom, dropOff, hasDrones } = input;
+    const {
+      dt,
+      ownerX,
+      ownerY,
+      derived,
+      storedUnits,
+      otherPending,
+      mode,
+      target,
+      ownerHasRoom,
+      dropOff,
+      hasDrones,
+    } = input;
     if (!this.spawned) this.reset(ownerX, ownerY);
 
-    const carried = this.carried(storedUnits);
+    // La mochila es de la jauría: cuenta lo suyo, lo de los demás y lo que ya
+    // está confirmado.
+    const carried = this.carried(storedUnits) + Math.floor(otherPending);
     const full = carried >= derived.capacity;
     const working = mode === 'gather';
     let result: PetTickResult = { ...NOTHING };
@@ -226,16 +261,20 @@ export class PetBrain {
     if (this.state === 'IR_A_VETA' || this.state === 'MINAR') {
       const p = found ?? nearestStation(this.x, this.y, derived.radius, target);
       if (p) {
-        goalX = p.point.x;
+        // Cada perro pica en su hueco de la veta, no encima del de al lado.
+        goalX = p.point.x + this.lateral;
         goalY = p.point.y;
         stopAt = ARRIVE;
       }
     } else if (this.state === 'IR_A_CINTA' && bay) {
-      goalX = bay.x;
+      goalX = bay.x + this.lateral * 0.6;
       goalY = bay.y;
       stopAt = ARRIVE + 8;
     } else if (this.state === 'VOLVER') {
       stopAt = 26;
+    } else {
+      goalX = ownerX + this.lateral;
+      goalY = ownerY + this.slot * 5;
     }
 
     /* ── 3. Movimiento siguiendo un camino calculado ── */
@@ -311,7 +350,10 @@ export class PetBrain {
          * la mascota se plantaba a media mochila y parecía que se colgaba,
          * cuando en realidad se creía llena.
          */
-        while (this.fraction >= 1 && storedUnits + this.pending < derived.capacity) {
+        while (
+          this.fraction >= 1 &&
+          storedUnits + otherPending + this.pending < derived.capacity
+        ) {
           this.fraction -= 1;
           this.pending += 1;
         }

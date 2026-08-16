@@ -6,7 +6,7 @@ import {
   isWalkableTile,
 } from '../src/game/world/pathfinding';
 import { bodyRect, getSolids, rectsOverlap } from '../src/game/world/geometry';
-import { SPAWN, STATIONS, TILE, WORLD_COLS, WORLD_ROWS } from '../src/config/world';
+import { SPAWN, STATIONS, TILE, WORLD_COLS, WORLD_ROWS, isOffworld } from '../src/config/world';
 import { stationWorkPoint } from '../src/game/logic/pet';
 import { MACHINE_LIST } from '../src/config/machines';
 
@@ -72,6 +72,8 @@ describe('cálculo de rutas', () => {
   it('llega a todas las zonas de extracción desde la entrada', () => {
     for (const s of STATIONS) {
       if (s.type !== 'oreVein' && s.type !== 'salvage') continue;
+      // Al otro planeta se va en nave, no andando: sus vetas no cuentan.
+      if (isOffworld(stationWorkPoint(s).y)) continue;
       const goal = stationWorkPoint(s);
       const path = findPath(SPAWN.x, SPAWN.y, goal.x, goal.y);
       expect(path.length, `sin ruta hasta ${s.id}`).toBeGreaterThan(0);

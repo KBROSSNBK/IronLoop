@@ -8,6 +8,7 @@ import {
 import { BALANCE } from '../src/config/balance';
 import { MACHINES, machineUpgradeCost, getMachine } from '../src/config/machines';
 import { UPGRADES, upgradeCost } from '../src/config/upgrades';
+import { getItem } from '../src/config/items';
 import type { FactoryState, PlayerState } from '../src/types';
 
 /** Punto en el que se pica una estación. */
@@ -174,9 +175,9 @@ describe('opSell — economía individual', () => {
     const { player, factory } = world({ inventory: { ingot: 4 } });
     const out = runOp('sell', player, factory, { at: AT_DOCK, now: T0 });
     expect(out.ok).toBe(true);
-    expect(out.player!.money).toBe(player.money + 4 * 18);
+    expect(out.player!.money).toBe(player.money + 4 * getItem('ingot').sellPrice);
     expect(out.player!.inventory.ingot).toBeUndefined();
-    expect(out.factory!.stats.sold).toBe(72);
+    expect(out.factory!.stats.sold).toBe(4 * getItem('ingot').sellPrice);
     expect(out.factory!.contribution).toBeGreaterThan(0);
   });
 
@@ -188,7 +189,7 @@ describe('opSell — economía individual', () => {
       now: T0,
     });
     expect(out.ok).toBe(true);
-    expect(out.player!.money).toBe(player.money + 18);
+    expect(out.player!.money).toBe(player.money + getItem('ingot').sellPrice);
   });
 
   it('rechaza vender con la mochila vacía', () => {
@@ -301,7 +302,7 @@ describe('opContribute — núcleo de la fábrica', () => {
     });
     expect(out.ok).toBe(true);
     expect(out.player!.inventory.ingot).toBeUndefined();
-    expect(out.factory!.contribution).toBe(5 * 12);
+    expect(out.factory!.contribution).toBe(5 * getItem('ingot').contribValue);
   });
 
   it('sube el nivel de la fábrica al superar el umbral', () => {
@@ -361,21 +362,21 @@ describe('misiones y consumibles', () => {
     expect(out.player!.missions.find((m) => m.id === id)?.progress ?? 0).toBe(0);
   });
 
-  it('un consumible restaura estamina y se gasta', () => {
-    const { player, factory } = world({
-      inventory: { energyDrink: 2 },
-      stamina: 10,
-      staminaAt: T0,
-    });
-    const out = runOp('useItem', player, factory, { itemId: 'energyDrink', now: T0 });
-    expect(out.ok).toBe(true);
-    expect(out.player!.inventory.energyDrink).toBe(1);
-    expect(out.player!.stamina).toBe(70);
+  /*
+   * Ya no hay bebidas ni ningún otro consumible: la estamina se recupera sola
+   * con el tiempo. Lo que sigue vivo es la REGLA — nada que no sea consumible
+   * se puede "usar", ni siquiera teniéndolo en la mochila.
+   */
+  it('no se puede usar un material que no es consumible', () => {
+    const { player, factory } = world({ inventory: { ingot: 3 } });
+    const out = runOp('useItem', player, factory, { itemId: 'ingot', now: T0 });
+    expect(out.ok).toBe(false);
+    expect(out.player).toBeUndefined();
   });
 
   it('no se puede usar un objeto que no se tiene', () => {
     const { player, factory } = world();
-    const out = runOp('useItem', player, factory, { itemId: 'energyDrink', now: T0 });
+    const out = runOp('useItem', player, factory, { itemId: 'crystal', now: T0 });
     expect(out.ok).toBe(false);
   });
 });

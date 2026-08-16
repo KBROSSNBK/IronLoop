@@ -96,6 +96,16 @@ import { CONVEYORS, TILE, conveyorLoadPoint, conveyorRect } from '../src/config/
 import { MACHINES, MACHINE_LIST, getMachine } from '../src/config/machines';
 import { BALANCE } from '../src/config/balance';
 import { conveyorAccepts, conveyorUnder, getSolids, rectsOverlap } from '../src/game/world/geometry';
+import {
+  BELT_ITEM_GAP_MS,
+  beltCount,
+  beltTargets,
+  beltTravelMs,
+  getBelt,
+  pushToBelt,
+  settleBelts,
+  splitUnits,
+} from '../src/game/logic/belts';
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import type { FactoryState, PlayerState } from '../src/types';
@@ -277,5 +287,54 @@ describe('traspaso automático por tandas', () => {
     const despues =
       (out.player!.inventory.crystal ?? 0) + (out.factory!.machines.lab.input.crystal ?? 0);
     expect(despues).toBe(antes);
+  });
+});
+
+/* ─────────────────────────── REPARTIDOR ───────────────────────────
+ *
+ * El cobre lo piden DOS máquinas. Si toda la bajante iba a Aleaciones, la
+ * Planta de Baterías se quedaba seca y la cadena se paraba a la mitad. La
+ * cinta reparte a partes iguales entre las que de verdad lo consumen.
+ */
+describe('cinta repartidora', () => {
+  const BELT = 'c9';
+
+  it('reparte el cobre a medias entre Aleaciones y Baterías', () => {
+    const def = getBelt(BELT)!;
+    expect(def.splits).toContain('batteryPlant');
+    const destinos = beltTargets(def, 'copper', 12);
+    expect(destinos).toHaveLength(2);
+    expect(splitUnits(10, destinos.length)).toEqual([5, 5]);
+    // Impares: la unidad suelta se la queda el destino principal.
+    expect(splitUnits(11, destinos.length)).toEqual([6, 5]);
+  });
+
+  it('un material que sólo usa una de las dos va entero', () => {
+    // El lingote lo pide Aleaciones; Baterías no sabe qué hacer con él.
+    expect(beltTargets(getBelt(BELT)!, 'ingot', 12)).toEqual(['alloy']);
+  });
+
+  it('mientras la planta de baterías esté bloqueada, todo va a Aleaciones', () => {
+    expect(beltTargets(getBelt(BELT)!, 'copper', 5)).toEqual(['alloy']);
+  });
+
+  it('al liquidar, las dos máquinas reciben su mitad y no se pierde nada', () => {
+    const def = getBelt(BELT)!;
+    const travel = beltTravelMs(def);
+    const base = createFactoryState('f1', 1, T0);
+    const f: FactoryState = {
+      ...base,
+      level: 12,
+      belts: pushToBelt({}, BELT, 'copper', 10, T0),
+    };
+    const fin = T0 + travel + 10 * BELT_ITEM_GAP_MS + 10;
+    const out = settleBelts(f, fin);
+    const enAleaciones = out.factory.machines.alloy.input.copper ?? 0;
+    const enBaterias = out.factory.machines.batteryPlant.input.copper ?? 0;
+    expect(enAleaciones + enBaterias).toBe(10);
+    // Ninguna se queda sin nada: de eso va el reparto.
+    expect(enAleaciones).toBeGreaterThan(0);
+    expect(enBaterias).toBeGreaterThan(0);
+    expect(beltCount(out.factory.belts[BELT], BELT, fin)).toBe(0);
   });
 });

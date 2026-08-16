@@ -584,6 +584,66 @@
 }
 .zone-btn .sub { font-size: 10.5px; color: var(--text-mute); line-height: 1.3; }
 
+/* ── Encargo de cada perro de la jauría ──
+   Una fila por perro: se ve de un vistazo quién va a qué mineral. */
+.dog-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid var(--amber-soft);
+}
+.dog-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.dog-tag {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.dog-now {
+  font-size: 11px;
+  color: var(--text-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dog-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dog-picks .pick {
+  width: 34px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-bottom: 2px solid var(--z, rgba(255, 255, 255, 0.12));
+  cursor: pointer;
+  transition: background 0.14s, transform 0.14s, border-color 0.14s;
+}
+.dog-picks .pick:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+.dog-picks .pick:disabled { opacity: 0.38; cursor: not-allowed; }
+.dog-picks .pick[data-on='true'] {
+  background: rgba(34, 211, 238, 0.2);
+  border-color: var(--cyan);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.45);
+}
+
 /* ── Receta visual de una máquina ── */
 .recipe-vis {
   display: flex;

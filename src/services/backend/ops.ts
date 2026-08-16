@@ -32,7 +32,7 @@ import {
   type RobotMode,
 } from '../../config/robots';
 import { ONLINE_WINDOW_MS, settleFactory } from '../../game/logic/robots';
-import { getBelt, pushToBelt } from '../../game/logic/belts';
+import { beltAccepts, getBelt, pushToBelt } from '../../game/logic/belts';
 import {
   DEFAULT_PET,
   PET_ACCENTS,
@@ -41,11 +41,12 @@ import {
   PET_RATE_TOLERANCE,
   PET_MODES,
   PET_STAT_MAP,
-  DRONE,
   PACK,
   deriveDrones,
+  derivePet,
   dogCost,
   droneCost,
+  droneSlots,
   droneUpgradeCost,
   getChassis,
   normalizePet,
@@ -1436,7 +1437,13 @@ export function opBuyDrone(
   const pet = normalizePet(player.pet, args.now);
   const subir = args.upgrade === true;
 
-  if (!subir && pet.drones >= DRONE.max) return fail('Escuadrilla completa');
+  // Un dron por perro, más el tuyo: van en dúo. Para tener otro, otro perro.
+  const tope = droneSlots(pet);
+  if (!subir && pet.drones >= tope) {
+    return fail(
+      pet.dogs >= PACK.max ? 'Escuadrilla completa' : 'Un dron por perro: suma otro perro',
+    );
+  }
   if (subir && pet.drones <= 0) return fail('Primero compra un dron');
 
   const cost = subir ? droneUpgradeCost(pet.droneLevel) : droneCost(pet.drones);
@@ -1483,7 +1490,14 @@ export function opBuyDrone(
 export function opDroneHaul(
   player: PlayerState,
   factory: FactoryState,
-  args: { machineId: string; beltId?: string; limit?: number; now: number },
+  args: {
+    machineId: string;
+    beltId?: string;
+    limit?: number;
+    /** Manifiesto exacto del viaje: material → unidades. */
+    items?: Record<string, number>;
+    now: number;
+  },
 ): OpOutcome<{ deposited: Record<string, number> }> {
   const pet = normalizePet(player.pet, args.now);
   if (pet.drones <= 0) return fail('No tienes drones');
@@ -1503,21 +1517,30 @@ export function opDroneHaul(
 
   // Nunca más de lo que la escuadrilla puede cargar en un viaje.
   const squad = deriveDrones(pet);
-  const pedido =
+  const tope =
     typeof args.limit === 'number' && Number.isFinite(args.limit)
       ? Math.max(0, Math.floor(args.limit))
       : squad.carry;
-  let room = Math.min(pedido, squad.carry);
+  let room = Math.min(tope, squad.carry);
 
-  const allowed = belt?.accepts?.length ? belt.accepts : Object.keys(def.input);
+  // Qué admite el destino: su filtro si lo tiene, y si no la receta de todas
+  // las máquinas a las que entrega (contando el repartidor de la cinta).
+  const allowed = belt ? beltAccepts(belt) : Object.keys(def.input);
+  // El dron viene con un manifiesto concreto —lleva de todo, no un solo
+  // material— y aquí sólo se comprueba que sea legal y que lo tengas.
+  const pedido = args.items
+    ? Object.keys(args.items).filter((i) => allowed.includes(i))
+    : allowed;
   const deposited: Record<string, number> = {};
   let inventory = player.inventory;
   let units = 0;
-  for (const item of allowed) {
+  for (const item of pedido) {
     if (room <= 0) break;
     const have = Math.max(0, Math.floor(inventory[item] ?? 0));
     if (have <= 0) continue;
-    const take = Math.min(have, room);
+    const quiere = args.items ? Math.max(0, Math.floor(args.items[item] ?? 0)) : have;
+    const take = Math.min(have, quiere, room);
+    if (take <= 0) continue;
     inventory = addToInventory(inventory, item, -take);
     deposited[item] = take;
     units += take;
@@ -1580,6 +1603,8 @@ export function opSetPetLook(
     color?: string;
     accent?: string;
     mode?: string;
+    /** Perro al que se le da la orden. Sin él, se la lleva toda la jauría. */
+    dog?: number;
     target?: string | null;
     droneTakesPlayer?: boolean;
     now: number;
@@ -1594,21 +1619,42 @@ export function opSetPetLook(
   if (args.mode && !modeDef) return fail('Modo desconocido');
   const mode = modeDef?.id ?? pet.mode;
 
-  // Material encargado: null = automático. Sólo se acepta un material que
-  // alguna veta dé de verdad y que ya esté abierto a este nivel de fábrica.
-  let target = pet.target;
+  /*
+   * Material encargado A UN PERRO CONCRETO. `null` = automático.
+   *
+   * Cada perro va a lo suyo: uno al cobre, otro al titanio y otro a la
+   * chatarra si te conviene. Sin `dog` la orden es para toda la jauría, que
+   * es lo que hacen las partidas viejas y el botón de "todos".
+   */
+  const targets = [...pet.targets];
   const events: OpEvent[] = [];
   if (args.target !== undefined) {
-    if (args.target === null) {
-      target = null;
-      events.push({ kind: 'info', text: 'Mascota: material automático' });
-    } else {
+    const dog =
+      typeof args.dog === 'number' && Number.isFinite(args.dog)
+        ? Math.floor(args.dog)
+        : null;
+    if (dog !== null && (dog < 0 || dog >= PACK.max)) return fail('Ese perro no existe');
+    if (dog !== null && dog >= pet.dogs) return fail('Todavía no tienes ese perro');
+
+    let valor: string | null = null;
+    if (args.target !== null) {
       const def = getPetTarget(args.target);
       if (!def) return fail('Ese material no sale de ninguna veta');
       if (factory.level < def.fromLevel) return fail(`Requiere fábrica nivel ${def.fromLevel}`);
-      target = def.item;
-      events.push({ kind: 'info', text: `Mascota → ${getItem(def.item).name}` });
+      valor = def.item;
     }
+
+    const quien = dog === null ? [...Array(PACK.max).keys()] : [dog];
+    for (const i of quien) targets[i] = valor;
+    // Las posiciones vacías se rellenan para que el array no tenga huecos:
+    // Firestore no guarda `undefined`.
+    for (let i = 0; i < targets.length; i++) targets[i] = targets[i] ?? null;
+
+    const nombre = valor ? getItem(valor).name : 'automático';
+    events.push({
+      kind: 'info',
+      text: dog === null ? `Jauría → ${nombre}` : `Perro ${dog + 1} → ${nombre}`,
+    });
   }
   if (modeDef) events.push({ kind: 'info', text: `Mascota: ${modeDef.label}` });
 
@@ -1623,7 +1669,7 @@ export function opSetPetLook(
 
   return {
     ok: true,
-    player: { ...player, pet: { ...pet, color, accent, mode, target, droneTakesPlayer } },
+    player: { ...player, pet: { ...pet, color, accent, mode, targets, droneTakesPlayer } },
     factory,
     events,
     data: { ok: true },
@@ -1657,6 +1703,15 @@ export function opPetMine(
   const asked = Math.max(0, Math.floor(args.qty || 0));
   if (asked <= 0) return fail('Nada que liquidar');
 
+  /*
+   * El tope es por tiempo, y el reloj se consume EN PROPORCIÓN a lo concedido
+   * en vez de reiniciarse. Es la misma idea que ya usan los robots, y aquí
+   * hace falta porque los tres perros de la jauría liquidan por separado: si
+   * el primero pusiera el reloj a cero, los otros dos se quedarían sin cupo
+   * aunque hubieran picado de verdad.
+   */
+  const derived = derivePet(pet);
+  const ritmo = derived.minePerSec * derived.dogs;
   const elapsed = args.now - (pet.lastAt || player.createdAt);
   const byTime = petMineCap(pet, elapsed, PET_RATE_TOLERANCE) * amount;
   const qty = Math.min(asked, byTime, petFree(pet));
@@ -1671,10 +1726,16 @@ export function opPetMine(
   }
 
   const { inventory, added } = addToPet(pet, item, qty);
+  const usedMs = ritmo > 0 ? (added / amount / ritmo) * 1000 : 0;
   const events: OpEvent[] = [];
   let p: PlayerState = {
     ...player,
-    pet: { ...pet, inventory, lastAt: args.now, mined: (pet.mined ?? 0) + added },
+    pet: {
+      ...pet,
+      inventory,
+      lastAt: Math.min(args.now, (pet.lastAt || player.createdAt) + usedMs),
+      mined: (pet.mined ?? 0) + added,
+    },
   };
   p = stat(p, { gathered: added, petMined: added });
   // La mascota trabaja por ti, así que rinde menos XP que picar tú mismo.
@@ -1702,7 +1763,14 @@ export function opPetMine(
 export function opPetDeposit(
   player: PlayerState,
   factory: FactoryState,
-  args: { machineId: string; beltId?: string; limit?: number; now: number },
+  args: {
+    machineId: string;
+    beltId?: string;
+    limit?: number;
+    /** Manifiesto exacto del viaje del dron: material → unidades. */
+    items?: Record<string, number>;
+    now: number;
+  },
 ): OpOutcome<{ deposited: Record<string, number> }> {
   const pet = normalizePet(player.pet, args.now);
   if (pet.mode !== 'gather') return fail('La mascota no está extrayendo');
@@ -1720,7 +1788,10 @@ export function opPetDeposit(
     if (factory.level < belt.fromLevel) return fail('Cinta sin energía');
   }
 
-  const allowed = belt?.accepts?.length ? belt.accepts : Object.keys(def.input);
+  const allowed = belt ? beltAccepts(belt) : Object.keys(def.input);
+  const pedido = args.items
+    ? Object.keys(args.items).filter((i) => allowed.includes(i))
+    : allowed;
   const moving: Record<string, number> = {};
   const inventory = { ...pet.inventory };
   // Un dron se lleva sólo lo que le cabe en el viaje; la mascota, todo.
@@ -1729,11 +1800,13 @@ export function opPetDeposit(
       ? Math.max(0, Math.floor(args.limit))
       : Number.POSITIVE_INFINITY;
   let units = 0;
-  for (const item of allowed) {
+  for (const item of pedido) {
     if (room <= 0) break;
     const have = Math.max(0, Math.floor(inventory[item] ?? 0));
     if (have <= 0 || !petAccepts(item)) continue;
-    const take = Math.min(have, room);
+    const quiere = args.items ? Math.max(0, Math.floor(args.items[item] ?? 0)) : have;
+    const take = Math.min(have, quiere, room);
+    if (take <= 0) continue;
     moving[item] = take;
     units += take;
     room -= take;

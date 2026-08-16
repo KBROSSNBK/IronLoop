@@ -35,11 +35,11 @@ export const MISSION_POOL: MissionDef[] = [
   { id: 'm_play_180', title: 'Trabaja 3 minutos seguidos', icon: '⏱️', metric: 'playtime', target: 180, reward: { money: 150, xp: 100 }, minLevel: 1, tier: 1 },
   { id: 'm_contrib_200', title: 'Contribuye 200 al núcleo', icon: '🏭', metric: 'contribute', target: 200, reward: { money: 300, xp: 150 }, minLevel: 2, tier: 2 },
   { id: 'm_earn_1000', title: 'Gana $1.000', icon: '💵', metric: 'earn', target: 1000, reward: { money: 400, xp: 160 }, minLevel: 2, tier: 2 },
-  { id: 'm_gather_60', title: 'Extrae 60 Minerales', icon: '⛏️', metric: 'gather', item: 'ore', target: 60, reward: { money: 520, xp: 220, items: { energyDrink: 1 } }, minLevel: 3, tier: 2 },
+  { id: 'm_gather_60', title: 'Extrae 60 Minerales', icon: '⛏️', metric: 'gather', item: 'ore', target: 60, reward: { money: 520, xp: 220, items: { copper: 6 } }, minLevel: 3, tier: 2 },
   { id: 'm_upgrade_2', title: 'Compra 2 mejoras', icon: '🛠️', metric: 'upgrade', target: 2, reward: { money: 350, xp: 200 }, minLevel: 3, tier: 2 },
   { id: 'm_produce_25', title: 'Recoge 25 productos', icon: '📦', metric: 'produce', target: 25, reward: { money: 900, xp: 380 }, minLevel: 5, tier: 3 },
   { id: 'm_sell_50', title: 'Vende 50 unidades', icon: '💰', metric: 'sell', target: 50, reward: { money: 1200, xp: 420 }, minLevel: 5, tier: 3 },
-  { id: 'm_contrib_2000', title: 'Contribuye 2.000 al núcleo', icon: '🏭', metric: 'contribute', target: 2000, reward: { money: 1600, xp: 700, items: { energyDrink: 2 } }, minLevel: 6, tier: 3 },
+  { id: 'm_contrib_2000', title: 'Contribuye 2.000 al núcleo', icon: '🏭', metric: 'contribute', target: 2000, reward: { money: 1600, xp: 700, items: { crystal: 2 } }, minLevel: 6, tier: 3 },
   { id: 'm_earn_10000', title: 'Gana $10.000', icon: '💵', metric: 'earn', target: 10000, reward: { money: 2500, xp: 900 }, minLevel: 8, tier: 3 },
 ];
 

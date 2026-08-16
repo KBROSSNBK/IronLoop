@@ -12,6 +12,7 @@ import {
   PROPS,
   STATIONS,
   TILE,
+  VOID_BAND,
   WALL_RECTS,
   WORLD_COLS,
   WORLD_H,
@@ -23,7 +24,7 @@ import {
   type PropDef,
 } from '../../config/world';
 import { getFactoryLevel } from '../../config/factoryLevels';
-import { getItem } from '../../config/items';
+import { getItem, itemGlyph } from '../../config/items';
 import { getMachine } from '../../config/machines';
 import { beltActive, beltCount, beltItems } from '../logic/belts';
 import type { FactoryState, GroundItem } from '../../types';
@@ -100,6 +101,70 @@ function paintStatic(ctx: CanvasRenderingContext2D, factoryLevel: number) {
 
   paintZoneMarkings(ctx, factoryLevel);
   paintWalls(ctx, polish, lvlDef.accent);
+  paintVoid(ctx);
+}
+
+/**
+ * EL VACÍO entre la estación y el planeta.
+ *
+ * Se pinta como lo que es —espacio abierto y un borde de peligro a cada
+ * lado— para que quede claro de un vistazo que ahí no se cruza andando y que
+ * lo de abajo es otro sitio, no otra sala de la misma nave.
+ */
+function paintVoid(ctx: CanvasRenderingContext2D) {
+  const y = VOID_BAND.ty * TILE;
+  const h = VOID_BAND.th * TILE;
+
+  ctx.save();
+  ctx.fillStyle = '#04060d';
+  ctx.fillRect(0, y, WORLD_W, h);
+
+  // Estrellas: deterministas, para que no bailen entre repintados.
+  for (let i = 0; i < 260; i++) {
+    const r = hash(i * 13, i * 7, 31);
+    const s = hash(i * 5, i * 11, 17);
+    const px = r * WORLD_W;
+    const py = y + s * h;
+    const brillo = 0.25 + hash(i, i * 3, 23) * 0.6;
+    ctx.fillStyle = `rgba(226,232,240,${brillo})`;
+    const size = hash(i * 2, i, 29) > 0.9 ? 2 : 1;
+    ctx.fillRect(px, py, size, size);
+  }
+
+  // Bordes: rayado de peligro y desvanecido hacia el hueco.
+  for (const [borde, dir] of [[y, 1], [y + h, -1]] as const) {
+    ctx.fillStyle = '#1b2231';
+    ctx.fillRect(0, dir > 0 ? borde : borde - 6, WORLD_W, 6);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, dir > 0 ? borde : borde - 6, WORLD_W, 6);
+    ctx.clip();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#facc15';
+    for (let i = -20; i < WORLD_W; i += 26) {
+      ctx.beginPath();
+      ctx.moveTo(i, dir > 0 ? borde : borde - 6);
+      ctx.lineTo(i + 10, dir > 0 ? borde : borde - 6);
+      ctx.lineTo(i + 4, dir > 0 ? borde + 6 : borde);
+      ctx.lineTo(i - 6, dir > 0 ? borde + 6 : borde);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    const g = ctx.createLinearGradient(0, borde, 0, borde + dir * 30);
+    g.addColorStop(0, 'rgba(4,6,13,0.9)');
+    g.addColorStop(1, 'rgba(4,6,13,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, dir > 0 ? borde : borde - 30, WORLD_W, 30);
+  }
+
+  ctx.font = '800 26px "Rajdhani", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(148,163,184,0.35)';
+  ctx.fillText('· · ·   V A C Í O   · · ·', WORLD_W / 2, y + h / 2);
+  ctx.restore();
 }
 
 function paintTile(ctx: CanvasRenderingContext2D, tx: number, ty: number, polish: number) {
@@ -149,6 +214,32 @@ function paintTile(ctx: CanvasRenderingContext2D, tx: number, ty: number, polish
       if (n > 0.82) {
         ctx.fillStyle = `rgba(34,211,238,${0.14 + polish * 0.2})`;
         ctx.fillRect(x + TILE / 2 - 3, y + TILE / 2 - 3, 6, 6);
+      }
+      break;
+    }
+    case 'regolith': {
+      // Suelo del planeta: polvo violáceo, cráteres y algún destello mineral.
+      ctx.fillStyle = `rgb(${26 + n * 9},${24 + n * 9},${44 + n * 12})`;
+      ctx.fillRect(x, y, TILE, TILE);
+      const c = hash(tx * 3, ty * 5, 13);
+      if (c > 0.72) {
+        // Cráter: aro claro arriba, sombra abajo.
+        const cx = x + TILE / 2 + (c - 0.85) * 18;
+        const cy = y + TILE / 2 + (hash(tx, ty, 21) - 0.5) * 14;
+        const r = 5 + c * 7;
+        ctx.fillStyle = 'rgba(8,10,20,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, r, r * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = `rgba(150,140,200,${0.12 + polish * 0.1})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - 1, r, r * 0.55, 0, Math.PI, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (n > 0.9) {
+        ctx.fillStyle = `rgba(190,180,255,${0.25 + polish * 0.2})`;
+        ctx.fillRect(x + n * (TILE - 3), y + c * (TILE - 3), 2, 2);
       }
       break;
     }
@@ -272,7 +363,8 @@ function paintWalls(ctx: CanvasRenderingContext2D, polish: number, accent: strin
     { x: 0, y: WORLD_ROWS - 1, w: WORLD_COLS, h: 1 },
     { x: 0, y: 0, w: 1, h: WORLD_ROWS },
     { x: WORLD_COLS - 1, y: 0, w: 1, h: WORLD_ROWS },
-    ...WALL_RECTS,
+    // El vacío se pinta aparte: es espacio abierto, no un muro de chapa.
+    ...WALL_RECTS.filter((r) => r.y !== VOID_BAND.ty),
   ];
   for (const r of rects) {
     const x = r.x * TILE;
@@ -528,9 +620,9 @@ export function drawConveyors(
           ? Object.keys(getMachine(c.feeds).input)
           : [];
       const icon = cargo.length > 0
-        ? getItem(cargo[0].item).icon
+        ? itemGlyph(cargo[0].item)
         : accepts.length > 0
-          ? getItem(accepts[0]).icon
+          ? itemGlyph(accepts[0])
           : '📦';
       /*
        * Placa de la cinta: qué admite, cuántas unidades lleva y a dónde va.
@@ -539,9 +631,16 @@ export function drawConveyors(
        * está justo donde surge la pregunta.
        */
       const destino = c.feeds ? getMachine(c.feeds) : null;
-      const admite = accepts.slice(0, 3).map((i) => getItem(i).icon).join('');
+      const admite = accepts.slice(0, 3).map((i) => itemGlyph(i)).join('');
+      // Con repartidor se ven los DOS destinos y el símbolo de bifurcación:
+      // es lo que explica que de diez unidades entren cinco en cada máquina.
+      const extra = (c.splits ?? [])
+        .filter((id) => factoryLevel >= getMachine(id).unlockFactoryLevel)
+        .map((id) => getMachine(id).icon);
       const label = destino
-        ? `${admite || icon} ${count} → ${destino.icon}`
+        ? extra.length > 0
+          ? `${admite || icon} ${count} ⑂ ${destino.icon}${extra.join('')}`
+          : `${admite || icon} ${count} → ${destino.icon}`
         : `${icon} ${count}`;
       // Se aparta del recorrido para no taparlo.
       const bx = horizontal ? boca.x + (c.dir === 'right' ? 4 : -4) : boca.x;
@@ -719,9 +818,101 @@ export function drawStations(
       case 'salvage':
         drawSalvage(ctx, x, y, w, h, time, s.accent);
         break;
+      case 'teleport':
+        drawPad(ctx, x, y, w, h, time, s.accent, factoryLevel >= (s.fromLevel ?? 1));
+        break;
     }
     ctx.restore();
   }
+}
+
+/** Color hexadecimal con transparencia. */
+function hexA(hex: string, a: number): string {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+/**
+ * PLATAFORMA DE LA NAVE.
+ *
+ * Un anillo de luz que sube, marcas de aterrizaje y un haz que late cuando
+ * está operativa. Apagada se ve el hierro, para que se entienda que existe
+ * mucho antes de poder usarla — y así se busca el nivel que la enciende.
+ */
+function drawPad(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  time: number,
+  accent: string,
+  activa: boolean,
+) {
+  const cx = x + w / 2;
+  const cy = y + h * 0.62;
+  const rx = w * 0.46;
+  const ry = h * 0.34;
+
+  // Plataforma
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 5, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1b2434';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = hexA(accent, activa ? 0.85 : 0.3);
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Marcas de aterrizaje
+  ctx.strokeStyle = hexA(accent, activa ? 0.5 : 0.18);
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * rx * 0.45, cy + Math.sin(a) * ry * 0.45);
+    ctx.lineTo(cx + Math.cos(a) * rx * 0.85, cy + Math.sin(a) * ry * 0.85);
+    ctx.stroke();
+  }
+
+  if (!activa) {
+    ctx.font = '800 11px "Rajdhani", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('🔒', cx, cy + 3);
+    return;
+  }
+
+  // Anillos que suben: el haz de la nave.
+  ctx.save();
+  for (let i = 0; i < 3; i++) {
+    const t = ((time * 0.55 + i / 3) % 1);
+    const alto = t * h * 1.5;
+    ctx.globalAlpha = (1 - t) * 0.55;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - alto, rx * (0.35 + t * 0.65), ry * (0.35 + t * 0.65), 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Columna de luz
+  const g = ctx.createLinearGradient(0, cy - h * 1.3, 0, cy);
+  g.addColorStop(0, hexA(accent, 0));
+  g.addColorStop(1, hexA(accent, 0.22 + Math.sin(time * 2.4) * 0.06));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(cx - rx * 0.35, cy - h * 1.3);
+  ctx.lineTo(cx + rx * 0.35, cy - h * 1.3);
+  ctx.lineTo(cx + rx * 0.92, cy);
+  ctx.lineTo(cx - rx * 0.92, cy);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function drawOreVein(
