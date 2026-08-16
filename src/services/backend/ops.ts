@@ -95,6 +95,13 @@ import {
   type MissionEvent,
 } from '../../game/logic/progression';
 import { inputRoom, settleMachine } from '../../game/logic/production';
+import {
+  opBuyCaex,
+  opBuyCaexStat,
+  opCaexDeposit,
+  opCaexMine,
+  opSetCaexLook,
+} from './caexOps';
 
 /* ────────────────────────────── TIPOS ────────────────────────────── */
 
@@ -129,14 +136,14 @@ export interface OpOutcome<T = unknown> {
 }
 
 /** Resultado de fallo. `T = never` lo hace asignable a cualquier `OpOutcome<X>`. */
-function fail<T = never>(reason: string): OpOutcome<T> {
+export function fail<T = never>(reason: string): OpOutcome<T> {
   return { ok: false, reason, events: [{ kind: 'error', text: reason }] };
 }
 
 /* ──────────────────────────── HELPERS ──────────────────────────── */
 
 /** Aplica XP con subidas de nivel encadenadas y genera eventos. */
-function grantXp(p: PlayerState, xp: number, events: OpEvent[], now: number): PlayerState {
+export function grantXp(p: PlayerState, xp: number, events: OpEvent[], now: number): PlayerState {
   if (xp <= 0) return p;
   const res = applyXp(p.level, p.xp, xp);
   events.push({ kind: 'xp', amount: xp });
@@ -155,7 +162,7 @@ function grantXp(p: PlayerState, xp: number, events: OpEvent[], now: number): Pl
 }
 
 /** Avanza misiones personales y avisa de las completadas. */
-function bumpMissions(
+export function bumpMissions(
   p: PlayerState,
   evts: MissionEvent[],
   events: OpEvent[],
@@ -168,7 +175,7 @@ function bumpMissions(
 }
 
 /** Suma contribución a la fábrica y resuelve subidas de nivel. */
-function addContribution(
+export function addContribution(
   f: FactoryState,
   points: number,
   events: OpEvent[],
@@ -189,7 +196,7 @@ function addContribution(
 }
 
 /** Progreso de los objetivos cooperativos. */
-function bumpObjectives(
+export function bumpObjectives(
   f: FactoryState,
   metric: 'produced' | 'sold' | 'contributed' | 'gathered',
   amount: number,
@@ -355,7 +362,7 @@ function nearBelt(at: unknown, beltId: string): boolean {
   );
 }
 
-function stat(p: PlayerState, patch: Partial<PlayerState['stats']>): PlayerState {
+export function stat(p: PlayerState, patch: Partial<PlayerState['stats']>): PlayerState {
   const stats = { ...p.stats };
   for (const [k, v] of Object.entries(patch)) {
     (stats as Record<string, number>)[k] = (stats as Record<string, number>)[k] + (v as number);
@@ -2084,6 +2091,11 @@ export type OpName =
   | 'petMine'
   | 'petDeposit'
   | 'petUnload'
+  | 'buyCaex'
+  | 'buyCaexStat'
+  | 'setCaexLook'
+  | 'caexMine'
+  | 'caexDeposit'
   | 'withdraw'
   | 'dropItem'
   | 'pickupGround'
@@ -2116,6 +2128,11 @@ export const OPS = {
   petMine: opPetMine,
   petDeposit: opPetDeposit,
   petUnload: opPetUnload,
+  buyCaex: opBuyCaex,
+  buyCaexStat: opBuyCaexStat,
+  setCaexLook: opSetCaexLook,
+  caexMine: opCaexMine,
+  caexDeposit: opCaexDeposit,
   withdraw: opWithdraw,
   dropItem: opDropItem,
   pickupGround: opPickupGround,

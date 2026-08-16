@@ -34,9 +34,21 @@ import {
   petStatCost,
   petUsed,
 } from '../../config/pets';
+import {
+  CAEX,
+  CAEX_MODES,
+  CAEX_SKINS,
+  CAEX_STATS,
+  DEFAULT_CAEX,
+  caexDroneUpgradeCost,
+  caexStatCost,
+  caexUsed,
+  deriveCaex,
+  getCaexSkin,
+} from '../../config/caex';
 import { compact, moneyExact } from '../../utils/format';
 
-type Tab = 'mejoras' | 'mascota' | 'robots';
+type Tab = 'mejoras' | 'mascota' | 'caex' | 'robots';
 
 /**
  * TALLER: mejoras personales y flota de robots. Es el único sitio donde se
@@ -70,6 +82,9 @@ export function UpgradesPanel() {
         </button>
         <button className="rank-tab bevel-sm" data-on={tab === 'mascota'} onClick={() => setTab('mascota')}>
           🐕 Mascota
+        </button>
+        <button className="rank-tab bevel-sm" data-on={tab === 'caex'} onClick={() => setTab('caex')}>
+          🛻 CAEX
         </button>
         <button className="rank-tab bevel-sm" data-on={tab === 'robots'} onClick={() => setTab('robots')}>
           🤖 Robots
@@ -124,6 +139,8 @@ export function UpgradesPanel() {
         </>
       ) : tab === 'mascota' ? (
         <PetTab />
+      ) : tab === 'caex' ? (
+        <CaexTab />
       ) : (
         <>
           <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
@@ -588,5 +605,232 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
       <span className="l">{label}</span>
       <span className="v mono-num">{value}</span>
     </div>
+  );
+}
+
+/* ─────────────────────────── CAEX ─────────────────────────── */
+
+/**
+ * El camión. No se le manda a ningún sitio —hace la ronda— así que aquí sólo
+ * está lo que de verdad decides: cuánto mejora, de qué color va y si sale del
+ * taller o no.
+ */
+function CaexTab() {
+  const player = useSessionStore((s) => s.player);
+  const factory = useSessionStore((s) => s.factory);
+  const op = useSessionStore((s) => s.op);
+  const busy = useSessionStore((s) => s.busy);
+  if (!player || !factory) return null;
+
+  const caex = { ...DEFAULT_CAEX, ...(player.caex ?? {}) };
+  const derived = deriveCaex(caex);
+  const carga = caexUsed(caex);
+  const skins = new Set([...DEFAULT_CAEX.skins, ...(caex.skins ?? [])]);
+
+  if (!caex.owned) {
+    const locked = factory.level < CAEX.unlockFactoryLevel;
+    const afford = player.money >= CAEX.cost;
+    return (
+      <>
+        <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+          El <b>CAEX</b> es un camión minero: no se le manda a ningún sitio, hace{' '}
+          <b>la ronda</b> por todas las zonas de recolección y carga lo que encuentra en
+          cada parada. Lento y cabezota, pero su tolva es enorme y no para nunca.
+        </div>
+        <div className="pet-hero bevel-sm">
+          <div className="ico">🛻</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="nm">{CAEX_SKINS[0].name}</div>
+            <div className="stat">{CAEX_SKINS[0].desc}</div>
+          </div>
+        </div>
+        <div className="pet-stats">
+          <Metric label="Tolva" value={`${CAEX.capacity}`} accent="var(--blue)" />
+          <Metric
+            label="Carga"
+            value={`${(CAEX.mining * 60).toFixed(0)}/min`}
+            accent="var(--amber-soft)"
+          />
+          <Metric label="Marcha" value={`${CAEX.speed} px/s`} accent="var(--green)" />
+        </div>
+        <div className="robot-modes">
+          <button
+            className="mode-btn"
+            disabled={busy || locked || !afford}
+            onClick={() => void op('buyCaex', {})}
+          >
+            {locked
+              ? `🔒 Requiere fábrica nivel ${CAEX.unlockFactoryLevel}`
+              : `🛻 Comprar CAEX · ${moneyExact(CAEX.cost)}`}
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+        Hace <b>la ronda</b> él solo: recorre todas las zonas de recolección, carga en
+        cada parada y va a vaciar cuando se llena. Su <b>tolva</b> y su <b>cuchara</b> se
+        mejoran <b>sin tope</b>. Con su dron ni siquiera tiene que salirse de la ruta.
+      </div>
+
+      <div className="pet-hero bevel-sm">
+        <div className="ico">{getCaexSkin(caex.skin).icon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="nm">{getCaexSkin(caex.skin).name}</div>
+          <div className="stat">{getCaexSkin(caex.skin).desc}</div>
+        </div>
+      </div>
+
+      <div className="robot-modes">
+        {CAEX_MODES.map((m) => (
+          <button
+            key={m.id}
+            className="mode-btn"
+            data-on={caex.mode === m.id}
+            disabled={busy}
+            title={m.desc}
+            onClick={() => void op('setCaexLook', { mode: m.id })}
+          >
+            {m.icon} {m.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="pet-stats">
+        <Metric label="Tolva" value={`${carga}/${derived.capacity}`} accent="var(--blue)" />
+        <Metric
+          label="Carga"
+          value={`${(derived.minePerSec * 60).toFixed(0)}/min`}
+          accent="var(--amber-soft)"
+        />
+        <Metric label="Cargado" value={compact(caex.mined ?? 0)} accent="var(--cyan)" />
+      </div>
+
+      <div className="section-title">MEJORAS DEL CAEX</div>
+      {CAEX_STATS.map((def) => {
+        const level = caex.stats?.[def.id] ?? 0;
+        const cost = caexStatCost(def, level);
+        const afford = player.money >= cost;
+        return (
+          <div className="upg-card" key={def.id} style={{ ['--upg-color' as string]: def.accent }}>
+            <div className="upg-icon">{def.icon}</div>
+            <div className="upg-main">
+              <div className="upg-name">
+                {def.name} <span style={{ color: 'var(--text-mute)' }}>Nv.{level}</span>
+              </div>
+              <div className="upg-effect">{level > 0 ? def.effect(level) : def.desc}</div>
+              <div className="upg-pips">
+                {Array.from({ length: 15 }, (_, i) => (
+                  <i key={i} className={i < Math.min(level, 15) ? 'on' : ''} />
+                ))}
+              </div>
+            </div>
+            <button
+              className="upg-buy"
+              disabled={busy || !afford}
+              onClick={() => void op('buyCaexStat', { stat: def.id })}
+            >
+              {moneyExact(cost)}
+            </button>
+          </div>
+        );
+      })}
+
+      <div className="section-title">SU DRON</div>
+      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+        Uno, y sólo para él: le vacía la tolva <b>en la propia ruta</b>, así que el camión
+        no tiene que salirse a descargar. Mueve mucho más que los de los perros.
+      </div>
+      <div className="pet-stats">
+        <Metric label="Dron" value={caex.drone ? 'Sí' : 'No'} accent="var(--blue)" />
+        <Metric label="Carga" value={`${derived.droneCarry}/viaje`} accent="var(--amber-soft)" />
+        <Metric label="Vuelo" value={`${derived.droneSpeed} px/s`} accent="var(--green)" />
+      </div>
+      <div className="robot-modes">
+        <button
+          className="mode-btn"
+          disabled={
+            busy ||
+            player.money < (caex.drone ? caexDroneUpgradeCost(caex.droneLevel) : CAEX.droneCost)
+          }
+          onClick={() => void op('buyCaexStat', { drone: true })}
+        >
+          {caex.drone
+            ? `⬆️ Dron nivel ${caex.droneLevel + 1} · ${moneyExact(caexDroneUpgradeCost(caex.droneLevel))}`
+            : `🛸 Comprar su dron · ${moneyExact(CAEX.droneCost)}`}
+        </button>
+      </div>
+
+      <div className="section-title">COLOR</div>
+      <div className="swatch-row">
+        {PET_COLORS.map((c) => (
+          <button
+            key={c.id}
+            className="swatch"
+            data-on={caex.color === c.id}
+            style={{ background: c.id }}
+            title={c.name}
+            disabled={busy}
+            onClick={() => void op('setCaexLook', { color: c.id })}
+          />
+        ))}
+      </div>
+
+      <div className="section-title">DETALLES</div>
+      <div className="swatch-row">
+        {PET_ACCENTS.map((c) => (
+          <button
+            key={c.id}
+            className="swatch"
+            data-on={caex.accent === c.id}
+            style={{ background: c.id }}
+            title={c.name}
+            disabled={busy}
+            onClick={() => void op('setCaexLook', { accent: c.id })}
+          />
+        ))}
+      </div>
+
+      <div className="section-title">CHASIS</div>
+      {CAEX_SKINS.map((s) => {
+        const has = skins.has(s.id);
+        const equipped = caex.skin === s.id;
+        const locked = player.level < s.unlockLevel;
+        const afford = player.money >= s.cost;
+        return (
+          <div
+            className="upg-card"
+            key={s.id}
+            data-locked={locked && !has}
+            style={{ ['--upg-color' as string]: s.color }}
+          >
+            <div className="upg-icon">{s.icon}</div>
+            <div className="upg-main">
+              <div className="upg-name">
+                {s.name}
+                {equipped && <span style={{ color: 'var(--green)' }}> · EQUIPADO</span>}
+              </div>
+              <div className="upg-effect">{s.desc}</div>
+            </div>
+            <button
+              className={`upg-buy${equipped ? ' max' : ''}`}
+              disabled={busy || equipped || (!has && (locked || !afford))}
+              onClick={() => void op('buyCaex', { skin: s.id })}
+            >
+              {equipped
+                ? 'EN USO'
+                : has
+                  ? 'EQUIPAR'
+                  : locked
+                    ? `🔒 Nv.${s.unlockLevel}`
+                    : moneyExact(s.cost)}
+            </button>
+          </div>
+        );
+      })}
+    </>
   );
 }

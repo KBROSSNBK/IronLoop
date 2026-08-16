@@ -1,6 +1,7 @@
 import { BALANCE } from '../../config/balance';
 import { MACHINE_LIST } from '../../config/machines';
 import { DEFAULT_APPEARANCE, randomAppearance } from '../../config/cosmetics';
+import { DEFAULT_CAEX, normalizeCaex } from '../../config/caex';
 import { DEFAULT_PET, normalizePet } from '../../config/pets';
 import { ACTIVE_MISSION_SLOTS, rollMissions } from '../../config/missions';
 import type {
@@ -42,6 +43,7 @@ export function createPlayerState(user: AuthUser, now = Date.now()): PlayerState
     staminaAt: now,
     upgrades: {},
     pet: { ...DEFAULT_PET, owned: [...DEFAULT_PET.owned], stats: {}, bags: [{}], lastAt: now },
+    caex: { ...DEFAULT_CAEX, skins: [...DEFAULT_CAEX.skins], stats: {}, bag: {}, lastAt: now },
     inventory: {},
     missions: rollMissions(1, [], ACTIVE_MISSION_SLOTS).map((id) => ({
       id,
@@ -124,6 +126,7 @@ export function normalizePlayer(raw: Partial<PlayerState>, user?: AuthUser): Pla
     upgrades: { ...(raw.upgrades ?? {}) },
     // El chasis de serie siempre está disponible, aunque el documento sea viejo.
     pet: normalizePet(raw.pet, raw.createdAt ?? Date.now()),
+    caex: normalizeCaex(raw.caex, raw.createdAt ?? Date.now()),
     inventory: { ...(raw.inventory ?? {}) },
     stats: { ...base.stats, ...(raw.stats ?? {}) },
     missions:

@@ -1,8 +1,9 @@
 import type { Appearance } from '../config/cosmetics';
 import type { PetState } from '../config/pets';
+import type { CaexState } from '../config/caex';
 import type { RobotMode } from '../config/robots';
 
-export type { Appearance, PetState, RobotMode };
+export type { Appearance, CaexState, PetState, RobotMode };
 
 /* ─────────────────────────── JUGADOR ─────────────────────────── */
 
@@ -43,8 +44,10 @@ export interface PlayerState {
 
   /** id de mejora → nivel comprado */
   upgrades: Record<string, number>;
-  /** Mascota cuadrúpeda: chasis, color, mejoras y su propia mochila. */
+  /** Mascota cuadrúpeda: chasis, color, mejoras y una mochila por perro. */
   pet: PetState;
+  /** Camión minero: hace la ronda por todas las zonas y carga lo que pilla. */
+  caex: CaexState;
   /** itemId → cantidad */
   inventory: Record<string, number>;
 

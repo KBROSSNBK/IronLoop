@@ -388,3 +388,16 @@ compartan una fábrica viva a que ocho fábricas tengan una persona cada una.
 Un monedero compartido convierte cualquier gasto en una discusión y premia al
 free rider. Con dinero individual y contribución voluntaria, ayudar es una
 elección visible que el ranking recompensa.
+
+### El CAEX
+
+La tercera mascota, y la que trabaja distinto a todas: un **camión minero**.
+No se le manda a ningún sitio — hace **la ronda**, recorre todas las zonas de
+recolección una detrás de otra y en cada parada carga lo que esa veta dé.
+Lento y cabezota, pero su tolva es enorme y no para nunca: es la
+automatización de fondo mientras tú haces otra cosa.
+
+Se mejora **sin tope** en las dos cosas que le importan —tolva y cuchara— y
+lleva **su propio dron**, que le vacía la tolva en la propia ruta para que no
+tenga que salirse a descargar. Lo que decides tú es cuánto mejora y de qué
+color va, no a dónde va: esa es justamente la gracia.

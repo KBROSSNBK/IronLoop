@@ -230,16 +230,24 @@ function Preview({
     if (!ctx) return;
     let raf = 0;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const SIZE = 168;
-    canvas.width = SIZE * dpr;
-    canvas.height = SIZE * dpr;
+    // Un personaje es más alto que ancho: el recuadro también, y así no queda
+    // medio marco vacío por encima de la cabeza.
+    const W = 132;
+    const H = 158;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
 
     const render = (t: number) => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, SIZE, SIZE);
+      ctx.clearRect(0, 0, W, H);
+      // Peana: el muñeco se apoya en algo en vez de flotar.
+      ctx.fillStyle = 'rgba(34,211,238,0.16)';
+      ctx.beginPath();
+      ctx.ellipse(W / 2, H * 0.84, 34, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
       ctx.save();
-      ctx.translate(SIZE / 2, SIZE * 0.7);
-      ctx.scale(2.3, 2.3);
+      ctx.translate(W / 2, H * 0.82);
+      ctx.scale(1.95, 1.95);
       drawCharacter(ctx, {
         x: 0,
         y: 0,
@@ -260,7 +268,7 @@ function Preview({
 
   return (
     <div className="char-preview">
-      <canvas ref={ref} style={{ width: 168, height: 168 }} />
+      <canvas ref={ref} style={{ width: 132, height: 158 }} />
     </div>
   );
 }

@@ -479,9 +479,11 @@
 .char-preview {
   display: grid;
   place-items: center;
-  padding: 10px;
-  background: radial-gradient(circle, rgba(34, 211, 238, 0.1), transparent 70%);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 6px 8px;
+  background:
+    radial-gradient(ellipse at 50% 78%, rgba(34, 211, 238, 0.16), transparent 62%),
+    linear-gradient(rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.18));
+  border: 1px solid rgba(255, 255, 255, 0.09);
 }
 .name-input {
   width: 100%;
@@ -718,10 +720,10 @@
   gap: 6px;
 }
 .dressing-stage .turn {
-  width: 34px;
-  height: 62px;
+  width: 28px;
+  height: 46px;
   flex: none;
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 800;
   line-height: 1;
   color: var(--text-dim);
@@ -852,21 +854,9 @@
   transform: scale(1.12);
 }
 
-/* En pantallas anchas, el muñeco al lado del vestidor y no encima. */
-@media (min-width: 560px) {
-  .dressing {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-areas:
-      'stage wardrobe'
-      'pose  wardrobe';
-    align-items: start;
-    column-gap: 10px;
-  }
-  .dressing-stage { grid-area: stage; }
-  .pose-row { grid-area: pose; }
-  .wardrobe { grid-area: wardrobe; }
-}
+/* El armario va SIEMPRE debajo del muñeco y a todo lo ancho. Puesto al lado,
+   la rejilla de opciones se quedaba en un canalón de un botón por fila, que
+   es justo lo que hacía incómodo el menú de antes. */
 
 /* El icono hace reconocible cada opción antes de leer el nombre. */
 .opt-chip .ico {

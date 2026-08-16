@@ -42,6 +42,9 @@ import {
   PET_FLUSH_MS,
 } from '../config/pets';
 import { DroneBrain } from './systems/droneBrain';
+import { CaexBrain } from './systems/caexBrain';
+import { drawCaex } from './render/caex';
+import { CAEX, CAEX_FLUSH_MS, caexUsed, deriveCaex } from '../config/caex';
 import { drawDrone } from './render/drone';
 import { dropOffFor, heaviestItem } from './logic/pet';
 import { factoryNeeds, shareNeeds } from './logic/needs';
@@ -188,6 +191,20 @@ export function GameCanvas() {
     const remotePets = new Map<string, RemotePet>();
     const petFlushAt: number[] = [];
     const petBusy: boolean[] = [];
+
+    /* CAEX: el camión de la ronda, con su propia tolva y su propio dron. */
+    const caex = new CaexBrain();
+    let caexAlive = false;
+    let caexBusy = false;
+    let caexFlushAt = 0;
+    let caexStored = 0;
+    let caexDerived = deriveCaex(undefined);
+    let caexDrop: ReturnType<typeof dropOffFor> = null;
+    let caexDropAt = 0;
+    let caexDropItem: string | null = null;
+    /** Su dron va aparte de los de los perros: sólo trabaja para él. */
+    const caexDrone = new DroneBrain(0);
+    let caexDroneAlive = false;
 
     /* Escuadrilla de drones: uno por perro, más tu escolta. Van en dúo. */
     const drones: DroneBrain[] = [];
@@ -916,6 +933,76 @@ export function GameCanvas() {
           }
         }
 
+        /* — CAEX: el camión hace su ronda, sin que le digas nada — */
+        if (player.caex?.owned && player.caex.mode === 'route') {
+          if (!caexAlive) {
+            caex.reset(me.x - 60, me.y);
+            caexAlive = true;
+          }
+          caexDerived = deriveCaex(player.caex);
+          caexStored = caexUsed(player.caex);
+          const cargaTop = heaviestItem(player.caex.bag ?? {});
+          if (!cargaTop || !factory) {
+            caexDrop = null;
+            caexDropItem = null;
+          } else if (cargaTop !== caexDropItem || nowMs >= caexDropAt) {
+            caexDropItem = cargaTop;
+            caexDropAt = nowMs + 600;
+            caexDrop = dropOffFor(cargaTop, factory.level, { x: caex.x, y: caex.y });
+          }
+
+          const cev = caex.update(now, {
+            dt,
+            derived: caexDerived,
+            storedUnits: caexStored,
+            mode: 'route',
+            hasDrone: player.caex.drone === true,
+            dropOff: caexDrop,
+            dwellMs: CAEX.dwellMs,
+          });
+
+          if (cev.scoop) {
+            fx.burst(cev.scoop.x, cev.scoop.y, cev.scoop.color, 3, 55, 'spark');
+          }
+          if (
+            cev.mined &&
+            !caexBusy &&
+            (nowMs >= caexFlushAt || caexStored + caex.pending >= caexDerived.capacity)
+          ) {
+            caexFlushAt = nowMs + CAEX_FLUSH_MS;
+            caexBusy = true;
+            const qty = cev.mined.qty;
+            void session
+              .op('caexMine', { stationId: cev.mined.stationId, qty })
+              .then((out) => {
+                if (out.ok) caex.confirmMined(qty);
+                else caex.dropPending();
+              })
+              .finally(() => {
+                caexBusy = false;
+              });
+          }
+          if (cev.deposit && !caexBusy) {
+            caexBusy = true;
+            const bay = cev.deposit;
+            void session
+              .op('caexDeposit', { machineId: bay.machineId, beltId: bay.beltId })
+              .then((out) => {
+                if (out.ok) {
+                  fx.burst(caex.x, caex.y - 20, '#fbbf24', 14, 90, 'spark');
+                  fx.ring(bay.x, bay.y, '#fbbf24', 9);
+                  emit('sfx', { name: 'machine', volume: 0.55 });
+                }
+              })
+              .finally(() => {
+                caexBusy = false;
+              });
+          }
+        } else {
+          caexAlive = false;
+          caexStored = 0;
+        }
+
         /*
          * ESCUADRILLA. Van en DÚO y de forma ESTRICTA: el dron 0 es tu escolta
          * y no se separa de ti; el dron N trabaja con el perro N y con ningún
@@ -1004,6 +1091,54 @@ export function GameCanvas() {
                 droneBusy = false;
               });
           }
+        }
+
+        /*
+         * EL DRON DEL CAEX. Uno, suyo, y sólo suyo: le vacía la tolva en la
+         * propia ruta para que el camión no tenga que salirse a descargar.
+         */
+        if (caexAlive && player.caex?.drone) {
+          if (!caexDroneAlive) {
+            caexDrone.reset(caex.x, caex.y);
+            caexDroneAlive = true;
+          }
+          const dev = caexDrone.update({
+            dt,
+            dogX: caex.x,
+            dogY: caex.y - 22,
+            items: player.caex.bag ?? {},
+            source: 'pet',
+            canDeliver: !droneBusy && !caexBusy,
+            carry: caexDerived.droneCarry,
+            speed: caexDerived.droneSpeed,
+            ownerX: caex.x,
+            ownerY: caex.y - 22,
+            factoryLevel: factory?.level ?? 1,
+            now,
+          });
+          if (dev.deliver) {
+            droneBusy = true;
+            const { bay, items: carga, units } = dev.deliver;
+            void session
+              .op('caexDeposit', {
+                machineId: bay.machineId,
+                beltId: bay.beltId,
+                items: carga,
+                limit: units,
+              })
+              .then((out) => {
+                if (out.ok) {
+                  fx.burst(caexDrone.x, caexDrone.y + 12, '#fbbf24', 9, 65, 'spark');
+                  fx.ring(bay.x, bay.y, '#fbbf24', 8);
+                  emit('sfx', { name: 'machine', volume: 0.4 });
+                }
+              })
+              .finally(() => {
+                droneBusy = false;
+              });
+          }
+        } else {
+          caexDroneAlive = false;
         }
       }
 
@@ -1149,6 +1284,32 @@ export function GameCanvas() {
           });
         }
       }
+      // El CAEX: va con el resto de la escena, ordenado por profundidad.
+      if (player && caexAlive) {
+        const cargaTop = heaviestItem(player.caex?.bag ?? {});
+        const cx = caex.x;
+        const cy = caex.y;
+        sortables.push({
+          y: cy,
+          draw: () =>
+            drawCaex(ctx, {
+              x: cx,
+              y: cy,
+              facing: caex.facing,
+              roll: caex.roll,
+              tilt: caex.tilt,
+              t: time,
+              state: caex.state,
+              skin: player.caex?.skin ?? 'srt',
+              color: player.caex?.color ?? '#f2b705',
+              accent: player.caex?.accent ?? '#1e2430',
+              carried: caexStored + Math.floor(caex.pending),
+              capacity: caexDerived.capacity,
+              carryIcon: cargaTop ? itemGlyph(cargaTop) : null,
+              carryColor: cargaTop ? getItem(cargaTop).color : null,
+            }),
+        });
+      }
       if (player) {
         sortables.push({
           y: me.y,
@@ -1193,6 +1354,27 @@ export function GameCanvas() {
               }),
           });
         }
+      }
+      // Y el del camión, con sus colores.
+      if (player && caexDroneAlive) {
+        sortables.push({
+          y: 1e9,
+          draw: () =>
+            drawDrone(ctx, {
+              x: caexDrone.x,
+              y: caexDrone.y,
+              facing: caexDrone.facing,
+              bob: caexDrone.bob,
+              t: time,
+              state: caexDrone.state,
+              color: player.caex?.color ?? '#f2b705',
+              accent: player.caex?.accent ?? '#fbbf24',
+              tilt: caexDrone.tilt,
+              load: caexDrone.load,
+              loadIcon: caexDrone.item ? itemGlyph(caexDrone.item) : null,
+              loadColor: caexDrone.item ? getItem(caexDrone.item).color : null,
+            }),
+        });
       }
 
       sortables.sort((a, b) => a.y - b.y);
@@ -1362,6 +1544,15 @@ export function GameCanvas() {
             source: d.source,
             cargo: { ...d.cargo },
           })),
+        caexState: () => ({
+          vivo: caexAlive,
+          x: Math.round(caex.x),
+          y: Math.round(caex.y),
+          state: caex.state,
+          parada: caex.where,
+          pending: caex.pending,
+          dron: caexDroneAlive ? caexDrone.state : null,
+        }),
         emoteState: () => ({
           id: me.emote,
           elapsed: me.emote ? (Date.now() - me.emoteAt) / 1000 : 0,
