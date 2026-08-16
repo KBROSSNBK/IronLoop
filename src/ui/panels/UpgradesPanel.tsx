@@ -293,6 +293,92 @@ function PetTab() {
       <div className="stat" style={{ fontSize: 11.5, color: 'var(--text-mute)' }}>
         {PET_MODES.find((m) => m.id === mode)?.desc}
       </div>
+      {/* La jauría: más perros = más ritmo y más mochila. */}
+      <div className="section-title">JAURÍA</div>
+      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+        Trabajan <b>juntos</b>: van a la misma veta, se reparten el trabajo y comparten
+        mochila. Cada perro que sumas multiplica la extracción y la carga. Lo suyo es que
+        cada uno lleve su dron, más otro que se quede contigo.
+      </div>
+      <div className="pet-stats">
+        <Metric label="Perros" value={`${derived.dogs}/${PACK.max}`} accent="var(--amber-soft)" />
+        <Metric
+          label="Drones ideales"
+          value={`${derived.dogs + 1}`}
+          accent={squad.count >= derived.dogs + 1 ? 'var(--green)' : 'var(--red)'}
+        />
+        <Metric label="Mochila total" value={`${derived.capacity}`} accent="var(--blue)" />
+      </div>
+      <div className="robot-modes">
+        <button
+          className="mode-btn"
+          disabled={busy || derived.dogs >= PACK.max || player.money < dogCost(derived.dogs)}
+          onClick={() => void op('buyDog', {})}
+        >
+          {derived.dogs >= PACK.max
+            ? '✅ Jauría completa'
+            : `🐕 Sumar perro · ${moneyExact(dogCost(derived.dogs))}`}
+        </button>
+      </div>
+
+      {/* Drones: el complemento del perro, no un sustituto. */}
+      <div className="section-title">ESCUADRILLA DE DRONES</div>
+      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+        Los drones <b>no extraen</b>: le quitan la carga a tu mascota <b>en la propia
+        veta</b> —y también a ti— y la llevan a su máquina, para que ninguno de los dos
+        pierda tiempo en el paseo. Cuantos más tengas, más caudal aguanta la cadena.
+      </div>
+      <div className="pet-stats">
+        <Metric label="Drones" value={`${squad.count}/${DRONE.max}`} accent="var(--blue)" />
+        <Metric label="Carga" value={`${squad.carry}/viaje`} accent="var(--amber-soft)" />
+        <Metric label="Vuelo" value={`${squad.speed} px/s`} accent="var(--green)" />
+      </div>
+      <div className="robot-modes">
+        <button
+          className="mode-btn"
+          disabled={busy || squad.count >= DRONE.max || player.money < droneCost(squad.count)}
+          onClick={() => void op('buyDrone', {})}
+        >
+          {squad.count >= DRONE.max
+            ? '✅ Escuadrilla completa'
+            : `🛸 Comprar dron · ${moneyExact(droneCost(squad.count))}`}
+        </button>
+        <button
+          className="mode-btn"
+          disabled={
+            busy || squad.count === 0 || player.money < droneUpgradeCost(squad.level)
+          }
+          title="Sube la carga y la velocidad de TODOS los drones"
+          onClick={() => void op('buyDrone', { upgrade: true })}
+        >
+          {squad.count === 0
+            ? '🔒 Necesitas un dron'
+            : `⬆️ Nivel ${squad.level + 1} · ${moneyExact(droneUpgradeCost(squad.level))}`}
+        </button>
+      </div>
+      {squad.count > 0 && (
+        <>
+          <div className="robot-modes">
+            <button
+              className="mode-btn"
+              data-on={pet.droneTakesPlayer !== false}
+              disabled={busy}
+              title="Si lo apagas, sólo cogerán de la mascota"
+              onClick={() =>
+                void op('setPetLook', { droneTakesPlayer: pet.droneTakesPlayer === false })
+              }
+            >
+              🎒 {pet.droneTakesPlayer === false ? 'No me vacían' : 'Me vacían a mí también'}
+            </button>
+          </div>
+          <div className="stat" style={{ fontSize: 11.5, color: 'var(--text-mute)' }}>
+            {pet.droneTakesPlayer === false
+              ? 'Sólo recogen de la mascota. Tu mochila es tuya.'
+              : 'Te quitan de la mochila lo que alguna máquina consuma y lo llevan por ti.'}
+          </div>
+        </>
+      )}
+
 
       {/* Dónde trabaja. Automática = la que pille dentro de su radio. */}
       <div className="section-title">ZONA DE EXTRACCIÓN</div>
@@ -411,91 +497,6 @@ function PetTab() {
         );
       })}
 
-      {/* La jauría: más perros = más ritmo y más mochila. */}
-      <div className="section-title">JAURÍA</div>
-      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-        Trabajan <b>juntos</b>: van a la misma veta, se reparten el trabajo y comparten
-        mochila. Cada perro que sumas multiplica la extracción y la carga. Lo suyo es que
-        cada uno lleve su dron, más otro que se quede contigo.
-      </div>
-      <div className="pet-stats">
-        <Metric label="Perros" value={`${derived.dogs}/${PACK.max}`} accent="var(--amber-soft)" />
-        <Metric
-          label="Drones ideales"
-          value={`${derived.dogs + 1}`}
-          accent={squad.count >= derived.dogs + 1 ? 'var(--green)' : 'var(--red)'}
-        />
-        <Metric label="Mochila total" value={`${derived.capacity}`} accent="var(--blue)" />
-      </div>
-      <div className="robot-modes">
-        <button
-          className="mode-btn"
-          disabled={busy || derived.dogs >= PACK.max || player.money < dogCost(derived.dogs)}
-          onClick={() => void op('buyDog', {})}
-        >
-          {derived.dogs >= PACK.max
-            ? '✅ Jauría completa'
-            : `🐕 Sumar perro · ${moneyExact(dogCost(derived.dogs))}`}
-        </button>
-      </div>
-
-      {/* Drones: el complemento del perro, no un sustituto. */}
-      <div className="section-title">ESCUADRILLA DE DRONES</div>
-      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-        Los drones <b>no extraen</b>: le quitan la carga a tu mascota <b>en la propia
-        veta</b> —y también a ti— y la llevan a su máquina, para que ninguno de los dos
-        pierda tiempo en el paseo. Cuantos más tengas, más caudal aguanta la cadena.
-      </div>
-      <div className="pet-stats">
-        <Metric label="Drones" value={`${squad.count}/${DRONE.max}`} accent="var(--blue)" />
-        <Metric label="Carga" value={`${squad.carry}/viaje`} accent="var(--amber-soft)" />
-        <Metric label="Vuelo" value={`${squad.speed} px/s`} accent="var(--green)" />
-      </div>
-      <div className="robot-modes">
-        <button
-          className="mode-btn"
-          disabled={busy || squad.count >= DRONE.max || player.money < droneCost(squad.count)}
-          onClick={() => void op('buyDrone', {})}
-        >
-          {squad.count >= DRONE.max
-            ? '✅ Escuadrilla completa'
-            : `🛸 Comprar dron · ${moneyExact(droneCost(squad.count))}`}
-        </button>
-        <button
-          className="mode-btn"
-          disabled={
-            busy || squad.count === 0 || player.money < droneUpgradeCost(squad.level)
-          }
-          title="Sube la carga y la velocidad de TODOS los drones"
-          onClick={() => void op('buyDrone', { upgrade: true })}
-        >
-          {squad.count === 0
-            ? '🔒 Necesitas un dron'
-            : `⬆️ Nivel ${squad.level + 1} · ${moneyExact(droneUpgradeCost(squad.level))}`}
-        </button>
-      </div>
-      {squad.count > 0 && (
-        <>
-          <div className="robot-modes">
-            <button
-              className="mode-btn"
-              data-on={pet.droneTakesPlayer !== false}
-              disabled={busy}
-              title="Si lo apagas, sólo cogerán de la mascota"
-              onClick={() =>
-                void op('setPetLook', { droneTakesPlayer: pet.droneTakesPlayer === false })
-              }
-            >
-              🎒 {pet.droneTakesPlayer === false ? 'No me vacían' : 'Me vacían a mí también'}
-            </button>
-          </div>
-          <div className="stat" style={{ fontSize: 11.5, color: 'var(--text-mute)' }}>
-            {pet.droneTakesPlayer === false
-              ? 'Sólo recogen de la mascota. Tu mochila es tuya.'
-              : 'Te quitan de la mochila lo que alguna máquina consuma y lo llevan por ti.'}
-          </div>
-        </>
-      )}
 
       <div className="section-title">CHASIS</div>
       {PET_CHASSIS.map((c) => {
