@@ -388,7 +388,9 @@ export function GameCanvas() {
         (exhausted ? BALANCE.player.exhaustedSpeedMult : 1);
 
       if (input.x !== 0 || input.y !== 0) {
-        const res = moveWithCollision(me.x, me.y, input.x * speed * dt, input.y * speed * dt);
+        const res = moveWithCollision(me.x, me.y, input.x * speed * dt, input.y * speed * dt, {
+          human: true,
+        });
         me.x = res.x;
         me.y = res.y;
         if (Math.abs(input.x) > Math.abs(input.y)) me.dir = input.x > 0 ? 'right' : 'left';
@@ -729,7 +731,7 @@ export function GameCanvas() {
           derived: petDerived,
           storedUnits: petStored,
           mode: player.pet?.mode ?? 'gather',
-          zone: player.pet?.zone ?? null,
+          target: player.pet?.target ?? null,
           hasDrones: (player.pet?.drones ?? 0) > 0,
           ownerHasRoom: inventoryFree(player) > 0,
           dropOff,

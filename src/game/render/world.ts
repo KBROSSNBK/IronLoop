@@ -233,6 +233,35 @@ function paintZoneMarkings(ctx: CanvasRenderingContext2D, factoryLevel: number) 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     ctx.fillText(`${z.icon} ${z.label}`, x + 14, y + h - 14);
+
+    /*
+     * Zona prohibida para personas: cordón de seguridad y aviso.
+     *
+     * Se pinta MUY claro porque es la única parte del mapa donde el jugador
+     * se choca con aire, y sin señal parecería un fallo en vez de una regla.
+     */
+    if (z.noHumans) {
+      ctx.globalAlpha = 0.85;
+      ctx.strokeStyle = z.accent;
+      ctx.lineWidth = 5;
+      ctx.setLineDash([26, 14]);
+      ctx.strokeRect(x + 2, y + 2, w - 4, h - 4);
+      ctx.setLineDash([]);
+
+      // Franjas de peligro en el borde superior, que es por donde se entra.
+      ctx.globalAlpha = 0.5;
+      for (let i = 0; i < w; i += 26) {
+        ctx.fillStyle = (i / 26) % 2 === 0 ? z.accent : '#facc15';
+        ctx.fillRect(x + i, y + 2, 13, 6);
+      }
+
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = '#fecaca';
+      ctx.font = '800 15px "Rajdhani", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText('⛔ SÓLO ROBOTS — PROHIBIDO EL PASO', x + w / 2, y + 16);
+    }
     ctx.restore();
   }
 }

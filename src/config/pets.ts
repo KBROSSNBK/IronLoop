@@ -324,10 +324,13 @@ export interface PetState {
   /** Qué le has mandado hacer. */
   mode: PetMode;
   /**
-   * Zona en la que debe trabajar (id de `ZONES`). `null` = automática: la que
+   * Material que le has encargado (id de item). `null` = automático: lo que
    * pille más cerca dentro del radio de su sensor.
+   *
+   * Se elige el MINERAL y no la zona: lo que importa es qué te falta para la
+   * cadena, no en qué esquina del mapa está. Ella ya busca la veta.
    */
-  zone: string | null;
+  target: string | null;
   /** Drones de apoyo comprados. */
   drones: number;
   /** Perros de la jauría (1..PACK.max). */
@@ -354,7 +357,7 @@ export const DEFAULT_PET: PetState = {
   lastAt: 0,
   mined: 0,
   mode: 'gather',
-  zone: null,
+  target: null,
   dogs: 1,
   drones: 0,
   droneLevel: 1,
@@ -365,6 +368,14 @@ export const DEFAULT_PET: PetState = {
  * Repara una mascota leída de un documento antiguo o incompleto: garantiza
  * que existen todos los campos y que el chasis de serie nunca se pierde.
  */
+/** Traducción de las zonas antiguas al material que las representa. */
+const LEGACY_ZONE_ITEM: Record<string, string> = {
+  resources: 'ore',
+  salvage: 'scrap',
+  mine: 'copper',
+  danger: 'titanium',
+};
+
 export function normalizePet(raw: Partial<PetState> | undefined, now: number): PetState {
   const owned = [...new Set([...DEFAULT_PET.owned, ...(raw?.owned ?? [])])].filter(
     (id) => !!PET_CHASSIS_MAP[id],
@@ -387,7 +398,13 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
     lastAt: raw?.lastAt || now,
     mined: raw?.mined ?? 0,
     mode,
-    zone: typeof raw?.zone === 'string' ? raw.zone : null,
+    // Partidas viejas guardaban una ZONA; se traduce al material que daba.
+    target:
+      typeof raw?.target === 'string'
+        ? raw.target
+        : typeof (raw as { zone?: string } | undefined)?.zone === 'string'
+          ? LEGACY_ZONE_ITEM[(raw as { zone: string }).zone] ?? null
+          : null,
     drones: Math.max(0, Math.min(DRONE.max, Math.floor(raw?.drones ?? 0))),
     dogs: Math.max(1, Math.min(PACK.max, Math.floor(raw?.dogs ?? 1))),
     droneLevel: Math.max(1, Math.floor(raw?.droneLevel ?? 1)),

@@ -53,7 +53,7 @@ import {
 } from '../../config/pets';
 import {
   addToPet,
-  getPetZone,
+  getPetTarget,
   isPetStation,
   petAccepts,
   petFree,
@@ -68,7 +68,7 @@ import {
  * material y tiempo libre, no progresión gratis.
  */
 const PET_XP_RATIO = 0.4;
-import { STATIONS, TILE } from '../../config/world';
+import { STATIONS, TILE, isHumanForbidden, type StationDef } from '../../config/world';
 import type {
   FactoryMember,
   FactoryState,
@@ -325,6 +325,17 @@ function nearStation(at: unknown, stationId: string): boolean {
   );
 }
 
+/**
+ * ¿Está esta estación en una zona donde una persona no puede entrar?
+ *
+ * La Zona Peligrosa rinde el doble precisamente porque TÚ no puedes ir: es
+ * trabajo de máquinas. Se comprueba aquí y no sólo en la colisión, para que
+ * forzar la posición desde consola tampoco sirva.
+ */
+function stationForbidden(s: StationDef): boolean {
+  return isHumanForbidden((s.tx + s.tw / 2) * TILE, (s.ty + s.th / 2) * TILE);
+}
+
 /** Lo mismo para una cinta: el material entra por donde estás tú. */
 function nearBelt(at: unknown, beltId: string): boolean {
   if (!isPoint(at)) return false;
@@ -370,6 +381,7 @@ export function opGather(
   // sistema de items; sólo cambia lo que rinde cada estación.
   if (!station || (station.type !== 'oreVein' && station.type !== 'salvage'))
     return fail('Estación inválida');
+  if (stationForbidden(station)) return fail('Zona prohibida: manda a tu mascota');
   if (!nearStation(args.at, args.stationId)) return fail('Acércate al yacimiento');
 
   const stats = deriveStats(player.upgrades);
@@ -1568,7 +1580,7 @@ export function opSetPetLook(
     color?: string;
     accent?: string;
     mode?: string;
-    zone?: string | null;
+    target?: string | null;
     droneTakesPlayer?: boolean;
     now: number;
   },
@@ -1582,20 +1594,20 @@ export function opSetPetLook(
   if (args.mode && !modeDef) return fail('Modo desconocido');
   const mode = modeDef?.id ?? pet.mode;
 
-  // Zona de trabajo: null = automática. Sólo se acepta una zona que exista y
-  // que ya esté abierta a este nivel de fábrica.
-  let zone = pet.zone;
+  // Material encargado: null = automático. Sólo se acepta un material que
+  // alguna veta dé de verdad y que ya esté abierto a este nivel de fábrica.
+  let target = pet.target;
   const events: OpEvent[] = [];
-  if (args.zone !== undefined) {
-    if (args.zone === null) {
-      zone = null;
-      events.push({ kind: 'info', text: 'Mascota: zona automática' });
+  if (args.target !== undefined) {
+    if (args.target === null) {
+      target = null;
+      events.push({ kind: 'info', text: 'Mascota: material automático' });
     } else {
-      const def = getPetZone(args.zone);
-      if (!def) return fail('Zona desconocida');
+      const def = getPetTarget(args.target);
+      if (!def) return fail('Ese material no sale de ninguna veta');
       if (factory.level < def.fromLevel) return fail(`Requiere fábrica nivel ${def.fromLevel}`);
-      zone = def.id;
-      events.push({ kind: 'info', text: `Mascota → ${def.label}` });
+      target = def.item;
+      events.push({ kind: 'info', text: `Mascota → ${getItem(def.item).name}` });
     }
   }
   if (modeDef) events.push({ kind: 'info', text: `Mascota: ${modeDef.label}` });
@@ -1611,7 +1623,7 @@ export function opSetPetLook(
 
   return {
     ok: true,
-    player: { ...player, pet: { ...pet, color, accent, mode, zone, droneTakesPlayer } },
+    player: { ...player, pet: { ...pet, color, accent, mode, target, droneTakesPlayer } },
     factory,
     events,
     data: { ok: true },

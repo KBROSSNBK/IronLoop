@@ -16,6 +16,7 @@ import {
   WORLD_W,
   conveyorLoadPoint,
   conveyorRect,
+  isHumanForbidden,
   type ConveyorDef,
   type Rect,
   type StationDef,
@@ -77,28 +78,46 @@ export function bodyRect(x: number, y: number): Rect {
   return { x: x - BODY.w / 2, y: y - BODY.h / 2 + BODY.offsetY, w: BODY.w, h: BODY.h };
 }
 
-/** Mueve con resolución por ejes; devuelve la posición final válida. */
+/**
+ * Mueve con resolución por ejes; devuelve la posición final válida.
+ *
+ * `human` marca que quien se mueve es una persona: además de los muros, le
+ * frenan las zonas prohibidas (la Zona Peligrosa). Las máquinas —mascotas,
+ * drones y robots— no pasan ese filtro y entran sin problema, que es
+ * justamente para lo que están.
+ */
 export function moveWithCollision(
   x: number,
   y: number,
   dx: number,
   dy: number,
+  opts: { human?: boolean } = {},
 ): { x: number; y: number; hit: boolean } {
   const solids = getSolids();
+  const veta = (px: number, py: number): boolean => {
+    const r = bodyRect(px, py);
+    if (solids.some((s) => rectsOverlap(r, s))) return true;
+    if (!opts.human) return false;
+    // Se comprueba la caja entera: nada de asomar medio cuerpo dentro.
+    return (
+      isHumanForbidden(r.x, r.y) ||
+      isHumanForbidden(r.x + r.w, r.y) ||
+      isHumanForbidden(r.x, r.y + r.h) ||
+      isHumanForbidden(r.x + r.w, r.y + r.h)
+    );
+  };
   let nx = x;
   let ny = y;
   let hit = false;
 
   if (dx !== 0) {
     const candidate = nx + dx;
-    const r = bodyRect(candidate, ny);
-    if (!solids.some((s) => rectsOverlap(r, s))) nx = candidate;
+    if (!veta(candidate, ny)) nx = candidate;
     else hit = true;
   }
   if (dy !== 0) {
     const candidate = ny + dy;
-    const r = bodyRect(nx, candidate);
-    if (!solids.some((s) => rectsOverlap(r, s))) ny = candidate;
+    if (!veta(nx, candidate)) ny = candidate;
     else hit = true;
   }
 

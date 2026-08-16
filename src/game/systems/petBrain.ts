@@ -80,8 +80,8 @@ export interface PetTickInput {
   storedUnits: number;
   /** Qué le has mandado hacer. */
   mode: PetMode;
-  /** Zona asignada, o null para que elija la más cercana ella sola. */
-  zone: string | null;
+  /** Material encargado, o null para que elija la veta más cercana ella sola. */
+  target: string | null;
   /** ¿Hay drones de apoyo? Entonces no interrumpe la extracción para el paseo. */
   hasDrones: boolean;
   /** ¿Cabe algo en el inventario del dueño? Si no, no tiene sentido entregárselo. */
@@ -160,7 +160,7 @@ export class PetBrain {
   }
 
   update(now: number, input: PetTickInput): PetTickResult {
-    const { dt, ownerX, ownerY, derived, storedUnits, mode, zone, ownerHasRoom, dropOff, hasDrones } = input;
+    const { dt, ownerX, ownerY, derived, storedUnits, mode, target, ownerHasRoom, dropOff, hasDrones } = input;
     if (!this.spawned) this.reset(ownerX, ownerY);
 
     const carried = this.carried(storedUnits);
@@ -169,11 +169,11 @@ export class PetBrain {
     let result: PetTickResult = { ...NOTHING };
 
     /* ── 1. Decisión: minar manda; soltar la carga es el plan B ── */
-    // Con zona asignada no hay correa: se lo has mandado tú y cruza el mapa.
-    const leashed = !zone && Math.hypot(ownerX - this.x, ownerY - this.y) > LEASH;
+    // Con material encargado no hay correa: se lo has pedido tú y cruza el mapa.
+    const leashed = !target && Math.hypot(ownerX - this.x, ownerY - this.y) > LEASH;
     const found =
       working && !full && !leashed
-        ? nearestStation(this.x, this.y, derived.radius, zone)
+        ? nearestStation(this.x, this.y, derived.radius, target)
         : null;
 
     // Sitio al que llevar lo que carga. En modo SEGUIR no reparte por la
@@ -206,7 +206,7 @@ export class PetBrain {
       this.state = 'IR_A_CINTA';
     } else if (esperandoDron) {
       // Llena pero con drones de apoyo: se queda en la veta a que la releven.
-      const p = nearestStation(this.x, this.y, derived.radius, zone);
+      const p = nearestStation(this.x, this.y, derived.radius, target);
       this.station = p?.station ?? null;
       this.state = p ? 'MINAR' : 'SEGUIR';
     } else if (carried > 0 && ownerHasRoom) {
@@ -224,7 +224,7 @@ export class PetBrain {
     let stopAt = FOLLOW_GAP;
 
     if (this.state === 'IR_A_VETA' || this.state === 'MINAR') {
-      const p = found ?? nearestStation(this.x, this.y, derived.radius, zone);
+      const p = found ?? nearestStation(this.x, this.y, derived.radius, target);
       if (p) {
         goalX = p.point.x;
         goalY = p.point.y;

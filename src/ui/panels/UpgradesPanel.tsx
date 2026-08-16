@@ -12,7 +12,7 @@ import {
 import { getMachine } from '../../config/machines';
 import { getItem } from '../../config/items';
 import { robotStatuses } from '../../game/logic/robots';
-import { PET_ZONES } from '../../game/logic/pet';
+import { PET_TARGETS } from '../../game/logic/pet';
 import {
   DEFAULT_PET,
   PET_ACCENTS,
@@ -380,45 +380,49 @@ function PetTab() {
       )}
 
 
-      {/* Dónde trabaja. Automática = la que pille dentro de su radio. */}
-      <div className="section-title">ZONA DE EXTRACCIÓN</div>
+      {/* QUÉ extrae. Se elige el material, no el sitio: lo que importa es
+          qué te falta para la cadena, no dónde está la veta. */}
+      <div className="section-title">QUÉ EXTRAE</div>
       <div className="zone-grid">
         <button
           className="zone-btn"
-          data-on={!pet.zone}
+          data-on={!pet.target}
           disabled={busy || mode !== 'gather'}
-          onClick={() => void op('setPetLook', { zone: null })}
+          onClick={() => void op('setPetLook', { target: null })}
         >
           <span className="ico">🎯</span>
-          <span className="nm">Automática</span>
-          <span className="sub">La más cercana dentro de su sensor</span>
+          <span className="nm">Automático</span>
+          <span className="sub">Lo que pille más cerca</span>
         </button>
-        {PET_ZONES.map((z) => {
-          const locked = factory.level < z.fromLevel;
+        {PET_TARGETS.map((t) => {
+          const locked = factory.level < t.fromLevel;
+          const it = getItem(t.item);
           return (
             <button
-              key={z.id}
+              key={t.item}
               className="zone-btn"
-              data-on={pet.zone === z.id}
+              data-on={pet.target === t.item}
               data-locked={locked}
               disabled={busy || locked || mode !== 'gather'}
-              style={{ ['--z' as string]: z.accent }}
-              onClick={() => void op('setPetLook', { zone: z.id })}
+              style={{ ['--z' as string]: it.color }}
+              onClick={() => void op('setPetLook', { target: t.item })}
             >
-              <span className="ico">{z.icon}</span>
-              <span className="nm">{z.label}</span>
+              <span className="ico">{it.icon}</span>
+              <span className="nm">{it.name}</span>
               <span className="sub">
                 {locked
-                  ? `🔒 Fábrica nivel ${z.fromLevel}`
-                  : z.items.map((i) => `${getItem(i).icon} ${getItem(i).name}`).join(' · ')}
+                  ? `🔒 Fábrica nivel ${t.fromLevel}`
+                  : t.onlyRobots
+                    ? '☢️ Zona prohibida: sólo tu mascota'
+                    : `${t.stations.length} veta${t.stations.length === 1 ? '' : 's'}`}
               </span>
             </button>
           );
         })}
       </div>
-      {pet.zone && (
+      {pet.target && (
         <div className="stat" style={{ fontSize: 11.5, color: 'var(--amber-soft)' }}>
-          Con una zona fija cruza el mapa hasta ella y no se queda contigo.
+          Con un material fijo cruza el mapa hasta su veta y no se queda contigo.
         </div>
       )}
 

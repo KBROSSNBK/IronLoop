@@ -51,6 +51,24 @@ export interface PetZone {
   stations: StationDef[];
   /** Materiales que rinde, sin repetir. */
   items: string[];
+  /** Sólo pueden entrar máquinas. */
+  noHumans: boolean;
+}
+
+/**
+ * MATERIAL QUE LE ENCARGAS A LA MASCOTA.
+ *
+ * Se elige el mineral, no la zona: lo que importa es qué te hace falta para
+ * la cadena, no en qué esquina del mapa está. Ella ya se busca la vida para
+ * encontrar la veta más cercana que lo dé.
+ */
+export interface PetTarget {
+  item: string;
+  stations: StationDef[];
+  /** Nivel de fábrica en el que se abre la primera veta que lo da. */
+  fromLevel: number;
+  /** Sólo se saca de zonas donde una persona no puede entrar. */
+  onlyRobots: boolean;
 }
 
 /**
@@ -68,12 +86,42 @@ export const PET_ZONES: PetZone[] = ZONES.map((z) => {
     fromLevel: z.liveAtLevel ?? 1,
     stations,
     items: [...new Set(stations.map((s) => stationYield(s).item))],
+    noHumans: z.noHumans === true,
   };
 }).filter((z) => z.stations.length > 0);
 
 export function getPetZone(id: string | null | undefined): PetZone | null {
   if (!id) return null;
   return PET_ZONES.find((z) => z.id === id) ?? null;
+}
+
+/** Zona a la que pertenece una estación. */
+function zoneOf(s: StationDef): PetZone | undefined {
+  return PET_ZONES.find((z) => z.stations.includes(s));
+}
+
+/**
+ * Materiales que se le pueden encargar, derivados del mapa.
+ * Añadir una veta nueva añade su material a la lista sola.
+ */
+export const PET_TARGETS: PetTarget[] = (() => {
+  const porItem = new Map<string, StationDef[]>();
+  for (const s of PET_STATIONS) {
+    const { item } = stationYield(s);
+    porItem.set(item, [...(porItem.get(item) ?? []), s]);
+  }
+  return [...porItem.entries()].map(([item, stations]) => ({
+    item,
+    stations,
+    fromLevel: Math.min(...stations.map((s) => zoneOf(s)?.fromLevel ?? 1)),
+    // Si TODAS sus vetas están en zona prohibida, sólo lo saca un robot.
+    onlyRobots: stations.every((s) => zoneOf(s)?.noHumans === true),
+  }));
+})();
+
+export function getPetTarget(item: string | null | undefined): PetTarget | null {
+  if (!item) return null;
+  return PET_TARGETS.find((t) => t.item === item) ?? null;
 }
 
 export interface StationChoice {
@@ -85,10 +133,11 @@ export interface StationChoice {
 /**
  * A qué veta va la mascota.
  *
- * · Sin zona elegida: la más cercana DENTRO del radio de su sensor. Es el
- *   comportamiento automático: trabaja con lo que pilla al lado.
- * · Con zona elegida: la más cercana DE ESA ZONA, sin importar el radio. Se
- *   lo has mandado tú, así que cruza el mapa si hace falta.
+ * · Sin material encargado: la más cercana DENTRO del radio de su sensor. Es
+ *   el comportamiento automático: trabaja con lo que pilla al lado.
+ * · Con material encargado: la veta más cercana QUE DÉ ESE MATERIAL, sin
+ *   importar el radio. Se lo has pedido tú, así que cruza el mapa si hace
+ *   falta.
  *
  * Devuelve null si no hay nada que trabajar.
  */
@@ -96,15 +145,15 @@ export function nearestStation(
   x: number,
   y: number,
   radius: number,
-  zoneId: string | null = null,
+  item: string | null = null,
 ): StationChoice | null {
-  const zone = getPetZone(zoneId);
-  const pool = zone ? zone.stations : PET_STATIONS;
+  const target = getPetTarget(item);
+  const pool = target ? target.stations : PET_STATIONS;
   let best: StationChoice | null = null;
   for (const s of pool) {
     const point = stationWorkPoint(s);
     const dist = Math.hypot(point.x - x, point.y - y);
-    if (!zone && dist > radius) continue;
+    if (!target && dist > radius) continue;
     if (!best || dist < best.dist) best = { station: s, point, dist };
   }
   return best;

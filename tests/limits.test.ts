@@ -11,6 +11,8 @@ import { applyXp, computeOfflineReport } from '../src/game/logic/progression';
 import { runOp } from '../src/services/backend/ops';
 import { createFactoryState, createPlayerState } from '../src/game/logic/defaults';
 import { getMachine } from '../src/config/machines';
+import { STATIONS, ZONES, isHumanForbidden } from '../src/config/world';
+import { moveWithCollision } from '../src/game/world/geometry';
 import { ROBOTS } from '../src/config/robots';
 import type { FactoryState, PlayerState } from '../src/types';
 
@@ -203,6 +205,42 @@ describe('cargar y retirar exige estar junto a la máquina', () => {
     expect(
       runOp('gather', player(), f, { stationId: 'vein_a', at: { x: 180, y: 300 }, now: T0 }).ok,
     ).toBe(true);
+  });
+
+  it('picar en una zona prohibida se rechaza: es trabajo de robots', () => {
+    const f: FactoryState = { ...createFactoryState('f1', 1, T0), level: 12 };
+    const veta = STATIONS.find((s) => s.id === 'vein_danger')!;
+    const encima = { x: (veta.tx + veta.tw / 2) * 40, y: (veta.ty + veta.th + 0.4) * 40 };
+    const out = runOp('gather', player(), f, { stationId: veta.id, at: encima, now: T0 });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/prohibida/i);
+  });
+
+  it('la mascota sí puede sacar material de ahí', () => {
+    const f: FactoryState = { ...createFactoryState('f1', 1, T0), level: 12 };
+    const out = runOp('petMine', player(), f, {
+      stationId: 'vein_danger',
+      qty: 3,
+      now: T0 + 60_000,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.player!.pet.inventory.titanium).toBeGreaterThan(0);
+  });
+
+  it('una persona no puede ni entrar en la zona prohibida', () => {
+    const danger = ZONES.find((z) => z.noHumans)!;
+    const dentro = { x: (danger.tx + 3) * 40, y: (danger.ty + 3) * 40 };
+    const fuera = { x: dentro.x, y: (danger.ty - 2) * 40 };
+
+    // Un humano se queda en el borde por mucho que empuje.
+    let p = { ...fuera };
+    for (let i = 0; i < 200; i++) p = moveWithCollision(p.x, p.y, 0, 12, { human: true });
+    expect(isHumanForbidden(p.x, p.y)).toBe(false);
+
+    // Una máquina entra sin problema.
+    let m = { ...fuera };
+    for (let i = 0; i < 200; i++) m = moveWithCollision(m.x, m.y, 0, 12);
+    expect(isHumanForbidden(m.x, m.y)).toBe(true);
   });
 
   it('por cinta lo que cuenta es estar junto a la CINTA', () => {

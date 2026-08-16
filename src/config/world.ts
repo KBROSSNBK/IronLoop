@@ -34,6 +34,15 @@ export interface ZoneDef {
   accent: string;
   /** Nivel de fábrica en el que la zona se "despierta" visualmente. */
   liveAtLevel?: number;
+  /**
+   * Zona prohibida para las personas. Sólo entran las máquinas.
+   *
+   * No es un adorno: el suelo bloquea al jugador igual que un muro y el
+   * servidor rechaza cualquier extracción ahí. Es lo que da sentido a tener
+   * mascotas —hay material que TÚ no puedes ir a buscar— y de paso explica
+   * por qué la Zona Peligrosa rinde el doble.
+   */
+  noHumans?: boolean;
 }
 
 export const ZONES: ZoneDef[] = [
@@ -50,7 +59,7 @@ export const ZONES: ZoneDef[] = [
   // ── Ampliación: zonas nuevas al este y al sur ──
   { id: 'mine', label: 'ZONA MINERA', icon: '⛏️', tx: 36, ty: 2, tw: 11, th: 10, floor: 'dirt', accent: '#fb923c', liveAtLevel: 3 },
   { id: 'tech', label: 'ZONA TECNOLÓGICA', icon: '🔬', tx: 36, ty: 13, tw: 11, th: 9, floor: 'tech', accent: '#a3e635', liveAtLevel: 6 },
-  { id: 'danger', label: 'ZONA PELIGROSA', icon: '☢️', tx: 36, ty: 23, tw: 11, th: 10, floor: 'hazard', accent: '#f87171', liveAtLevel: 8 },
+  { id: 'danger', label: 'ZONA PELIGROSA', icon: '☢️', tx: 36, ty: 23, tw: 11, th: 10, floor: 'hazard', accent: '#f87171', liveAtLevel: 8, noHumans: true },
   { id: 'advanced', label: 'ZONA AVANZADA', icon: '💠', tx: 14, ty: 26, tw: 20, th: 7, floor: 'tech', accent: '#22d3ee', liveAtLevel: 10 },
 ];
 
@@ -400,6 +409,18 @@ export const CONVEYORS: ConveyorDef[] = [
     feeds: 'recycler',
     label: 'CINTA DE CHATARRA',
   },
+  // RECICLADORA → ALEACIONES. El acero reciclado es la otra mitad de la
+  // receta de la aleación; sin esta cinta ese proceso se quedaba clavado.
+  {
+    id: 'c13',
+    tx: 31,
+    ty: 15.2,
+    len: 7,
+    dir: 'right',
+    fromLevel: 5,
+    feeds: 'alloy',
+    label: 'CINTA DE ACERO RECICLADO',
+  },
   // Todo lo pesado → REACTOR, por su costado derecho.
   {
     id: 'c11',
@@ -462,6 +483,23 @@ export const ROBOT_ROUTES: { id: string; points: { x: number; y: number }[]; fro
     ],
   },
 ];
+
+/** Zonas en las que una persona no puede poner un pie. */
+export const NO_HUMAN_ZONES: ZoneDef[] = ZONES.filter((z) => z.noHumans);
+
+export function isHumanForbidden(x: number, y: number): boolean {
+  for (const z of NO_HUMAN_ZONES) {
+    if (
+      x >= z.tx * TILE &&
+      x < (z.tx + z.tw) * TILE &&
+      y >= z.ty * TILE &&
+      y < (z.ty + z.th) * TILE
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function tilesToRect(tx: number, ty: number, tw: number, th: number): Rect {
   return { x: tx * TILE, y: ty * TILE, w: tw * TILE, h: th * TILE };
