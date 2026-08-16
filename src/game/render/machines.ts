@@ -9,7 +9,7 @@ import { TILE } from '../../config/world';
 import { getItem } from '../../config/items';
 import { ROBOTS } from '../../config/robots';
 import type { FactoryState, MachineState } from '../../types';
-import { fillRatio, settleMachine, type SettleResult } from '../logic/production';
+import {settleMachine, type SettleResult } from '../logic/production';
 import { ROBOT_STATE_LABEL, type RobotBrain } from '../systems/robotBrain';
 import type { Fx } from '../engine/fx';
 import { roundRect } from './world';
@@ -171,19 +171,8 @@ export function drawMachine(
   // Los buffers muestran el estado SIMULADO (settle), no el último persistido:
   // así el HUD coincide siempre con lo que devolverá la próxima operación.
   const live = settle.state;
-  // Tolva de entrada (izquierda)
-  drawBuffer(ctx, x + 8, y + bodyH - 30, def.input, live.input, def.inputCap, '#38bdf8', 'IN');
-  // Salida (derecha)
-  drawBuffer(
-    ctx,
-    x + w - 52,
-    y + bodyH - 30,
-    def.output,
-    live.output,
-    def.outputCap,
-    '#4ade80',
-    'OUT',
-  );
+  // Una ficha por ingrediente: se ve de un vistazo QUÉ falta y cuánto.
+  if (!locked) drawIngredients(ctx, x, y + bodyH - 34, w, def, live);
 
   // Barra de progreso
   const bw = w - 24;
@@ -205,6 +194,9 @@ export function drawMachine(
   ctx.textBaseline = 'middle';
   ctx.fillStyle = locked ? '#64748b' : def.accent;
   ctx.fillText(`${def.icon} ${def.short}`, x + w / 2, y - 22);
+
+  // Receta en una línea: qué entra y qué sale por cada ciclo.
+  if (!locked) drawRecipeLine(ctx, x + w / 2, y - 38, def);
 
   // Nivel de la máquina (pips)
   if (!locked && live.level > 0) {
@@ -245,45 +237,117 @@ export function drawMachine(
   }
 }
 
-function drawBuffer(
+/**
+ * Receta de un ciclo, en una línea: `2×🧿 + 1×🔋 + 2×⬜ = 1×💠`.
+ *
+ * Es la pregunta que todo el mundo se hace al plantarse delante de una máquina
+ * («¿esto qué come?»), así que se responde ahí mismo y sin abrir ningún panel.
+ */
+function drawRecipeLine(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  y: number,
+  def: MachineDef,
+): void {
+  const ins = Object.entries(def.input);
+  const outs = Object.entries(def.output);
+  if (ins.length === 0 || outs.length === 0) return;
+
+  const part = (list: [string, number | undefined][]) =>
+    list.map(([id, n]) => `${n ?? 1}×${getItem(id).icon}`).join(' + ');
+  const text = `${part(ins)} = ${part(outs)}`;
+
+  ctx.save();
+  ctx.font = '700 10px "Rajdhani", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const wBox = ctx.measureText(text).width + 14;
+  ctx.fillStyle = 'rgba(2,6,23,0.72)';
+  roundRect(ctx, cx - wBox / 2, y - 9, wBox, 18, 5);
+  ctx.fill();
+  ctx.strokeStyle = hexA(def.accent, 0.35);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#cbd5e1';
+  ctx.fillText(text, cx, y + 0.5);
+  ctx.restore();
+}
+
+/**
+ * Una ficha por ingrediente (`icono  tiene/necesita`) y otra por producto.
+ *
+ * Antes había un único contador con el icono del PRIMER ingrediente y la suma
+ * de todos: con el Reactor cargado de titanio ponía «◉ 52», que es justo lo
+ * contrario de la verdad — parecía que sobraba aleación cuando lo que faltaba
+ * era todo menos titanio. Ahora cada material va por separado y en verde o en
+ * rojo según llegue o no para un ciclo.
+ */
+function drawIngredients(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  recipe: Partial<Record<string, number>>,
-  buffer: Record<string, number>,
-  cap: number,
-  color: string,
-  label: string,
-) {
-  const items = Object.keys(recipe);
+  w: number,
+  def: MachineDef,
+  live: MachineState,
+): void {
+  const ins = Object.entries(def.input);
+  const outs = Object.entries(def.output);
+  const chipW = 42;
+  const gap = 3;
+  const arrow = 12;
+  const total = ins.length * (chipW + gap) + arrow + outs.length * (chipW + gap);
+  let cx = x + Math.max(6, (w - total) / 2);
+
   ctx.save();
-  ctx.fillStyle = 'rgba(2,6,23,0.72)';
-  roundRect(ctx, x, y, 44, 24, 4);
+  ctx.textBaseline = 'middle';
+
+  for (const [id, need] of ins) {
+    const have = live.input[id] ?? 0;
+    const ok = have >= (need ?? 1);
+    chip(ctx, cx, y, chipW, getItem(id).icon, `${have}/${need}`, ok ? '#4ade80' : '#f87171', ok);
+    cx += chipW + gap;
+  }
+
+  ctx.font = '800 12px "Rajdhani", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(148,163,184,0.75)';
+  ctx.fillText('→', cx + arrow / 2, y + 12);
+  cx += arrow;
+
+  for (const [id] of outs) {
+    const have = live.output[id] ?? 0;
+    chip(ctx, cx, y, chipW, getItem(id).icon, String(have), '#38bdf8', have > 0);
+    cx += chipW + gap;
+  }
+  ctx.restore();
+}
+
+/** Ficha compacta: icono arriba-izquierda y cifra a la derecha. */
+function chip(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  icon: string,
+  text: string,
+  color: string,
+  on: boolean,
+): void {
+  ctx.fillStyle = 'rgba(2,6,23,0.78)';
+  roundRect(ctx, x, y, w, 24, 4);
   ctx.fill();
-  ctx.strokeStyle = hexA(color, 0.45);
+  ctx.strokeStyle = hexA(color, on ? 0.75 : 0.4);
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  ctx.font = '700 7px "Rajdhani", system-ui, sans-serif';
+  ctx.font = '11px "Segoe UI Emoji", sans-serif';
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = hexA(color, 0.8);
-  ctx.fillText(label, x + 3, y + 2);
+  ctx.fillText(icon, x + 3, y + 12.5);
 
-  const total = items.reduce((a, i) => a + (buffer[i] ?? 0), 0);
-  const first = items[0];
   ctx.font = '800 11px "Rajdhani", system-ui, sans-serif';
-  ctx.fillStyle = total > 0 ? '#e2e8f0' : '#475569';
-  ctx.fillText(`${first ? getItem(first).icon : ''}${total}`, x + 3, y + 10);
-
-  // Barra de referencia. La capacidad es ilimitada, así que al pasar de la
-  // referencia se muestra llena en color de acento, nunca en rojo de "lleno".
-  const ratio = fillRatio(total, cap);
-  ctx.fillStyle = 'rgba(148,163,184,0.2)';
-  ctx.fillRect(x + 3, y + 20, 38, 2.4);
-  ctx.fillStyle = color;
-  ctx.fillRect(x + 3, y + 20, 38 * ratio, 2.4);
-  ctx.restore();
+  ctx.textAlign = 'right';
+  ctx.fillStyle = on ? '#e2e8f0' : color;
+  ctx.fillText(text, x + w - 4, y + 12.5);
 }
 
 function drawGear(

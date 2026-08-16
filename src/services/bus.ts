@@ -6,7 +6,18 @@
 
 export interface GameEvents {
   /** Número flotante sobre el jugador local. */
-  float: { text: string; color?: string; kind?: 'money' | 'xp' | 'item' | 'bad' };
+  float: {
+    text: string;
+    color?: string;
+    kind?: 'money' | 'xp' | 'item' | 'bad';
+    /** Avisos con la misma clave se SUMAN en uno solo en vez de apilarse. */
+    group?: string;
+    /** Cantidad a sumar dentro del grupo. */
+    amount?: number;
+    /** Prefijo y sufijo con los que se rehace el texto al sumar. */
+    pre?: string;
+    post?: string;
+  };
   /** Explosión de partículas en coordenadas de mundo. */
   burst: { x: number; y: number; color: string; count?: number; power?: number; kind?: 'spark' | 'smoke' | 'ring' };
   /** Notificación en la esquina. */

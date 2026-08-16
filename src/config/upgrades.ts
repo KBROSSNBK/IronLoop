@@ -14,6 +14,17 @@ export type UpgradeId =
   | 'trading'
   | 'luck';
 
+/**
+ * Mejoras sin tope. No es infinito de verdad —nada lo es— pero está tan lejos
+ * que el precio se dispara mucho antes: es el coste el que pone el límite, no
+ * un número escrito a mano. La UI reconoce este valor y no pinta «MÁX».
+ */
+export const UNLIMITED_LEVEL = 9_999;
+
+export function isUnlimited(def: Pick<UpgradeDef, 'maxLevel'>): boolean {
+  return def.maxLevel >= UNLIMITED_LEVEL;
+}
+
 export interface UpgradeDef {
   id: UpgradeId;
   name: string;
@@ -21,6 +32,7 @@ export interface UpgradeDef {
   desc: string;
   /** Texto del efecto por nivel, para la UI. */
   effect: (level: number) => string;
+  /** Tope de niveles. `UNLIMITED_LEVEL` = se puede seguir mejorando siempre. */
   maxLevel: number;
   baseCost: number;
   costGrowth: number;
@@ -70,9 +82,15 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     id: 'capacity',
     name: 'Mochila Modular',
     icon: '🎒',
-    desc: 'Más huecos de inventario.',
+    desc: 'Más huecos de inventario. No tiene tope: siempre se puede ampliar.',
     effect: (l) => `+${l * 5} huecos`,
-    maxLevel: 18,
+    /**
+     * Sin tope real. La mochila es la mejora que nunca deja de apetecer —
+     * cuanto más produce la fábrica, más quieres cargar de una vez— así que
+     * en vez de un muro artificial se deja crecer y es el precio (×1,55 por
+     * nivel) el que marca el ritmo.
+     */
+    maxLevel: UNLIMITED_LEVEL,
     baseCost: 300,
     costGrowth: 1.55,
     accent: '#f59e0b',

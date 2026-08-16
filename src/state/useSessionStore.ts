@@ -68,12 +68,24 @@ function dispatchOpEvents(events: OpEvent[]) {
         emit('float', {
           text: `${ev.amount > 0 ? '+' : '−'}$${Math.abs(ev.amount).toLocaleString('es')}`,
           kind: ev.amount > 0 ? 'money' : 'bad',
+          // Vender diez veces seguidas sale como UNA cifra que va subiendo,
+          // no como diez números encimados que no da tiempo a leer.
+          group: ev.amount > 0 ? 'money+' : 'money-',
+          amount: Math.abs(ev.amount),
+          pre: ev.amount > 0 ? '+$' : '−$',
         });
         emit('sfx', { name: ev.amount > 0 ? 'coin' : 'spend' });
         break;
       case 'xp':
         if (!ev.amount) break;
-        emit('float', { text: `+${Math.round(ev.amount)} XP`, kind: 'xp' });
+        emit('float', {
+          text: `+${Math.round(ev.amount)} XP`,
+          kind: 'xp',
+          group: 'xp',
+          amount: Math.round(ev.amount),
+          pre: '+',
+          post: ' XP',
+        });
         break;
       case 'item': {
         if (!ev.item || !ev.amount) break;
@@ -82,6 +94,10 @@ function dispatchOpEvents(events: OpEvent[]) {
           text: `${ev.amount > 0 ? '+' : ''}${ev.amount} ${def.icon}`,
           kind: 'item',
           color: def.color,
+          group: `item:${ev.item}`,
+          amount: ev.amount,
+          pre: ev.amount > 0 ? '+' : '',
+          post: ` ${def.icon}`,
         });
         if (ev.amount > 0) emit('sfx', { name: 'pickup' });
         break;
@@ -126,6 +142,10 @@ function dispatchOpEvents(events: OpEvent[]) {
           text: `+${Math.round(ev.amount).toLocaleString('es')} 🏭`,
           kind: 'item',
           color: '#22d3ee',
+          group: 'contrib',
+          amount: Math.round(ev.amount),
+          pre: '+',
+          post: ' 🏭',
         });
         break;
       case 'info':

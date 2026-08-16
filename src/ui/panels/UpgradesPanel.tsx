@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Panel } from './Panel';
 import { useSessionStore } from '../../state/useSessionStore';
-import { UPGRADE_LIST, upgradeCost } from '../../config/upgrades';
+import { UPGRADE_LIST, isUnlimited, upgradeCost } from '../../config/upgrades';
 import {
   ROBOT_CONTRIB_RATIO,
   ROBOT_MODES,
@@ -76,7 +76,8 @@ export function UpgradesPanel() {
 
           {UPGRADE_LIST.map((def) => {
             const level = player.upgrades[def.id] ?? 0;
-            const maxed = level >= def.maxLevel;
+            // Las mejoras sin tope nunca llegan a "MÁX": siempre hay siguiente.
+            const maxed = !isUnlimited(def) && level >= def.maxLevel;
             const cost = upgradeCost(def, level);
             const locked = player.level < def.unlockLevel;
             const afford = player.money >= cost;
@@ -96,7 +97,7 @@ export function UpgradesPanel() {
                     {locked ? `🔒 Requiere nivel ${def.unlockLevel}` : def.effect(level) || def.desc}
                   </div>
                   <div className="upg-pips">
-                    {Array.from({ length: Math.min(def.maxLevel, 15) }, (_, i) => (
+                    {Array.from({ length: 15 }, (_, i) => (
                       <i key={i} className={i < Math.min(level, 15) ? 'on' : ''} />
                     ))}
                   </div>

@@ -124,9 +124,39 @@ function noise(at: number, dur: number, peak: number, freq = 1400, q = 1) {
   src.stop(at + dur);
 }
 
+/**
+ * Antirruido: cuándo sonó por última vez cada efecto.
+ *
+ * Con la fábrica en marcha las mismas acciones se repiten varias veces por
+ * segundo, y sin esto el juego era una ametralladora de monedas y recogidas.
+ * Repetir el MISMO sonido antes de que se apague el anterior no aporta
+ * información —ya te has enterado— así que simplemente se omite.
+ */
+const lastPlayed: Record<string, number> = {};
+const SFX_COOLDOWN_MS: Record<string, number> = {
+  coin: 320,
+  pickup: 300,
+  spend: 320,
+  machine: 400,
+  click: 90,
+  error: 700,
+  mission: 1200,
+  // Los hitos gordos siempre suenan: son raros y hay que enterarse.
+  levelup: 0,
+  factory: 0,
+};
+
 export function playSfx(name: SfxName, volume = 1): void {
   const c = ensureContext();
   if (!c || muted) return;
+
+  const cooldown = SFX_COOLDOWN_MS[name] ?? 200;
+  if (cooldown > 0) {
+    const now = performance.now();
+    if (now - (lastPlayed[name] ?? -Infinity) < cooldown) return;
+    lastPlayed[name] = now;
+  }
+
   const t = c.currentTime + 0.005;
   const v = volume;
 

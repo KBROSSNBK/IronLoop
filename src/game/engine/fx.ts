@@ -30,6 +30,10 @@ export interface FloatingText {
   text: string;
   color: string;
   size: number;
+  /** Clave de agrupación: los avisos del mismo grupo se suman en uno solo. */
+  group?: string;
+  /** Total acumulado del grupo. */
+  total?: number;
 }
 
 const MAX_PARTICLES = 420;
@@ -96,8 +100,49 @@ export class Fx {
     });
   }
 
-  float(x: number, y: number, text: string, color = '#ffffff', size = 13): void {
-    this.texts.push({ x, y, vy: -46, life: 1.15, max: 1.15, text, color, size });
+  /**
+   * Texto flotante.
+   *
+   * `group` permite que varios avisos del mismo tipo (todo el mineral que vas
+   * picando, todo el dinero de una tanda de ventas) se junten en UNO que va
+   * sumando, en vez de escupir diez cifras encimadas que no se leen. Los que
+   * no se pueden sumar salen en columna, cada uno un poco más arriba que el
+   * anterior, para que tampoco se tapen entre ellos.
+   */
+  float(
+    x: number,
+    y: number,
+    text: string,
+    color = '#ffffff',
+    size = 13,
+    group?: { key: string; amount: number; render: (total: number) => string },
+  ): void {
+    if (group) {
+      const live = this.texts.find((t) => t.group === group.key && t.life > 0.45);
+      if (live) {
+        live.total = (live.total ?? 0) + group.amount;
+        live.text = group.render(live.total);
+        live.life = live.max;
+        return;
+      }
+    }
+
+    // Reparto en columna: cada aviso reciente empuja al siguiente hacia arriba.
+    const recientes = this.texts.filter((t) => t.life > t.max * 0.72).length;
+    const lift = Math.min(recientes, 4) * 15;
+
+    this.texts.push({
+      x,
+      y: y - lift,
+      vy: -42,
+      life: 1.15,
+      max: 1.15,
+      text,
+      color,
+      size,
+      group: group?.key,
+      total: group?.amount,
+    });
     if (this.texts.length > 40) this.texts.shift();
   }
 

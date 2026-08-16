@@ -190,19 +190,29 @@ export function GameCanvas() {
 
     /* ── feedback visual desde el bus ── */
     const offs = [
-      on('float', ({ text, color, kind }) => {
+      on('float', ({ text, color, kind, group, amount, pre, post }) => {
         const palette: Record<string, string> = {
           money: '#fbbf24',
           xp: '#a78bfa',
           item: '#7dd3fc',
           bad: '#f87171',
         };
+        // Sin desplazamiento aleatorio: los avisos salen alineados sobre la
+        // cabeza y, si se repiten, se suman o se ordenan en columna.
         fx.float(
-          me.x + (Math.random() - 0.5) * 14,
-          me.y - 50,
+          me.x,
+          me.y - 52,
           text,
           color ?? palette[kind ?? 'item'] ?? '#e2e8f0',
           kind === 'money' ? 15 : 13,
+          group && amount !== undefined
+            ? {
+                key: group,
+                amount,
+                render: (total) =>
+                  `${pre ?? ''}${Math.round(total).toLocaleString('es')}${post ?? ''}`,
+              }
+            : undefined,
         );
       }),
       on('burst', ({ x, y, color, count, power, kind }) =>

@@ -583,3 +583,52 @@
   letter-spacing: 0.02em;
 }
 .zone-btn .sub { font-size: 10.5px; color: var(--text-mute); line-height: 1.3; }
+
+/* ── Receta visual de una máquina ── */
+.recipe-vis {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.recipe-vis .r-part { display: flex; align-items: center; gap: 5px; }
+.recipe-vis .r-op {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-mute);
+}
+.recipe-vis .r-op.eq { color: var(--cyan); }
+.r-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px 5px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  border-radius: 4px;
+}
+.r-chip[data-ok='true'] { border-color: rgba(74, 222, 128, 0.5); }
+.r-chip.out { border-color: rgba(56, 189, 248, 0.5); }
+.r-chip i { font-style: normal; font-size: 17px; line-height: 1; }
+/* Cantidad que pide la receta */
+.r-chip em {
+  font-style: normal;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+}
+/* Cuánto hay ahora dentro de la máquina */
+.r-chip u {
+  text-decoration: none;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-mute);
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  padding-left: 4px;
+}
+.r-chip[data-ok='true'] u { color: var(--green); }
+.r-chip.out u { color: var(--blue); }

@@ -112,15 +112,54 @@ export function FactoryPanel() {
               <div className="stat">🔒 Se desbloquea con la fábrica a nivel {m.unlockFactoryLevel}</div>
             ) : (
               <>
-                <div className="recipe">
-                  {Object.entries(m.input)
-                    .map(([i, n]) => `${n}× ${getItem(i).icon}`)
-                    .join(' + ')}
-                  {' → '}
-                  {Object.entries(m.output)
-                    .map(([i, n]) => `${n}× ${getItem(i).icon}`)
-                    .join(' + ')}
+                {/* Receta visual de UN ciclo: qué entra, qué sale y cuánto
+                    hay ahora mismo de cada cosa. */}
+                <div className="recipe-vis">
+                  {Object.entries(m.input).map(([id, need], i) => {
+                    const have = settled.state.input[id] ?? 0;
+                    const ok = have >= (need ?? 1);
+                    const it = getItem(id);
+                    return (
+                      <span key={id} className="r-part">
+                        {i > 0 && <b className="r-op">+</b>}
+                        <span className="r-chip" data-ok={ok} title={it.name}>
+                          <i>{it.icon}</i>
+                          <em>{need}</em>
+                          <u>{have}</u>
+                        </span>
+                      </span>
+                    );
+                  })}
+                  <b className="r-op eq">=</b>
+                  {Object.entries(m.output).map(([id, n]) => {
+                    const it = getItem(id);
+                    return (
+                      <span className="r-chip out" key={id} title={it.name}>
+                        <i>{it.icon}</i>
+                        <em>{n}</em>
+                        <u>{settled.state.output[id] ?? 0}</u>
+                      </span>
+                    );
+                  })}
                 </div>
+                {(() => {
+                  const falta = Object.entries(m.input).filter(
+                    ([id, need]) => (settled.state.input[id] ?? 0) < (need ?? 1),
+                  );
+                  if (falta.length === 0) return null;
+                  return (
+                    <div className="stat" style={{ color: 'var(--red)' }}>
+                      Falta:{' '}
+                      {falta
+                        .map(([id, need]) => {
+                          const it = getItem(id);
+                          const have = settled.state.input[id] ?? 0;
+                          return `${it.icon} ${it.name} ×${(need ?? 1) - have}`;
+                        })
+                        .join(' · ')}
+                    </div>
+                  );
+                })()}
                 <div className="bar">
                   <i style={{ width: `${settled.progress * 100}%`, background: m.accent }} />
                 </div>

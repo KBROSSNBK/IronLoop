@@ -105,6 +105,38 @@ function emotePose(anim: string, t: number): EmotePose {
   }
 }
 
+/**
+ * Cuña en el suelo que apunta a donde mira el personaje.
+ * Se dibuja antes que el cuerpo para que quede debajo, como parte de la sombra.
+ */
+function drawFacingWedge(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  dir: FacingDir,
+  accent: string,
+  moving: boolean,
+): void {
+  const ang: Record<FacingDir, number> = {
+    right: 0,
+    down: Math.PI / 2,
+    left: Math.PI,
+    up: -Math.PI / 2,
+  };
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(ang[dir]);
+  ctx.globalAlpha *= moving ? 0.85 : 0.55;
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.moveTo(13, 0);
+  ctx.lineTo(6, -3.4);
+  ctx.lineTo(6, 3.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 function roundRect(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -180,6 +212,14 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   ctx.ellipse(x, y + 16, 10 - pose.hop * 0.2, 3.6, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  // Cuña de orientación pegada a los pies. Es la señal más barata y más
+  // legible de hacia dónde miras: en vista cenital el cuerpo apenas cambia
+  // entre izquierda y derecha, y sin esto no se sabe a qué vas a interactuar.
+  // Mirando hacia arriba iría justo debajo del cuerpo, tapada, así que en ese
+  // caso se pinta al final y por encima de la cabeza.
+  const wedgeArriba = c.dir === 'up';
+  if (!wedgeArriba) drawFacingWedge(ctx, x, y + 16, c.dir, ap.accent, moving);
+
   // El emote inclina, sacude y levanta el cuerpo (la sombra ya está pintada).
   if (emoting) {
     ctx.translate(x + pose.shakeX, y - pose.hop);
@@ -196,6 +236,19 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   const headY = y - 15 - bob;
   const faceLeft = c.dir === 'left';
   const back = c.dir === 'up';
+  const perfil = c.dir === 'left' || c.dir === 'right';
+
+  /**
+   * De perfil el cuerpo se dibuja MIRANDO A LA DERECHA y se espeja cuando toca.
+   * Así izquierda y derecha son de verdad simétricas —el brazo adelantado, el
+   * sombreado y el pico cambian de lado— en vez de ser el mismo dibujo con
+   * los ojos movidos dos píxeles.
+   */
+  if (faceLeft) {
+    ctx.translate(x, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-x, 0);
+  }
 
   // Piernas
   const legColor = ap.outfit === 'suit' ? shade(ap.outfitColor, -50) : '#26303f';
@@ -219,8 +272,17 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
     ctx.fillRect(x + 0.5 + sp, y + 16 - bob, 6.5, 1);
   }
 
-  // Torso
-  const torsoW = 17;
+  // Brazo del lado LEJANO: de perfil va detrás del torso y más oscuro, que
+  // es lo que hace que se lea la profundidad y hacia dónde mira.
+  const armYFar = bodyY + 2 + (moving ? -swing * 3.5 * 0.35 : 0);
+  if (perfil) {
+    ctx.fillStyle = shade(ap.outfitColor, -55);
+    roundRect(ctx, x - 5, armYFar, 4, 10, 2);
+    ctx.fill();
+  }
+
+  // Torso — de perfil es más estrecho.
+  const torsoW = perfil ? 13 : 17;
   ctx.fillStyle = ap.outfitColor;
   roundRect(ctx, x - torsoW / 2, bodyY, torsoW, 14, 4);
   ctx.fill();
@@ -228,6 +290,16 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   ctx.fillStyle = 'rgba(0,0,0,0.18)';
   roundRect(ctx, x + 2, bodyY, torsoW / 2 - 2, 14, 4);
   ctx.fill();
+
+  // Mochila: sólo se ve por detrás, y es lo que distingue "de espaldas" de
+  // "de frente" sin tener que fijarse en la cara.
+  if (back) {
+    ctx.fillStyle = shade(ap.outfitColor, -45);
+    roundRect(ctx, x - 6.5, bodyY + 1.5, 13, 10, 3);
+    ctx.fill();
+    ctx.fillStyle = ap.accent;
+    ctx.fillRect(x - 4.5, bodyY + 4.5, 9, 1.6);
+  }
 
   // Detalles de la ropa
   ctx.fillStyle = ap.accent;
@@ -257,18 +329,28 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   const armLY = armY + armSwing * 0.35 - pose.armL - mineLift;
   const armRY = armY - armSwing * 0.35 + (working ? 2 : 0) - pose.armR - mineLift;
   ctx.fillStyle = shade(ap.outfitColor, -28);
-  roundRect(ctx, x - torsoW / 2 - 3.4, armLY, 4, 10, 2);
-  ctx.fill();
-  roundRect(ctx, x + torsoW / 2 - 0.6, armRY, 4, 10, 2);
-  ctx.fill();
-  // Manos
-  ctx.fillStyle = ap.body;
-  ctx.beginPath();
-  ctx.arc(x - torsoW / 2 - 1.4, armLY + 10, 2.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(x + torsoW / 2 + 1.4, armRY + 10, 2.1, 0, Math.PI * 2);
-  ctx.fill();
+  if (perfil) {
+    // De perfil sólo se ve el brazo cercano, y va por delante del torso.
+    roundRect(ctx, x + 1, armRY, 4.4, 10, 2);
+    ctx.fill();
+    ctx.fillStyle = ap.body;
+    ctx.beginPath();
+    ctx.arc(x + 3.2, armRY + 10, 2.1, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    roundRect(ctx, x - torsoW / 2 - 3.4, armLY, 4, 10, 2);
+    ctx.fill();
+    roundRect(ctx, x + torsoW / 2 - 0.6, armRY, 4, 10, 2);
+    ctx.fill();
+    // Manos
+    ctx.fillStyle = ap.body;
+    ctx.beginPath();
+    ctx.arc(x - torsoW / 2 - 1.4, armLY + 10, 2.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + torsoW / 2 + 1.4, armRY + 10, 2.1, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // Cabeza
   ctx.fillStyle = ap.body;
@@ -280,16 +362,29 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
   ctx.arc(x + 2, headY, 6, 0, Math.PI * 2);
   ctx.fill();
 
-  // Cara (sólo si no está de espaldas)
+  // Cara (sólo si no está de espaldas). De perfil se ve un ojo y la nariz.
   if (!back) {
     ctx.fillStyle = 'rgba(20,16,12,0.85)';
-    const ex = faceLeft ? -2.6 : c.dir === 'right' ? 2.6 : 0;
-    ctx.beginPath();
-    ctx.arc(x - 2.4 + ex * 0.4, headY - 0.6, 0.95, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + 2.4 + ex * 0.4, headY - 0.6, 0.95, 0, Math.PI * 2);
-    ctx.fill();
+    if (perfil) {
+      ctx.beginPath();
+      ctx.arc(x + 2.2, headY - 0.6, 1, 0, Math.PI * 2);
+      ctx.fill();
+      // Perfil de la nariz: remata la silueta y deja claro el lado.
+      ctx.fillStyle = shade(ap.body, -22);
+      ctx.beginPath();
+      ctx.moveTo(x + 6, headY - 1.6);
+      ctx.lineTo(x + 8.4, headY + 0.4);
+      ctx.lineTo(x + 6, headY + 1.8);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.arc(x - 2.4, headY - 0.6, 0.95, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + 2.4, headY - 0.6, 0.95, 0, Math.PI * 2);
+      ctx.fill();
+    }
     if (tired) {
       ctx.strokeStyle = 'rgba(20,16,12,0.7)';
       ctx.lineWidth = 0.9;
@@ -307,7 +402,9 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
 
   // Pico: se dibuja después del cuerpo para que quede en primer plano.
   if (mine.active) {
-    const side = c.dir === 'left' ? -1 : 1;
+    // El cuerpo ya está espejado si mira a la izquierda, así que aquí el pico
+    // siempre va al lado derecho del dibujo.
+    const side = 1;
     const px = x + side * 9;
     const py = armY + 3;
     ctx.save();
@@ -348,6 +445,10 @@ export function drawCharacter(ctx: CanvasRenderingContext2D, c: CharacterDrawArg
       ctx.restore();
     }
   }
+
+  // Mirando hacia arriba, la cuña va sobre la cabeza: en el suelo quedaría
+  // detrás del propio cuerpo y no se vería.
+  if (wedgeArriba) drawFacingWedge(ctx, x, headY - 16, 'up', ap.accent, moving);
 
   // Indicador de actividad
   if (working && c.actionProgress !== undefined) {

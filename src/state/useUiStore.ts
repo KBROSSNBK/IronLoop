@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { BALANCE } from '../config/balance';
 
 export type PanelId =
   | 'inventory'
@@ -19,7 +18,20 @@ export interface Toast {
   icon?: string;
   tone: 'good' | 'bad' | 'epic' | 'info';
   at: number;
+  /** Veces que se ha repetido el mismo aviso mientras estaba en pantalla. */
+  count: number;
 }
+
+/** Cuántos avisos caben a la vez antes de tapar el juego. */
+const MAX_TOASTS = 3;
+
+/** Los hitos se quedan más rato; el ruido de fondo se va enseguida. */
+const TOAST_MS: Record<Toast['tone'], number> = {
+  epic: 3600,
+  bad: 2600,
+  good: 2000,
+  info: 1800,
+};
 
 interface UiState {
   panel: PanelId;
@@ -35,7 +47,7 @@ interface UiState {
 
   setPanel: (p: PanelId) => void;
   togglePanel: (p: Exclude<PanelId, null>) => void;
-  pushToast: (t: Omit<Toast, 'id' | 'at'>) => void;
+  pushToast: (t: Omit<Toast, 'id' | 'at' | 'count'>) => void;
   dismissToast: (id: number) => void;
   setMuted: (v: boolean) => void;
   setMusicOn: (v: boolean) => void;
@@ -62,10 +74,36 @@ export const useUiStore = create<UiState>((set, get) => ({
   setPanel: (panel) => set({ panel }),
   togglePanel: (p) => set({ panel: get().panel === p ? null : p }),
 
+  /**
+   * Apila un aviso, con dos reglas para que no se conviertan en spam:
+   *  · Un aviso REPETIDO no crea otra tarjeta: suma en la que ya está y le
+   *    renueva el tiempo. Vender diez veces seguidas sale como «×10».
+   *  · Nunca hay más de MAX_TOASTS en pantalla; el más viejo se va.
+   */
   pushToast: (t) => {
-    const toast: Toast = { ...t, id: ++toastId, at: Date.now() };
-    set({ toasts: [...get().toasts.slice(-4), toast] });
-    window.setTimeout(() => get().dismissToast(toast.id), BALANCE.ui.toastMs);
+    const now = Date.now();
+    const toasts = get().toasts;
+    const same = toasts.find((x) => x.title === t.title && x.body === t.body);
+    if (same) {
+      set({
+        toasts: toasts.map((x) =>
+          x.id === same.id ? { ...x, count: x.count + 1, at: now } : x,
+        ),
+      });
+      window.setTimeout(() => {
+        // Sólo se retira si nadie lo ha renovado mientras tanto.
+        const cur = get().toasts.find((x) => x.id === same.id);
+        if (cur && cur.at <= now) get().dismissToast(same.id);
+      }, TOAST_MS[t.tone]);
+      return;
+    }
+
+    const toast: Toast = { ...t, id: ++toastId, at: now, count: 1 };
+    set({ toasts: [...toasts.slice(-(MAX_TOASTS - 1)), toast] });
+    window.setTimeout(() => {
+      const cur = get().toasts.find((x) => x.id === toast.id);
+      if (cur && cur.at <= now) get().dismissToast(toast.id);
+    }, TOAST_MS[t.tone]);
   },
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
 
