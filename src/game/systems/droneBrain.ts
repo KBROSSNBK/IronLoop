@@ -88,13 +88,28 @@ export class DroneBrain {
     this.bay = null;
   }
 
-  /** Punto de espera: en formación al lado del dueño. */
-  private idlePoint(ownerX: number, ownerY: number): { x: number; y: number } {
-    const lado = this.slot % 2 === 0 ? 1 : -1;
-    const fila = Math.floor(this.slot / 2);
+  /**
+   * Punto de espera.
+   *
+   * El primer dron es tu escolta: se queda contigo pase lo que pase. Los
+   * demás esperan junto a la jauría, que es donde va a salir el trabajo, para
+   * no perder el viaje de ida cada vez.
+   */
+  private idlePoint(
+    ownerX: number,
+    ownerY: number,
+    dogX: number,
+    dogY: number,
+  ): { x: number; y: number } {
+    if (this.slot === 0) {
+      return { x: ownerX + 26, y: ownerY - DRONE_ALTITUDE };
+    }
+    const i = this.slot - 1;
+    const lado = i % 2 === 0 ? 1 : -1;
+    const fila = Math.floor(i / 2);
     return {
-      x: ownerX + lado * (26 + fila * 16),
-      y: ownerY - DRONE_ALTITUDE - fila * 10,
+      x: dogX + lado * (24 + fila * 14),
+      y: dogY - DRONE_ALTITUDE - fila * 9,
     };
   }
 
@@ -147,7 +162,7 @@ export class DroneBrain {
           this.state = 'AL_ORIGEN';
           break;
         }
-        const p = this.idlePoint(ownerX, ownerY);
+        const p = this.idlePoint(ownerX, ownerY, dogX, dogY);
         this.flyTo(p.x, p.y, speed * 0.75, dt);
         break;
       }

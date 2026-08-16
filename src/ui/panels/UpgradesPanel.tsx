@@ -21,8 +21,10 @@ import {
   PET_MODES,
   PET_STATS,
   DRONE,
+  PACK,
   derivePet,
   deriveDrones,
+  dogCost,
   droneCost,
   droneUpgradeCost,
   isPetStatUnlimited,
@@ -408,6 +410,34 @@ function PetTab() {
           </div>
         );
       })}
+
+      {/* La jauría: más perros = más ritmo y más mochila. */}
+      <div className="section-title">JAURÍA</div>
+      <div className="card accent" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+        Trabajan <b>juntos</b>: van a la misma veta, se reparten el trabajo y comparten
+        mochila. Cada perro que sumas multiplica la extracción y la carga. Lo suyo es que
+        cada uno lleve su dron, más otro que se quede contigo.
+      </div>
+      <div className="pet-stats">
+        <Metric label="Perros" value={`${derived.dogs}/${PACK.max}`} accent="var(--amber-soft)" />
+        <Metric
+          label="Drones ideales"
+          value={`${derived.dogs + 1}`}
+          accent={squad.count >= derived.dogs + 1 ? 'var(--green)' : 'var(--red)'}
+        />
+        <Metric label="Mochila total" value={`${derived.capacity}`} accent="var(--blue)" />
+      </div>
+      <div className="robot-modes">
+        <button
+          className="mode-btn"
+          disabled={busy || derived.dogs >= PACK.max || player.money < dogCost(derived.dogs)}
+          onClick={() => void op('buyDog', {})}
+        >
+          {derived.dogs >= PACK.max
+            ? '✅ Jauría completa'
+            : `🐕 Sumar perro · ${moneyExact(dogCost(derived.dogs))}`}
+        </button>
+      </div>
 
       {/* Drones: el complemento del perro, no un sustituto. */}
       <div className="section-title">ESCUADRILLA DE DRONES</div>

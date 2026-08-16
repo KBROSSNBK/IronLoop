@@ -6,7 +6,7 @@ import { createFactoryState, createPlayerState } from '../src/game/logic/default
 import { conveyorLoadPoint, CONVEYORS } from '../src/config/world';
 import { ROBOTS, robotRate } from '../src/config/robots';
 import { getMachine, MACHINE_LIST } from '../src/config/machines';
-import { DEFAULT_PET, DRONE } from '../src/config/pets';
+import { DEFAULT_PET, DRONE, PACK, derivePet } from '../src/config/pets';
 import type { FactoryState, PlayerState } from '../src/types';
 
 const T0 = 1_700_000_000_000;
@@ -327,6 +327,47 @@ describe('drones de apoyo', () => {
     });
     expect(out.ok).toBe(false);
     expect(p.inventory.copper).toBe(30);
+  });
+
+  it('la jauría multiplica ritmo y mochila, con tope de tres', () => {
+    const uno = derivePet({ ...DEFAULT_PET, dogs: 1, lastAt: T0 });
+    const tres = derivePet({ ...DEFAULT_PET, dogs: 3, lastAt: T0 });
+    expect(tres.dogs).toBe(3);
+    expect(tres.minePerSec).toBeCloseTo(uno.minePerSec * 3, 5);
+    expect(tres.capacity).toBe(uno.capacity * 3);
+    // Ni por documentos manipulados se pasa del tope.
+    expect(derivePet({ ...DEFAULT_PET, dogs: 99, lastAt: T0 }).dogs).toBe(PACK.max);
+    expect(derivePet({ ...DEFAULT_PET, dogs: 0, lastAt: T0 }).dogs).toBe(1);
+  });
+
+  it('sumar perros se cobra y se corta al llegar al máximo', () => {
+    let p = player({ money: 10_000_000 });
+    let f: FactoryState = createFactoryState('f1', 1, T0);
+    for (let i = 1; i < PACK.max; i++) {
+      const out = runOp('buyDog', p, f, { now: T0 });
+      expect(out.ok).toBe(true);
+      expect(out.player!.money).toBeLessThan(p.money);
+      p = out.player!;
+      f = out.factory!;
+    }
+    expect(p.pet.dogs).toBe(PACK.max);
+    expect(runOp('buyDog', p, f, { now: T0 }).ok).toBe(false);
+  });
+
+  it('con más perros el servidor acepta más material por el mismo tiempo', () => {
+    const conPerros = (n: number) =>
+      player({ pet: { ...DEFAULT_PET, dogs: n, lastAt: T0 } });
+    const uno = runOp('petMine', conPerros(1), nivel(6), {
+      stationId: 'vein_a',
+      qty: 9999,
+      now: T0 + 10_000,
+    });
+    const tres = runOp('petMine', conPerros(3), nivel(6), {
+      stationId: 'vein_a',
+      qty: 9999,
+      now: T0 + 10_000,
+    });
+    expect(tres.player!.pet.inventory.ore).toBeGreaterThan(uno.player!.pet.inventory.ore!);
   });
 
   it('un límite absurdo no crea material de la nada', () => {

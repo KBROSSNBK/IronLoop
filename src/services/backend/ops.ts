@@ -42,7 +42,9 @@ import {
   PET_MODES,
   PET_STAT_MAP,
   DRONE,
+  PACK,
   deriveDrones,
+  dogCost,
   droneCost,
   droneUpgradeCost,
   getChassis,
@@ -1377,6 +1379,43 @@ export function opBuyPetStat(
  * Los drones no extraen: le quitan la carga a la mascota en la propia veta y
  * la llevan a su máquina, para que ella no pierda tiempo en el paseo.
  */
+export function opBuyDog(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { now: number },
+): OpOutcome<{ dogs: number; cost: number }> {
+  const pet = normalizePet(player.pet, args.now);
+  if (pet.dogs >= PACK.max) return fail('Jauría completa');
+
+  const cost = dogCost(pet.dogs);
+  if (player.money < cost) return fail('Dinero insuficiente');
+
+  const events: OpEvent[] = [];
+  let p: PlayerState = {
+    ...player,
+    money: player.money - cost,
+    pet: { ...pet, dogs: pet.dogs + 1 },
+  };
+  p = stat(p, { upgradesBought: 1 });
+  p = bumpMissions(p, [{ metric: 'upgrade', amount: 1 }], events);
+
+  const contrib = Math.round(cost * UPGRADE_CONTRIB_RATIO);
+  const f = addContribution(factory, contrib, events);
+  p = stat(p, { contributed: contrib });
+
+  events.push({ kind: 'money', amount: -cost });
+  events.push({ kind: 'info', text: `Jauría de ${pet.dogs + 1} perros` });
+
+  return {
+    ok: true,
+    player: p,
+    factory: f,
+    memberDelta: { contributed: contrib, money: p.money },
+    events,
+    data: { dogs: pet.dogs + 1, cost },
+  };
+}
+
 export function opBuyDrone(
   player: PlayerState,
   factory: FactoryState,
@@ -1938,6 +1977,7 @@ export type OpName =
   | 'setRobotMode'
   | 'buyPetChassis'
   | 'buyPetStat'
+  | 'buyDog'
   | 'buyDrone'
   | 'droneHaul'
   | 'setPetLook'
@@ -1969,6 +2009,7 @@ export const OPS = {
   setRobotMode: opSetRobotMode,
   buyPetChassis: opBuyPetChassis,
   buyPetStat: opBuyPetStat,
+  buyDog: opBuyDog,
   buyDrone: opBuyDrone,
   droneHaul: opDroneHaul,
   setPetLook: opSetPetLook,

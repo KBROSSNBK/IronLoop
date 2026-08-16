@@ -239,6 +239,24 @@ export function petStatCost(def: PetStatDef, level: number): number {
  * propia carga, así que la cadena sólo se atasca si el perro produce más de
  * lo que la escuadrilla es capaz de mover.
  */
+/**
+ * JAURÍA. Hasta tres perros trabajando juntos.
+ *
+ * Se comportan como una unidad: van a la misma veta, reparten el trabajo y
+ * comparten mochila. Multiplican el ritmo de extracción y la carga, y lo
+ * natural es que cada uno lleve su dron —más otro que se queda contigo— para
+ * que la escuadrilla no sea el cuello de botella.
+ */
+export const PACK = {
+  max: 3,
+  baseCost: 60_000,
+  costGrowth: 4.5,
+} as const;
+
+export function dogCost(owned: number): number {
+  return Math.round(PACK.baseCost * Math.pow(PACK.costGrowth, owned - 1));
+}
+
 export const DRONE = {
   /** Unidades por viaje, y cuánto sube por nivel de la escuadrilla. */
   carry: 18,
@@ -249,7 +267,7 @@ export const DRONE = {
   /** Segundos enganchado al perro y descargando. */
   loadMs: 450,
   dropMs: 400,
-  /** Máximo de drones por jugador. */
+  /** Máximo de drones por jugador: uno por perro más tu escolta. */
   max: 6,
   /** Coste del primer dron y crecimiento por cada uno más. */
   baseCost: 18_000,
@@ -312,6 +330,8 @@ export interface PetState {
   zone: string | null;
   /** Drones de apoyo comprados. */
   drones: number;
+  /** Perros de la jauría (1..PACK.max). */
+  dogs: number;
   /** Nivel de la escuadrilla: carga y velocidad de TODOS los drones. */
   droneLevel: number;
   /**
@@ -335,6 +355,7 @@ export const DEFAULT_PET: PetState = {
   mined: 0,
   mode: 'gather',
   zone: null,
+  dogs: 1,
   drones: 0,
   droneLevel: 1,
   droneTakesPlayer: true,
@@ -368,6 +389,7 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
     mode,
     zone: typeof raw?.zone === 'string' ? raw.zone : null,
     drones: Math.max(0, Math.min(DRONE.max, Math.floor(raw?.drones ?? 0))),
+    dogs: Math.max(1, Math.min(PACK.max, Math.floor(raw?.dogs ?? 1))),
     droneLevel: Math.max(1, Math.floor(raw?.droneLevel ?? 1)),
     droneTakesPlayer: raw?.droneTakesPlayer ?? true,
   };
@@ -375,6 +397,8 @@ export function normalizePet(raw: Partial<PetState> | undefined, now: number): P
 
 export interface DerivedPet {
   def: PetChassisDef;
+  /** Perros que trabajan a la vez. */
+  dogs: number;
   /** Unidades que caben en su mochila. */
   capacity: number;
   /** Unidades por segundo que extrae. */
@@ -389,13 +413,16 @@ export function derivePet(pet: PetState | undefined): DerivedPet {
   const p = { ...DEFAULT_PET, ...(pet ?? {}) };
   const def = getChassis(p.chassis);
   const lvl = (id: PetStat) => Math.max(0, Math.floor(p.stats?.[id] ?? 0));
+  // La jauría trabaja junta: más perros = más ritmo y más mochila.
+  const dogs = Math.max(1, Math.min(PACK.max, Math.floor(p.dogs ?? 1)));
   return {
     def,
+    dogs,
     capacity: Math.round(
-      (PET_BASE.capacity + PET_BASE.capacityPerLevel * lvl('capacity')) * def.bonus.capacity,
+      (PET_BASE.capacity + PET_BASE.capacityPerLevel * lvl('capacity')) * def.bonus.capacity * dogs,
     ),
     minePerSec:
-      (PET_BASE.mining + PET_BASE.miningPerLevel * lvl('mining')) * def.bonus.mining,
+      (PET_BASE.mining + PET_BASE.miningPerLevel * lvl('mining')) * def.bonus.mining * dogs,
     speed: Math.round((PET_BASE.speed + PET_BASE.speedPerLevel * lvl('speed')) * def.bonus.speed),
     radius: PET_BASE.radius + PET_BASE.radiusPerLevel * lvl('radius'),
   };

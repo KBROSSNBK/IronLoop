@@ -963,25 +963,41 @@ export function GameCanvas() {
         // Material predominante en su mochila: lo que enseña en la espalda.
         const topItem = petTop;
         const carried = pet.carried(petStored);
-        sortables.push({
-          y: pet.y,
-          draw: () =>
-            drawPet(ctx, {
-              x: pet.x,
-              y: pet.y,
-              facing: pet.facing,
-              gait: pet.gait,
-              t: time,
-              state: pet.state,
-              chassis: player.pet?.chassis ?? 'spot',
-              color: player.pet?.color ?? '#f2c015',
-              accent: player.pet?.accent ?? '#22d3ee',
-              carried,
-              capacity: petDerived.capacity,
-              carryIcon: topItem ? getItem(topItem).icon : null,
-              carryColor: topItem ? getItem(topItem).color : null,
-            }),
-        });
+        /*
+         * La jauría se mueve como una unidad: un solo cerebro decide y los
+         * demás perros trabajan a su lado, escalonados y con el paso
+         * desfasado para que no parezcan copias calcadas. La carga y el
+         * ritmo ya van multiplicados por el número de perros.
+         */
+        for (let i = 0; i < petDerived.dogs; i++) {
+          const lado = i === 0 ? 0 : i % 2 === 1 ? -1 : 1;
+          const fila = Math.ceil(i / 2);
+          const ox = lado * (18 + fila * 4);
+          const oy = fila * 9;
+          const px = pet.x + ox;
+          const py = pet.y + oy;
+          sortables.push({
+            y: py,
+            draw: () =>
+              drawPet(ctx, {
+                x: px,
+                y: py,
+                facing: pet.facing,
+                gait: pet.gait + i * 0.37,
+                t: time + i * 0.9,
+                state: pet.state,
+                chassis: player.pet?.chassis ?? 'spot',
+                color: player.pet?.color ?? '#f2c015',
+                accent: player.pet?.accent ?? '#22d3ee',
+                // Sólo el que lleva la voz cantante muestra el contador: es
+                // una mochila compartida, no una por perro.
+                carried: i === 0 ? carried : 0,
+                capacity: petDerived.capacity,
+                carryIcon: topItem ? getItem(topItem).icon : null,
+                carryColor: topItem ? getItem(topItem).color : null,
+              }),
+          });
+        }
       }
       if (player) {
         sortables.push({

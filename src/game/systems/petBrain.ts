@@ -136,6 +136,8 @@ export class PetBrain {
   private repathAt = 0;
   /** Desde cuándo está llena esperando a un dron. */
   private fullSince = 0;
+  /** Última carga confirmada vista, para detectar cuándo la relevan. */
+  private lastStored = 0;
 
   /** Coloca la mascota junto a su dueño sin animación (al entrar al juego). */
   reset(x: number, y: number): void {
@@ -178,6 +180,12 @@ export class PetBrain {
     // fábrica: te lo da a ti y se acabó.
     // Con drones esperando a recoger, la mascota NO abandona la veta: se
     // queda picando (o esperando un momento) y son ellos los que reparten.
+    // Si la carga confirmada BAJA es que alguien se la ha llevado: mientras
+    // los drones sigan viniendo, la paciencia se renueva y no abandona la
+    // veta. El plazo sólo corre cuando de verdad no la releva nadie.
+    if (storedUnits < this.lastStored) this.fullSince = now;
+    this.lastStored = storedUnits;
+
     if (!full) this.fullSince = 0;
     else if (this.fullSince === 0) this.fullSince = now;
     const esperandoDron =
@@ -296,7 +304,14 @@ export class PetBrain {
           this.strikeAt = now;
           result = { ...result, strike: { x: this.x + this.facing * 15, y: this.y - 2, color: this.station.accent } };
         }
-        while (this.fraction >= 1 && this.pending + carried < derived.capacity) {
+        /*
+         * El tope es lo que hay confirmado MÁS lo que lleva sin liquidar, ni
+         * un gramo más. Antes se comparaba contra `carried`, que ya incluía lo
+         * pendiente, así que lo contaba dos veces: con la perforadora subida
+         * la mascota se plantaba a media mochila y parecía que se colgaba,
+         * cuando en realidad se creía llena.
+         */
+        while (this.fraction >= 1 && storedUnits + this.pending < derived.capacity) {
           this.fraction -= 1;
           this.pending += 1;
         }

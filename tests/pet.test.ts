@@ -501,6 +501,114 @@ describe('prioridades de la mascota', () => {
     expect(b.state).toBe('VOLVER');
   });
 
+  it('pica hasta llenar la mochila DE VERDAD, no hasta la mitad', () => {
+    // Regresión: el tope contaba lo pendiente de liquidar dos veces, así que
+    // con la perforadora subida la mascota se plantaba a media carga y
+    // parecía colgada.
+    const rapida = { ...derived, minePerSec: 8 };
+    const p = at('vein_a');
+    const b = brainAt(p.x, p.y);
+    for (let i = 0; i < 200; i++) {
+      b.update(T0 + i * 50, {
+        dt: 0.05,
+        ownerX: p.x,
+        ownerY: p.y,
+        derived: rapida,
+        storedUnits: 0, // nada liquidado todavía: todo está pendiente
+        mode: 'gather',
+        zone: null,
+        hasDrones: false,
+        ownerHasRoom: true,
+        dropOff: null,
+      });
+    }
+    expect(b.pending).toBe(rapida.capacity);
+  });
+
+  it('en cuanto un dron le hace hueco, vuelve a picar sin esperar', () => {
+    const rapida = { ...derived, minePerSec: 8 };
+    const p = at('vein_a');
+    const b = brainAt(p.x, p.y);
+    const base = {
+      dt: 0.05,
+      ownerX: p.x,
+      ownerY: p.y,
+      derived: rapida,
+      mode: 'gather' as const,
+      zone: null,
+      hasDrones: true,
+      ownerHasRoom: true,
+      dropOff: null,
+    };
+
+    // Llena del todo: se queda en la veta esperando a que la relevan.
+    for (let i = 0; i < 40; i++) {
+      b.update(T0 + i * 50, { ...base, storedUnits: rapida.capacity });
+    }
+    expect(b.state).toBe('MINAR');
+    expect(b.pending).toBe(0);
+
+    // Llega el dron y se lleva la mitad: se pone a picar de inmediato, sin
+    // tener que volver a decidir nada ni dar un paseo.
+    const libre = Math.floor(rapida.capacity / 2);
+    for (let i = 0; i < 6; i++) {
+      b.update(T0 + 3000 + i * 50, { ...base, storedUnits: libre });
+      expect(b.state).toBe('MINAR');
+    }
+    expect(b.pending).toBeGreaterThan(0);
+  });
+
+  it('con drones relevándola no abandona la veta aunque tarden', () => {
+    const p = at('vein_a');
+    const b = brainAt(p.x, p.y);
+    const bay = dropOffFor('ore', 10, { x: p.x, y: p.y })!;
+    const base = {
+      dt: 0.05,
+      ownerX: p.x + 400,
+      ownerY: p.y,
+      derived,
+      mode: 'gather' as const,
+      zone: null,
+      hasDrones: true,
+      ownerHasRoom: true,
+      dropOff: bay,
+    };
+
+    let stored = derived.capacity;
+    // 30 segundos: mucho más que la paciencia, pero un dron la releva a ratos.
+    for (let i = 0; i < 600; i++) {
+      const t = T0 + i * 50;
+      if (i % 100 === 99) stored = derived.capacity - 6; // pasa un dron
+      else if (i % 100 === 0) stored = derived.capacity; // se vuelve a llenar
+      b.update(t, { ...base, storedUnits: stored });
+      expect(b.state, 'no debería irse a la cinta').not.toBe('IR_A_CINTA');
+    }
+  });
+
+  it('sin nadie que la releve, al final va ella a soltar la carga', () => {
+    const p = at('vein_a');
+    const b = brainAt(p.x, p.y);
+    const bay = dropOffFor('ore', 10, { x: p.x, y: p.y })!;
+    const base = {
+      dt: 0.05,
+      ownerX: p.x,
+      ownerY: p.y,
+      derived,
+      storedUnits: derived.capacity,
+      mode: 'gather' as const,
+      zone: null,
+      hasDrones: true,
+      ownerHasRoom: true,
+      dropOff: bay,
+    };
+    let sefue = false;
+    for (let i = 0; i < 400; i++) {
+      b.update(T0 + i * 50, base);
+      if (b.state === 'IR_A_CINTA' || b.state === 'DESCARGAR') sefue = true;
+    }
+    expect(sefue).toBe(true);
+  });
+
   it('nunca se sale del mundo ni atraviesa el mapa de golpe', () => {
     const b = brainAt(600, 400);
     for (let i = 0; i < 300; i++) {
