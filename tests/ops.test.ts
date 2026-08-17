@@ -6,6 +6,7 @@ import {
   createPlayerState,
 } from '../src/game/logic/defaults';
 import { BALANCE } from '../src/config/balance';
+import { xpForLevel } from '../src/game/logic/progression';
 import { MACHINES, machineUpgradeCost, getMachine } from '../src/config/machines';
 import { UPGRADES, upgradeCost } from '../src/config/upgrades';
 import { getItem } from '../src/config/items';
@@ -570,5 +571,35 @@ describe('opBulk — muchos recados, una escritura', () => {
   it('un lote vacío se rechaza sin tocar nada', () => {
     const { player, factory } = world();
     expect(runOp('bulk', player, factory, { ops: [], now: T0 }).ok).toBe(false);
+  });
+});
+
+describe('el premio de subir de nivel se apunta como dinero ganado', () => {
+  it('suma a la cartera y al histórico la misma cantidad', () => {
+    // Justo por debajo del salto: una picada basta para subir.
+    const { player, factory } = world({ xp: xpForLevel(1) - 1 });
+    const antes = { money: player.money, earned: player.stats.earned };
+
+    const out = runOp('gather', player, factory, {
+      stationId: 'vein_a', at: EN_VETA('vein_a'), now: T0, rand: noLuck,
+    });
+
+    expect(out.ok).toBe(true);
+    expect(out.player!.level).toBe(2);
+    const premio = out.player!.money - antes.money;
+    expect(premio).toBeGreaterThan(0);
+    // Lo que entra en la cartera es exactamente lo que dice el histórico: sin
+    // esto, el «Dinero ganado» del ranking se quedaba en cero para siempre.
+    expect(out.player!.stats.earned - antes.earned).toBe(premio);
+  });
+
+  it('sin subir de nivel no inventa ingresos', () => {
+    const { player, factory } = world();
+    const out = runOp('gather', player, factory, {
+      stationId: 'vein_a', at: EN_VETA('vein_a'), now: T0, rand: noLuck,
+    });
+    expect(out.player!.level).toBe(1);
+    expect(out.player!.stats.earned).toBe(player.stats.earned);
+    expect(out.player!.money).toBe(player.money);
   });
 });

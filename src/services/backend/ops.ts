@@ -158,7 +158,10 @@ export function grantXp(p: PlayerState, xp: number, events: OpEvent[], now: numb
       staminaAt = now;
     }
   }
-  return { ...p, level: res.level, xp: res.xp, money, stamina, staminaAt };
+  const salida = { ...p, level: res.level, xp: res.xp, money, stamina, staminaAt };
+  // El premio de subir de nivel es dinero como cualquier otro: si no se apunta,
+  // el «Dinero ganado» del ranking se queda corto y no cuadra con la cartera.
+  return res.moneyReward > 0 ? stat(salida, { earned: res.moneyReward }) : salida;
 }
 
 /** Avanza misiones personales y avisa de las completadas. */
