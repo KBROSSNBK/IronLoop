@@ -57,23 +57,19 @@ describe('material viajando por la cinta', () => {
     expect(beltCount(out.factory!.belts[BELT], BELT, T0)).toBe(30);
   });
 
-  it('llega a la máquina bulto a bulto, según se ven entrar', () => {
+  it('el bulto entra ENTERO al llegar al otro extremo', () => {
     const travel = beltTravelMs(getBelt(BELT)!);
     const f = factory({ belts: pushToBelt({}, BELT, 'crystal', 12, T0) });
 
+    // A mitad de camino no ha entrado nada: el paquete va de viaje.
     const antes = settleBelts(f, T0 + travel - 50);
     expect(antes.deliveries).toHaveLength(0);
     expect(antes.factory.machines.lab.input.crystal).toBeUndefined();
 
-    // El primero entra al terminar el recorrido; los demás van detrás.
-    const primero = settleBelts(f, T0 + travel + 10);
-    expect(primero.factory.machines.lab.input.crystal).toBe(1);
-    expect(beltCount(primero.factory.belts[BELT], BELT, T0 + travel + 10)).toBe(11);
-
-    const fin = T0 + travel + 12 * BELT_ITEM_GAP_MS;
-    const todo = settleBelts(f, fin);
-    expect(todo.factory.machines.lab.input.crystal).toBe(12);
-    expect(beltCount(todo.factory.belts[BELT], BELT, fin)).toBe(0);
+    // Y al tocar el final entran las doce de una vez, no de una en una.
+    const llega = settleBelts(f, T0 + travel + 10);
+    expect(llega.factory.machines.lab.input.crystal).toBe(12);
+    expect(beltCount(llega.factory.belts[BELT], BELT, T0 + travel + 10)).toBe(0);
   });
 
   it('el contador refleja el material REAL en tránsito', () => {
@@ -81,10 +77,9 @@ describe('material viajando por la cinta', () => {
     belts = pushToBelt(belts, BELT, 'crystal', 3, T0 + 200);
     expect(beltCount(belts[BELT], BELT, T0 + 300)).toBe(8);
 
-    // Según van entrando en la máquina, el contador baja.
+    // Al llegar el bulto al final, su carga sale del contador de golpe.
     const travel = beltTravelMs(getBelt(BELT)!);
-    expect(beltCount(belts[BELT], BELT, T0 + travel + 10)).toBe(7);
-    expect(beltCount(belts[BELT], BELT, T0 + travel + 8 * BELT_ITEM_GAP_MS)).toBe(0);
+    expect(beltCount(belts[BELT], BELT, T0 + travel + 10)).toBe(0);
   });
 
   it('dibuja los bultos dentro de la cinta y con su material', () => {

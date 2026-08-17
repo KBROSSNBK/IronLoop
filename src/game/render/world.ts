@@ -545,17 +545,18 @@ export function drawConveyors(
       ctx.textBaseline = 'middle';
       ctx.fillText(itemGlyph(it.item), it.x, it.y - 6 + jitter);
 
-      // La cifra, en una chapita al lado para que no tape el icono.
+      // La cifra, en una chapita ENCIMA del bulto: se lee sin taparlo y sin
+      // pelearse con la barandilla de la cinta.
       if (it.qty > 1) {
         const txt = `×${it.qty}`;
-        ctx.font = '800 10px "Rajdhani", system-ui, sans-serif';
-        const tw = ctx.measureText(txt).width + 8;
-        const ty = it.y + 12 + jitter;
+        ctx.font = '800 11px "Rajdhani", system-ui, sans-serif';
+        const tw = ctx.measureText(txt).width + 10;
+        const ty = it.y - 18 + jitter;
         ctx.fillStyle = 'rgba(6,11,20,0.92)';
-        roundRect(ctx, it.x - tw / 2, ty - 7, tw, 14, 6);
+        roundRect(ctx, it.x - tw / 2, ty - 8, tw, 15, 6);
         ctx.fill();
-        ctx.strokeStyle = hexA(def.color, 0.65);
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = hexA(def.color, 0.75);
+        ctx.lineWidth = 1.1;
         ctx.stroke();
         ctx.fillStyle = '#e2e8f0';
         ctx.fillText(txt, it.x, ty);

@@ -14,6 +14,31 @@ import { ROBOT_STATE_LABEL, type RobotBrain } from '../systems/robotBrain';
 import type { Fx } from '../engine/fx';
 import { roundRect } from './world';
 
+/**
+ * CONTADORES QUE FLUYEN.
+ *
+ * Las cintas entregan el bulto entero y las máquinas muy mejoradas procesan
+ * varias recetas de una tacada, así que los números daban saltos de 128 en
+ * 128 y de 7 en 7: cierto, pero se ve a trompicones. Aquí se guarda un valor
+ * "visual" que persigue al real, de modo que la cifra sube rodando aunque por
+ * dentro haya entrado de golpe. Es sólo presentación: la simulación no cambia.
+ */
+const suavizado = new Map<string, number>();
+
+function fluido(clave: string, real: number, dt: number): number {
+  const antes = suavizado.get(clave);
+  if (antes === undefined || Math.abs(real - antes) > 5000) {
+    suavizado.set(clave, real);
+    return real;
+  }
+  // Persigue rápido pero visible; al llegar, se clava en el valor exacto.
+  const k = Math.min(1, dt * 7);
+  const v = antes + (real - antes) * k;
+  const next = Math.abs(real - v) < 0.6 ? real : v;
+  suavizado.set(clave, next);
+  return next;
+}
+
 export interface MachineVisual {
   def: MachineDef;
   state: MachineState;
@@ -46,6 +71,7 @@ export function drawMachine(
   v: MachineVisual,
   time: number,
   fx: Fx,
+  dt = 0.016,
 ): void {
   const { def, settle, locked } = v;
   const x = def.tx * TILE;
@@ -238,7 +264,7 @@ export function drawMachine(
   // así el HUD coincide siempre con lo que devolverá la próxima operación.
   const live = settle.state;
   // Una ficha por ingrediente: se ve de un vistazo QUÉ falta y cuánto.
-  if (!locked) drawIngredients(ctx, x, y + bodyH - 34, w, def, live);
+  if (!locked) drawIngredients(ctx, x, y + bodyH - 34, w, def, live, dt);
 
   // Barra de progreso
   const bw = w - 24;
@@ -359,6 +385,7 @@ function drawIngredients(
   w: number,
   def: MachineDef,
   live: MachineState,
+  dt: number,
 ): void {
   const ins = Object.entries(def.input);
   const outs = Object.entries(def.output);
@@ -373,8 +400,10 @@ function drawIngredients(
 
   for (const [id, need] of ins) {
     const have = live.input[id] ?? 0;
+    // El estado (verde/rojo) sale del valor REAL; la cifra, del suavizado.
     const ok = have >= (need ?? 1);
-    chip(ctx, cx, y, chipW, itemGlyph(id), `${have}/${need}`, ok ? '#4ade80' : '#f87171', ok);
+    const visto = Math.round(fluido(`${def.id}:in:${id}`, have, dt));
+    chip(ctx, cx, y, chipW, itemGlyph(id), `${visto}/${need}`, ok ? '#4ade80' : '#f87171', ok);
     cx += chipW + gap;
   }
 
@@ -386,7 +415,8 @@ function drawIngredients(
 
   for (const [id] of outs) {
     const have = live.output[id] ?? 0;
-    chip(ctx, cx, y, chipW, itemGlyph(id), String(have), '#38bdf8', have > 0);
+    const visto = Math.round(fluido(`${def.id}:out:${id}`, have, dt));
+    chip(ctx, cx, y, chipW, itemGlyph(id), String(visto), '#38bdf8', have > 0);
     cx += chipW + gap;
   }
   ctx.restore();

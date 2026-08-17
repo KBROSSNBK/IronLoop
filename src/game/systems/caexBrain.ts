@@ -107,6 +107,8 @@ export class CaexBrain {
   private repathAt = 0;
   private fullSince = 0;
   private lastStored = 0;
+  /** Hasta cuándo no vuelve a intentar ir a descargar (se atascó llegando). */
+  private evitarHasta = 0;
 
   reset(x: number, y: number): void {
     this.x = x;
@@ -159,7 +161,7 @@ export class CaexBrain {
     /* ── 1. Decisión ── */
     if (this.state === 'VACIANDO') {
       if (now >= this.dumpUntil) this.state = 'EN_RUTA';
-    } else if (full && !esperandoDron && dropOff) {
+    } else if (full && !esperandoDron && dropOff && now >= this.evitarHasta) {
       this.bay = dropOff;
       this.state = 'A_DESCARGAR';
     } else {
@@ -214,8 +216,19 @@ export class CaexBrain {
         this.path = [];
         this.pathGoal = null;
         this.repathAt = 0;
-        // Si de verdad no puede llegar, se salta la parada en vez de empotrarse.
-        if (this.state === 'EN_RUTA') this.idx = (this.idx + 1) % Math.max(1, this.route.length);
+        /*
+         * Si de verdad no puede llegar, ABANDONA ese destino en vez de
+         * empotrarse contra él. Yendo a descargar no había salida: un camión
+         * de este tamaño no siempre cabe junto a la boca de una cinta, y se
+         * quedaba empujando la pared el resto de la partida. Ahora deja esa
+         * descarga, sigue la ronda y lo reintenta con otro destino.
+         */
+        if (this.state === 'A_DESCARGAR') {
+          this.bay = null;
+          this.state = 'EN_RUTA';
+          this.evitarHasta = now + 6000;
+        }
+        this.idx = (this.idx + 1) % Math.max(1, this.route.length);
       }
     } else {
       this.speed = 0;

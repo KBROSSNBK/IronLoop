@@ -74,19 +74,15 @@ export function beltPointAt(belt: ConveyorDef, t: number): { x: number; y: numbe
 /**
  * Unidades de una tanda que YA han llegado al final de la cinta.
  *
- * No llegan todas a la vez: el lote viaja como una hilera de bultos separados
- * y entra en la máquina de uno en uno, exactamente igual que se ve. Antes el
- * lote entero desaparecía en el instante en que el primer bulto tocaba la
- * máquina, y la mitad de la hilera se esfumaba a media cinta.
+ * UNA TANDA ES UN BULTO Y VIAJA ENTERA: sale del cargador, recorre la cinta y
+ * entra en la máquina de una vez. Es lo que se ve —un paquete con su cifra
+ * encima— y por tanto lo que debe pasar de verdad.
  */
 export function beltArrived(belt: ConveyorDef, batch: BeltBatch, now: number): number {
-  const travel = beltTravelMs(belt);
-  const age = now - batch.at;
-  if (age < travel) return 0;
-  return Math.min(batch.qty, Math.floor((age - travel) / BELT_ITEM_GAP_MS) + 1);
+  return now - batch.at >= beltTravelMs(belt) ? batch.qty : 0;
 }
 
-/** ¿Ha entregado ya la tanda hasta el último bulto? */
+/** ¿Ha entrado ya la tanda entera en la máquina? */
 function batchDone(belt: ConveyorDef, batch: BeltBatch, now: number): boolean {
   return beltArrived(belt, batch, now) >= batch.qty;
 }
@@ -233,11 +229,10 @@ export function settleBelts(factory: FactoryState, now: number): BeltSettleResul
 /**
  * Añade material a la cola de una cinta.
  *
- * Si lo último que se cargó es del mismo material y su hilera aún está
- * entrando, la carga nueva se engancha detrás y forma un solo tren continuo.
- * Si es de otro material, se deja el hueco de un bulto para que no se dibujen
- * dos cosas encima. Es lo que hace que la cinta se vea fluir en vez de ir a
- * saltos.
+ * Si lo último cargado es del MISMO material y sigue en el primer tramo, se
+ * suma a ese bulto en vez de crear otro: así la cinta enseña «×128» en un
+ * paquete y no una fila de paquetitos. Si es de otro material, entra detrás
+ * con un hueco para que no se dibujen uno encima del otro.
  */
 export function pushToBelt(
   belts: Record<string, BeltState>,
@@ -248,18 +243,21 @@ export function pushToBelt(
 ): Record<string, BeltState> {
   const cur = belts[beltId]?.queue ?? [];
   if (qty <= 0) return belts;
+  const def = getBelt(beltId);
   const last = cur[cur.length - 1];
 
-  if (last) {
-    // Instante en el que el ÚLTIMO bulto de la tanda anterior entró en la cinta.
-    const colaAt = last.at + (last.qty - 1) * BELT_ITEM_GAP_MS;
-    if (last.item === item && colaAt + BELT_ITEM_GAP_MS >= now) {
+  if (last && def) {
+    const travel = beltTravelMs(def);
+    // Se agrupa mientras el bulto anterior no se haya alejado del cargador:
+    // más allá, sumarle carga sería teletransportarla media cinta.
+    const recorrido = now - last.at;
+    if (last.item === item && recorrido < travel * 0.45) {
       const queue = cur.slice(0, -1);
       queue.push({ item, qty: last.qty + qty, at: last.at });
       return { ...belts, [beltId]: { queue } };
     }
-    // Material distinto: entra justo detrás, sin montarse encima.
-    const at = Math.min(Math.max(now, colaAt + BELT_ITEM_GAP_MS), now + 2_000);
+    // Material distinto o bulto ya lanzado: entra detrás, sin solaparse.
+    const at = Math.min(Math.max(now, last.at + BELT_ITEM_GAP_MS), now + 1_500);
     return { ...belts, [beltId]: { queue: [...cur, { item, qty, at }] } };
   }
 
@@ -317,7 +315,6 @@ export function beltItems(
 ): BeltItemVisual[] {
   const def = getBelt(beltId);
   if (!def || !state) return [];
-  const len = beltLength(def);
   const travel = beltTravelMs(def);
   const out: BeltItemVisual[] = [];
 
@@ -325,18 +322,10 @@ export function beltItems(
     const age = now - batch.at;
     if (age < 0 || batchDone(def, batch, now)) continue;
 
-    // Lo ya entregado no se pinta: el bulto lleva lo que de verdad queda.
-    const entregadas = beltArrived(def, batch, now);
-    const quedan = batch.qty - entregadas;
-    if (quedan <= 0) continue;
-
-    // El bulto va donde está la primera unidad que aún no ha llegado, que es
-    // la cabeza del tren que queda por entrar.
-    const head = (age / travel) * len;
-    const d = Math.max(0, Math.min(len, head - entregadas * BELT_ITEM_GAP));
-    const t = d / len;
+    // Un bulto, con todo lo que lleva, avanzando de un extremo al otro.
+    const t = Math.max(0, Math.min(1, age / travel));
     const p = beltPointAt(def, t);
-    out.push({ x: p.x, y: p.y, item: batch.item, t, qty: quedan });
+    out.push({ x: p.x, y: p.y, item: batch.item, t, qty: batch.qty });
   }
   return out;
 }

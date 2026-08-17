@@ -182,7 +182,9 @@ describe('traspaso de los robots', () => {
       const res = settleRobots(f, now);
       esperado += res.transfers[0]?.amount ?? 0;
       f = res.factory;
-      expect(f.belts[belt].queue.length, 'cada tanda es una entrada nueva').toBe(i);
+      // Las tandas seguidas del mismo material se agrupan en un solo bulto
+      // —así la cinta enseña «×N» y no una fila de paquetitos— pero lo que
+      // cuenta es que SUMEN: ni una unidad se pierde por el camino.
       expect(beltCount(f.belts[belt], belt, now)).toBe(esperado);
     }
     expect(esperado).toBe(3 * (robotRate(HAULER, 3) / 60));

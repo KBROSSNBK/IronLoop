@@ -821,8 +821,18 @@ export function GameCanvas() {
         pets.length = Math.max(1, petDerived.dogs);
 
         const modo = player.pet?.mode ?? 'gather';
-        const hayDrones = (player.pet?.drones ?? 0) > 0;
         const conHueco = inventoryFree(player) > 0;
+        /*
+         * Drones DE VERDAD asignados. El dron 0 es tu escolta y el N va con el
+         * perro N−1, así que el perro k sólo tiene quien le releve si hay al
+         * menos k+2 drones.
+         *
+         * Antes bastaba con tener UNO para que los tres perros se creyeran
+         * atendidos: al llenarse se quedaban siete segundos plantados en la
+         * veta esperando a alguien que no existía, en vez de ir a soltar la
+         * carga en la cinta más cercana.
+         */
+        const escuadrilla = deriveDrones(player.pet).count;
 
         /*
          * MODO AUTOMÁTICO = «mira qué le falta a la fábrica y ve a por ello».
@@ -874,7 +884,7 @@ export function GameCanvas() {
             mode: modo,
             target: encargo,
             autoTarget: auto,
-            hasDrones: hayDrones,
+            hasDrones: escuadrilla >= i + 2,
             ownerHasRoom: conHueco,
             dropOff: petDrops[i] ?? null,
           });
@@ -1199,7 +1209,7 @@ export function GameCanvas() {
         for (const v of computeMachineVisuals(liveFactory.machines, level, now)) {
           sortables.push({
             y: (v.def.ty + v.def.th - 1) * TILE,
-            draw: () => drawMachine(ctx, v, time, fx),
+            draw: () => drawMachine(ctx, v, time, fx, dt),
           });
         }
         sortables.push({

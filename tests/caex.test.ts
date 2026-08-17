@@ -250,3 +250,61 @@ describe('operaciones del CAEX', () => {
     }
   });
 });
+
+/* ─────────── NO SE QUEDA TRABADO YENDO A DESCARGAR ─────────── */
+
+/**
+ * Un camión de este tamaño no siempre cabe junto a la boca de una cinta. Al
+ * ir a descargar no había salida de emergencia: se quedaba empujando la pared
+ * el resto de la partida. Ahora abandona ese destino y sigue la ronda.
+ */
+describe('el CAEX nunca se queda clavado', () => {
+  const derived = deriveCaex(caex({ stats: { capacity: 0 } }));
+
+  it('si no puede llegar a descargar, vuelve a la ruta', () => {
+    const b = new CaexBrain();
+    b.reset(500, 500);
+    // Un destino imposible: en medio de un muro, al otro lado del mapa.
+    const imposible = { machineId: 'smelter', x: 0, y: 0, label: 'INALCANZABLE' };
+    let enDescarga = 0;
+    const visitadas = new Set<string>();
+    for (let i = 0; i < 1200; i++) {
+      b.update(T0 + i * 50, {
+        dt: 0.05,
+        derived,
+        storedUnits: derived.capacity, // lleno: quiere descargar
+        mode: 'route',
+        hasDrone: false,
+        dropOff: imposible,
+        dwellMs: 2000,
+      });
+      if (b.state === 'A_DESCARGAR') enDescarga++;
+      else if (b.station) visitadas.add(b.station.id);
+    }
+    /*
+     * Lo intenta, se rinde, sigue la ronda y vuelve a intentarlo más tarde.
+     * Lo que NO puede es pasarse la partida entera empujando una pared.
+     */
+    expect(enDescarga).toBeLessThan(1200 * 0.6);
+    expect(visitadas.size).toBeGreaterThan(0);
+  });
+
+  it('lleno y sin sitio donde vaciar, sigue haciendo la ronda', () => {
+    const b = new CaexBrain();
+    b.reset(500, 500);
+    const visitadas = new Set<string>();
+    for (let i = 0; i < 3000; i++) {
+      b.update(T0 + i * 50, {
+        dt: 0.05,
+        derived,
+        storedUnits: derived.capacity,
+        mode: 'route',
+        hasDrone: false,
+        dropOff: null,
+        dwellMs: 1200,
+      });
+      if (b.station) visitadas.add(b.station.id);
+    }
+    expect(visitadas.size).toBeGreaterThanOrEqual(2);
+  });
+});
