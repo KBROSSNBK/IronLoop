@@ -21,7 +21,7 @@ export type Unsub = () => void;
  * escribe dinero/XP/inventario directamente.
  */
 export interface Backend {
-  readonly kind: 'firebase' | 'local';
+  readonly kind: 'firebase' | 'rtdb' | 'local';
   /** Etiqueta legible para la UI. */
   readonly label: string;
 

@@ -19,7 +19,6 @@ import { FactoryCelebration } from './overlays/FactoryCelebration';
 import { useUiStore } from '../state/useUiStore';
 import { useGameplayStore } from '../state/useGameplayStore';
 import { on } from '../services/bus';
-import { WRITE_QUOTA } from '../services/writeMeter';
 import { playSfx } from '../services/audio';
 
 export function GameScreen() {
@@ -52,17 +51,18 @@ export function GameScreen() {
         <div className="fps-badge">
           <span>{fps} FPS</span>
           {/*
-            Cuota de escrituras del día: es lo que agota el plan gratuito de
-            Firestore y lo que deja la partida muerta con «Quota exceeded».
-            Se enseña aquí para saber cuánto queda antes de que pase.
+            Lo que queda del plan gratuito antes de que la partida se muera con
+            un «Quota exceeded». Según dónde viva el estado se agota una cosa u
+            otra: escrituras al día en Firestore, datos al mes en la Realtime
+            Database. El medidor enseña la que toca.
           */}
           <span
             className="quota"
             data-level={writes.ratio > 0.9 ? 'alto' : writes.ratio > 0.6 ? 'medio' : 'bajo'}
-            title={`${writes.used.toLocaleString('es')} de ${WRITE_QUOTA.toLocaleString('es')} escrituras usadas hoy · ${writes.perMinute}/min`}
+            title={writes.detail}
           >
-            ✍ {writes.left.toLocaleString('es')}
-            {Number.isFinite(writes.minutesLeft) && (
+            {writes.mode === 'data' ? '📡' : '✍'} {writes.left}
+            {Number.isFinite(writes.minutesLeft) && writes.minutesLeft < 6000 && (
               <b> · {Math.floor(writes.minutesLeft)} min</b>
             )}
           </span>

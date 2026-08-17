@@ -6,6 +6,7 @@ import { DEFAULT_PET, normalizePet } from '../../config/pets';
 import { ACTIVE_MISSION_SLOTS, rollMissions } from '../../config/missions';
 import type {
   AuthUser,
+  BeltState,
   FactoryMember,
   FactoryState,
   LifetimeStats,
@@ -151,6 +152,13 @@ export function normalizeFactory(raw: Partial<FactoryState>, id: string): Factor
       sold: v?.sold ?? 0,
     };
   }
+  // Una cinta vacía puede volver del backend sin `queue`: la Realtime Database
+  // no guarda listas vacías, borra la clave. Sin esto, la primera cinta que se
+  // vacía tumba el bucle de dibujado.
+  const belts: Record<string, BeltState> = {};
+  for (const [k, v] of Object.entries(raw.belts ?? {})) {
+    belts[k] = { queue: Array.isArray(v?.queue) ? v.queue.filter(Boolean) : [] };
+  }
   return {
     ...base,
     ...raw,
@@ -158,7 +166,7 @@ export function normalizeFactory(raw: Partial<FactoryState>, id: string): Factor
     machines,
     robots,
     ground: { ...(raw.ground ?? {}) },
-    belts: { ...(raw.belts ?? {}) },
+    belts,
     online: { ...(raw.online ?? {}) },
     saleLedger: { ...(raw.saleLedger ?? {}) },
     stats: { ...base.stats, ...(raw.stats ?? {}) },

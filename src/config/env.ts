@@ -60,10 +60,29 @@ export const HAS_FIREBASE_CONFIG = Boolean(
 /** Fuerza el backend local aunque haya credenciales (útil para desarrollar). */
 export const FORCE_LOCAL_BACKEND = env.VITE_FORCE_LOCAL === 'true';
 
-export type BackendKind = 'firebase' | 'local';
+export type BackendKind = 'firebase' | 'rtdb' | 'local';
 
-export const BACKEND_KIND: BackendKind =
-  HAS_FIREBASE_CONFIG && !FORCE_LOCAL_BACKEND ? 'firebase' : 'local';
+/**
+ * Dónde vive la partida.
+ *
+ * Por defecto, la Realtime Database: Firestore cobra por OPERACIONES (20.000
+ * escrituras al día) y una fábrica automatizada se las come en una tarde,
+ * mientras que la RTDB cobra por DATOS y este juego mueve muy pocos.
+ *
+ * `VITE_BACKEND` permite forzarlo:
+ *   rtdb       → Realtime Database (por defecto si hay VITE_FIREBASE_DATABASE_URL)
+ *   firestore  → el backend antiguo, por si hiciera falta volver
+ *   local      → localStorage + BroadcastChannel, sin nube
+ */
+const BACKEND_PEDIDO = (env.VITE_BACKEND as string | undefined)?.trim().toLowerCase();
+
+export const BACKEND_KIND: BackendKind = (() => {
+  if (BACKEND_PEDIDO === 'local' || FORCE_LOCAL_BACKEND) return 'local';
+  if (!HAS_FIREBASE_CONFIG) return 'local';
+  if (BACKEND_PEDIDO === 'firestore' || BACKEND_PEDIDO === 'firebase') return 'firebase';
+  // La RTDB necesita su URL; sin ella no queda más remedio que Firestore.
+  return FIREBASE_CONFIG.databaseURL ? 'rtdb' : 'firebase';
+})();
 
 /** Panel de admin/debug. Sólo en dev, o con VITE_ENABLE_DEBUG=true. */
 export const DEBUG_ENABLED =

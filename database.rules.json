@@ -3,6 +3,131 @@
     ".read": false,
     ".write": false,
 
+    "_comment_modelo": "El cliente es hostil: cualquiera puede abrir la consola y escribir aquí directamente. Estas reglas no reimplementan la economía —imposible en un lenguaje de reglas— sino que ACOTAN el daño: nadie toca el documento de otro, el dinero y la XP sólo crecen dentro de un límite por escritura, el nivel no salta, y la identidad es inmutable. Mismo criterio que firestore.rules.",
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+
+        "uid": { ".validate": "newData.val() === $uid" },
+
+        "name": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20"
+        },
+
+        "createdAt": {
+          ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())"
+        },
+
+        "_comment_dinero": "Un exploit puede acelerar, no puede teletransportar a un billón. El reinicio de fábrica es la única vía por la que puede bajar.",
+        "money": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.val() <= data.val() + 5000000)"
+        },
+
+        "xp": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.val() <= data.val() + 200000 || newData.val() === 0)"
+        },
+
+        "level": {
+          ".validate": "newData.isNumber() && newData.val() >= 1 && (!data.exists() || newData.val() <= data.val() + 50)"
+        },
+
+        "stamina": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 2000"
+        },
+
+        "factoryId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+
+        "rev": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+
+        "$otro": { ".validate": true }
+      }
+    },
+
+    "_comment_indice": "Nodo minúsculo por fábrica para el emparejamiento. Se consulta ordenando por aforo sin bajarse el estado entero de nadie.",
+    "factoryIndex": {
+      ".read": "auth != null",
+      ".indexOn": ["playerCount"],
+      "$fid": {
+        ".write": "auth != null",
+        "playerCount": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+        },
+        "name": { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "level": { ".validate": "newData.isNumber() && newData.val() >= 1" },
+        "$otro": { ".validate": false }
+      }
+    },
+
+    "factories": {
+      "$fid": {
+        ".read": "auth != null",
+
+        "state": {
+          "_comment_escritura": "Escriben los miembros de la fábrica. Crear una nueva sí puede hacerlo cualquiera autenticado: es como se entra al juego cuando todas están llenas.",
+          ".write": "auth != null && (!data.exists() || root.child('factories').child($fid).child('members').child(auth.uid).exists())",
+
+          "id": { ".validate": "newData.val() === $fid" },
+
+          "createdAt": {
+            ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())"
+          },
+
+          "_comment_rev": "COMPARA Y CAMBIA. Cada escritura de la fábrica manda rev+1; si dos tripulantes coinciden, el segundo llega con un número que ya no es el siguiente y se le rechaza. El cliente lo detecta, se refresca y reintenta. Esto no es seguridad, es lo que evita que dos jugadores se pisen el estado compartido.",
+          "rev": {
+            ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val() + 1)"
+          },
+
+          "_comment_nivel": "El nivel de fábrica sube, nunca baja ni salta de golpe. La excepción es el administrador, que es quien puede reiniciarla: mismo criterio y mismo correo que en firestore.rules.",
+          "level": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && (!data.exists() || (newData.val() >= data.val() && newData.val() <= data.val() + 5) || (auth.token.email_verified === true && auth.token.email === 'kbros.contacto@gmail.com'))"
+          },
+
+          "contribution": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+
+          "totalContribution": {
+            ".validate": "newData.isNumber() && (!data.exists() || newData.val() >= data.val() || (auth.token.email_verified === true && auth.token.email === 'kbros.contacto@gmail.com'))"
+          },
+
+          "_comment_aforo": "Excepción a la regla de miembros: para ENTRAR hay que poder reservar plaza, y todavía no eres miembro. Se acota a +1 por escritura para que nadie invente aforo.",
+          "playerCount": {
+            ".write": "auth != null",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && (!data.exists() || newData.val() <= data.val() + 1 || root.child('factories').child($fid).child('members').child(auth.uid).exists())"
+          },
+
+          "prestige": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+
+          "$otro": { ".validate": true }
+        },
+
+        "_comment_miembros": "Documento público por jugador: es lo que alimenta el ranking. Cada uno escribe sólo el suyo.",
+        "members": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            "uid": { ".validate": "newData.val() === $uid" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 20" },
+            "level": { ".validate": "newData.isNumber() && newData.val() >= 1" },
+            "money": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "contributed": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "produced": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "sold": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "$otro": { ".validate": true }
+          }
+        }
+      }
+    },
+
+    "_comment_contador": "Sólo sirve para numerar las fábricas (FACTORY #007).",
+    "meta": {
+      "counters": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "factories": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "$otro": { ".validate": false }
+      }
+    },
+
     "presence": {
       "$factoryId": {
         ".read": "auth != null",

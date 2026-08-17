@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getBackend } from '../services/backend';
+import { caerAFirestore, esFaltaDeReglas, getBackend } from '../services/backend';
 import type { Backend, Unsub } from '../services/backend/types';
 import type { OpName, OpEvent, OpOutcome } from '../services/backend/ops';
 import { emit } from '../services/bus';
@@ -358,6 +358,26 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         try {
           await enterGame(backend!, user, set, get);
         } catch (e) {
+          // Si la Realtime Database nos cierra la puerta es que sus reglas aún
+          // no están desplegadas. Se sigue jugando en Firestore en vez de dejar
+          // al jugador delante de un error que no puede resolver.
+          if (esFaltaDeReglas(e)) {
+            const alterno = await caerAFirestore().catch(() => null);
+            if (alterno) {
+              console.warn(
+                'Reglas de la Realtime Database sin desplegar; se sigue en Firestore. ' +
+                  'Ejecuta: firebase deploy --only database',
+              );
+              backend = alterno;
+              set({ backendLabel: alterno.label });
+              try {
+                await enterGame(alterno, user, set, get);
+                return;
+              } catch (e2) {
+                console.error(e2);
+              }
+            }
+          }
           console.error(e);
           set({ phase: 'error', error: e instanceof Error ? e.message : 'Error al entrar' });
         }

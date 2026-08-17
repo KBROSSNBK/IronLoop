@@ -1,4 +1,4 @@
-import { WRITE_QUOTA, type WriteBudget } from '../services/writeMeter';
+import type { Budget } from '../services/writeMeter';
 import { create } from 'zustand';
 import type { ActionOption } from '../game/systems/interaction';
 import type { RobotDebug } from '../game/systems/robotBrain';
@@ -17,7 +17,7 @@ interface GameplayState {
   staminaMax: number;
   fps: number;
   /** Cuota de escrituras del día: es lo que agota el plan gratuito. */
-  writes: WriteBudget;
+  writes: Budget;
   onlineCount: number;
   /** Progreso 0..1 de la acción sostenida en curso. */
   actionProgress: number;
@@ -50,7 +50,7 @@ export const useGameplayStore = create<GameplayState>((set) => ({
   stamina: 100,
   staminaMax: 100,
   fps: 0,
-  writes: { used: 0, left: WRITE_QUOTA, ratio: 0, perMinute: 0, minutesLeft: Infinity },
+  writes: { mode: 'ops', left: '—', ratio: 0, minutesLeft: Infinity, detail: '' },
   onlineCount: 1,
   actionProgress: 0,
   holdProgress: 0,

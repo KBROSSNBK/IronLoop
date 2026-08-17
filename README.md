@@ -216,14 +216,44 @@ los tres y no hay tres economías distintas que puedan divergir.
 | Dato | Dónde | Frecuencia | Motivo |
 |---|---|---|---|
 | Posición, dirección, actividad, presencia | **Realtime Database** | ~9 escrituras/s por jugador | RTDB factura por **volumen de datos**, no por operación; además tiene `onDisconnect()` para limpiar solo al cerrar la pestaña |
-| Usuario, inventario, dinero, XP, mejoras | **Firestore** | sólo al interactuar | Transacciones multi-documento y reglas expresivas |
-| Fábrica, máquinas, contribución | **Firestore** | sólo al interactuar | Estado compartido con consistencia fuerte |
-| Ranking (`members/{uid}`) | **Firestore** | sólo al interactuar | Documentos pequeños, un listener por fábrica |
+| Usuario, inventario, dinero, XP, mejoras | **Realtime Database** | sólo al interactuar | Ver abajo: Firestore se quedaba sin cuota en una tarde |
+| Fábrica, máquinas, contribución | **Realtime Database** | sólo al interactuar | Ídem |
+| Ranking (`members/{uid}`) | **Realtime Database** | sólo al interactuar | Nodos pequeños, un listener por fábrica |
 
 Guardar posiciones en Firestore costaría ~9 escrituras/segundo/jugador: con
 10 jugadores serían **~7,8 millones de escrituras al día**, muy por encima del
 plan gratuito. En RTDB ese mismo tráfico es un goteo de bytes irrelevante.
 El desglose completo está en **[FIREBASE_COSTS.md](FIREBASE_COSTS.md)**.
+
+### Por qué la partida ya no vive en Firestore
+
+Firestore cobra por **operaciones**: 20.000 escrituras al día en el plan
+gratuito. Con tres perros picando, cuatro drones repartiendo y el CAEX en ruta,
+una partida las agotaba en una tarde y moría con un «Quota exceeded» que además
+no explicaba nada. La RTDB cobra por **datos** (10 GB de bajada al mes) y este
+juego mueve unos pocos KB por minuto: en la práctica, no se toca.
+
+Lo que hizo falta para mudarse, en `src/services/backend/rtdb/`:
+
+- **`update()` multi-ruta** en lugar de transacción. Es atómico —o entran todas
+  las rutas o no entra ninguna—, así que jugador y fábrica siguen cambiando a la
+  vez.
+- **Contador `rev`** en la fábrica para detectar carreras: cada escritura manda
+  `rev + 1` y las reglas exigen que sea exactamente el siguiente. El segundo que
+  llegue es rechazado, se refresca y reintenta. Es el «compara y cambia» que
+  daba Firestore, hecho a mano.
+- **Diff de rutas** (`paths.ts`): no se manda el documento entero en cada recado,
+  sólo las hojas que cambiaron. Es lo que mantiene el gasto en KB en vez de MB.
+
+`VITE_BACKEND=firestore` vuelve al backend anterior, que sigue entero y sin
+tocar. Los datos de Firestore tampoco se borran: la primera vez que un jugador
+entra, `migrate.ts` se los trae a la RTDB tal cual.
+
+> **Orden de despliegue.** Las reglas van SIEMPRE antes que el código:
+> `firebase deploy --only database` y después el resto. Si se publica al revés,
+> el juego detecta el rechazo y sigue funcionando en Firestore hasta que las
+> reglas estén puestas (`caerAFirestore` en `services/backend/index.ts`), pero
+> es mejor no depender de la red de seguridad.
 
 ### El truco que hace barato el juego: simulación por timestamp
 
