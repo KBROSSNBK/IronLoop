@@ -60,7 +60,12 @@ export function LoginScreen() {
         ))}
       </div>
 
-      {backendKind === 'firebase' ? (
+      {/*
+        Cualquier backend en la nube entra con Google; sólo el local pide un
+        nombre. Comparar contra 'firebase' a secas dejaba la pantalla sin botón
+        de acceso el día que apareció un segundo backend en la nube.
+      */}
+      {backendKind !== 'local' ? (
         <button className="google-btn" onClick={enterGoogle} disabled={pending}>
           <GoogleMark />
           {pending ? 'Conectando…' : 'Entrar con Google'}

@@ -330,7 +330,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   phase: 'boot',
   error: null,
   backendKind: BACKEND_KIND,
-  backendLabel: BACKEND_KIND === 'firebase' ? 'Firebase' : 'Modo local',
+  // Provisional hasta que el backend arranque y diga su nombre de verdad.
+  backendLabel:
+    BACKEND_KIND === 'rtdb'
+      ? 'Realtime Database'
+      : BACKEND_KIND === 'firebase'
+        ? 'Firebase'
+        : 'Modo local',
 
   user: null,
   player: null,
