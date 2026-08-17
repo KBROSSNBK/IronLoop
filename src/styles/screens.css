@@ -265,9 +265,24 @@
   position: absolute;
   bottom: calc(var(--safe-b) + 4px);
   left: calc(var(--safe-l) + 6px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-display);
   font-size: 10px;
   color: var(--text-mute);
   z-index: 8;
-  pointer-events: none;
+  pointer-events: auto;
 }
+/* Escrituras que quedan hoy: verde tranquilo, ámbar aviso, rojo se acaba. */
+.fps-badge .quota {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(6, 11, 20, 0.75);
+  border: 1px solid currentColor;
+  cursor: help;
+}
+.fps-badge .quota[data-level='bajo'] { color: var(--green, #4ade80); }
+.fps-badge .quota[data-level='medio'] { color: var(--amber-soft, #fbbf24); }
+.fps-badge .quota[data-level='alto'] { color: var(--red, #f87171); }
+.fps-badge .quota b { font-weight: 800; opacity: 0.85; }

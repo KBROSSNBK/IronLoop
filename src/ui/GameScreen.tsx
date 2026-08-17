@@ -19,6 +19,7 @@ import { FactoryCelebration } from './overlays/FactoryCelebration';
 import { useUiStore } from '../state/useUiStore';
 import { useGameplayStore } from '../state/useGameplayStore';
 import { on } from '../services/bus';
+import { WRITE_QUOTA } from '../services/writeMeter';
 import { playSfx } from '../services/audio';
 
 export function GameScreen() {
@@ -26,6 +27,7 @@ export function GameScreen() {
   const isTouch = useUiStore((s) => s.isTouch);
   const showFps = useUiStore((s) => s.showFps);
   const fps = useGameplayStore((s) => s.fps);
+  const writes = useGameplayStore((s) => s.writes);
   const pushToast = useUiStore((s) => s.pushToast);
 
   // Puente bus → audio y toasts globales.
@@ -46,7 +48,26 @@ export function GameScreen() {
       <EmoteWheel />
       {isTouch && <Joystick />}
       <Toasts />
-      {showFps && <div className="fps-badge">{fps} FPS</div>}
+      {showFps && (
+        <div className="fps-badge">
+          <span>{fps} FPS</span>
+          {/*
+            Cuota de escrituras del día: es lo que agota el plan gratuito de
+            Firestore y lo que deja la partida muerta con «Quota exceeded».
+            Se enseña aquí para saber cuánto queda antes de que pase.
+          */}
+          <span
+            className="quota"
+            data-level={writes.ratio > 0.9 ? 'alto' : writes.ratio > 0.6 ? 'medio' : 'bajo'}
+            title={`${writes.used.toLocaleString('es')} de ${WRITE_QUOTA.toLocaleString('es')} escrituras usadas hoy · ${writes.perMinute}/min`}
+          >
+            ✍ {writes.left.toLocaleString('es')}
+            {Number.isFinite(writes.minutesLeft) && (
+              <b> · {Math.floor(writes.minutesLeft)} min</b>
+            )}
+          </span>
+        </div>
+      )}
 
       {panel === 'inventory' && <InventoryPanel />}
       {panel === 'upgrades' && <UpgradesPanel />}

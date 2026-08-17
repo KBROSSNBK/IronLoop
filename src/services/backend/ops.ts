@@ -2068,6 +2068,76 @@ export function opTick(
 
 /* ───────────────────── REGISTRO DE OPERACIONES ───────────────────── */
 
+/**
+ * LOTE DE OPERACIONES DE FONDO — la que ahorra la cuota.
+ *
+ * Firestore no cobra por datos, cobra por ESCRITURAS: 20.000 al día en el plan
+ * gratuito. Con tres perros, cuatro drones y el CAEX mandando cada recado por
+ * su cuenta, eso se agota en una tarde y la partida se queda sin poder jugarse.
+ *
+ * Esta operación mete muchos recados en UNA sola escritura. No duplica ni una
+ * regla: ejecuta las mismas funciones puras, en orden, sobre el estado que va
+ * saliendo de la anterior. Lo único que cambia es cuántas veces se toca la
+ * base de datos.
+ *
+ * Sólo admite operaciones de FONDO, nunca acciones tuyas: una vender o una
+ * compra siguen yendo solas y al momento.
+ */
+const BULK_ALLOWED = new Set<string>([
+  'petMine',
+  'petDeposit',
+  'petUnload',
+  'droneHaul',
+  'caexMine',
+  'caexDeposit',
+]);
+
+/** Tope por lote: acota lo que puede pedir un cliente en una transacción. */
+const BULK_MAX = 24;
+
+export function opBulk(
+  player: PlayerState,
+  factory: FactoryState,
+  args: { ops?: { name: string; args?: Record<string, unknown> }[]; now: number },
+): OpOutcome<{ results: { ok: boolean; reason?: string; data?: unknown }[] }> {
+  const lista = Array.isArray(args.ops) ? args.ops.slice(0, BULK_MAX) : [];
+  if (lista.length === 0) return fail('Lote vacío');
+
+  let p = player;
+  let f = factory;
+  const events: OpEvent[] = [];
+  const results: { ok: boolean; reason?: string; data?: unknown }[] = [];
+  let memberDelta: OpOutcome['memberDelta'];
+
+  for (const item of lista) {
+    if (!BULK_ALLOWED.has(item.name)) {
+      results.push({ ok: false, reason: 'Operación no agrupable' });
+      continue;
+    }
+    const fn = OPS[item.name as OpName];
+    if (!fn) {
+      results.push({ ok: false, reason: 'Operación desconocida' });
+      continue;
+    }
+    // Cada recado va aislado: uno malo no puede tumbar a los otros veinte.
+    let out: OpOutcome;
+    try {
+      out = fn(p, f, { ...(item.args ?? {}), now: args.now } as never) as OpOutcome;
+    } catch (e) {
+      results.push({ ok: false, reason: e instanceof Error ? e.message : 'Error' });
+      continue;
+    }
+    results.push({ ok: out.ok, reason: out.reason, data: out.data });
+    if (!out.ok) continue;
+    p = out.player ?? p;
+    f = out.factory ?? f;
+    if (out.events?.length) events.push(...out.events);
+    if (out.memberDelta) memberDelta = { ...(memberDelta ?? {}), ...out.memberDelta };
+  }
+
+  return { ok: true, player: p, factory: f, memberDelta, events, data: { results } };
+}
+
 export type OpName =
   | 'gather'
   | 'deposit'
@@ -2101,6 +2171,7 @@ export type OpName =
   | 'pickupGround'
   | 'trashItem'
   | 'applyFactoryReset'
+  | 'bulk'
   | 'tick';
 
 type AnyOp = (p: PlayerState, f: FactoryState, args: never) => OpOutcome<never>;
@@ -2138,6 +2209,7 @@ export const OPS = {
   pickupGround: opPickupGround,
   trashItem: opTrashItem,
   applyFactoryReset: opApplyFactoryReset,
+  bulk: opBulk,
   tick: opTick,
 } as unknown as Record<OpName, AnyOp>;
 

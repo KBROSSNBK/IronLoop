@@ -16,6 +16,7 @@ import type {
   PresenceState,
 } from '../types';
 import { useUiStore } from './useUiStore';
+import { addWrites, markWrites } from '../services/writeMeter';
 
 export type Phase = 'boot' | 'signedOut' | 'loading' | 'ready' | 'error';
 
@@ -142,6 +143,8 @@ const BACKGROUND_OPS = new Set<OpName>([
   'droneHaul',
   'caexMine',
   'caexDeposit',
+  // El lote: mete muchos recados de fondo en UNA sola escritura.
+  'bulk',
   'tick',
 ]);
 
@@ -170,6 +173,18 @@ async function runOne(
         optimisticAt = out.factory.updatedAt ?? Date.now();
         optimisticUntil = Date.now() + OPTIMISTIC_WINDOW_MS;
         set({ factory: out.factory });
+      }
+    }
+    /*
+     * Cuenta de escrituras: es lo que agota la cuota gratuita de Firestore y
+     * lo que deja la partida muerta con un «Quota exceeded». Un documento
+     * tocado es una escritura; se cuenta aquí para poder enseñarlo en pantalla.
+     */
+    if (out.ok) {
+      const docs = (out.player ? 1 : 0) + (out.factory ? 1 : 0) + (out.memberDelta ? 1 : 0);
+      if (docs > 0) {
+        addWrites(docs);
+        markWrites(docs);
       }
     }
     dispatchOpEvents(out.events ?? [], background);

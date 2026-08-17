@@ -498,3 +498,77 @@ describe('resistencia a entradas maliciosas', () => {
     expect(factory.contribution).toBe(0);
   });
 });
+
+/* ─────────────── LOTE DE OPERACIONES: LA CUOTA ─────────────── */
+
+/**
+ * Firestore cobra por ESCRITURA: 20.000 al día en el plan gratuito. Con la
+ * automatización mandando cada recado por su cuenta eso se agota en una tarde
+ * y la partida muere con «Quota exceeded». El lote mete muchos recados en una
+ * sola escritura — sin cambiar ni una regla del juego.
+ */
+describe('opBulk — muchos recados, una escritura', () => {
+  it('aplica todas las operaciones en orden sobre el mismo estado', () => {
+    const { player, factory } = world({ inventory: {} });
+    const p: PlayerState = {
+      ...player,
+      pet: { ...player.pet, mode: 'gather', bags: [{ ore: 20 }, {}, {}] },
+    };
+    const f: FactoryState = { ...factory, level: 6 };
+
+    const out = runOp('bulk', p, f, {
+      ops: [
+        { name: 'petDeposit', args: { machineId: 'smelter', dog: 0, limit: 5 } },
+        { name: 'petDeposit', args: { machineId: 'smelter', dog: 0, limit: 7 } },
+      ],
+      now: T0,
+    });
+
+    expect(out.ok).toBe(true);
+    // Las dos entregas se acumulan: la segunda ve el estado que dejó la primera.
+    expect(out.factory!.machines.smelter.input.ore).toBe(12);
+    expect(out.player!.pet.bags[0].ore).toBe(8);
+    const res = (out.data as { results: { ok: boolean }[] }).results;
+    expect(res.map((r) => r.ok)).toEqual([true, true]);
+  });
+
+  it('una operación que falla no tumba el lote', () => {
+    const { player, factory } = world();
+    const p: PlayerState = {
+      ...player,
+      pet: { ...player.pet, mode: 'gather', bags: [{ ore: 10 }, {}, {}] },
+    };
+    const out = runOp('bulk', p, { ...factory, level: 6 }, {
+      ops: [
+        { name: 'petDeposit', args: { machineId: 'inventada', dog: 0 } },
+        { name: 'petDeposit', args: { machineId: 'smelter', dog: 0, limit: 4 } },
+      ],
+      now: T0,
+    });
+    expect(out.ok).toBe(true);
+    const res = (out.data as { results: { ok: boolean }[] }).results;
+    expect(res[0].ok).toBe(false);
+    expect(res[1].ok).toBe(true);
+    expect(out.factory!.machines.smelter.input.ore).toBe(4);
+  });
+
+  it('sólo admite operaciones de fondo: nada de vender ni comprar', () => {
+    const { player, factory } = world({ money: 10 ** 6, inventory: { ingot: 5 } });
+    const out = runOp('bulk', player, factory, {
+      ops: [
+        { name: 'sell', args: { at: AT_DOCK } },
+        { name: 'buyUpgrade', args: { upgradeId: 'speed' } },
+      ],
+      now: T0,
+    });
+    const res = (out.data as { results: { ok: boolean }[] }).results;
+    expect(res.every((r) => !r.ok)).toBe(true);
+    // Ni un euro se ha movido.
+    expect(out.player!.money).toBe(player.money);
+  });
+
+  it('un lote vacío se rechaza sin tocar nada', () => {
+    const { player, factory } = world();
+    expect(runOp('bulk', player, factory, { ops: [], now: T0 }).ok).toBe(false);
+  });
+});

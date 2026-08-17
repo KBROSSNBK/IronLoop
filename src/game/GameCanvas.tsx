@@ -66,6 +66,7 @@ import { useSessionStore, applyLocalStamina } from '../state/useSessionStore';
 import { useGameplayStore } from '../state/useGameplayStore';
 import { useUiStore } from '../state/useUiStore';
 import { emit, on } from '../services/bus';
+import { writeBudget } from '../services/writeMeter';
 import type { ActivityKind, FacingDir, PresenceState } from '../types';
 
 interface RemoteEntity {
@@ -163,6 +164,55 @@ export function GameCanvas() {
     /* Cintas: el material se traspasa solo, en tandas y con pausa entre ellas. */
     let pendingBelt = false;
     let beltCooldownUntil = 0;
+
+    /*
+     * LOTE DE RECADOS — lo que salva la cuota.
+     *
+     * Firestore cobra por ESCRITURA, no por datos: 20.000 al día en el plan
+     * gratuito. Con tres perros, cuatro drones y el CAEX mandando cada recado
+     * por su cuenta eso se agota en una tarde y aparece «Quota exceeded».
+     *
+     * Así que la automatización no escribe: deja el recado aquí y cada dos
+     * segundos y medio se manda TODO junto en una sola operación. Lo que
+     * pulsas tú sigue yendo solo y al instante.
+     */
+    interface Recado {
+      name: 'petMine' | 'petDeposit' | 'petUnload' | 'droneHaul' | 'caexMine' | 'caexDeposit';
+      args: Record<string, unknown>;
+      done?: (ok: boolean, reason?: string) => void;
+    }
+    const recados: Recado[] = [];
+    const BULK_MS = 4000;
+    const BULK_MAX = 20;
+    let bulkAt = 0;
+
+    const pedir = (
+      name: Recado['name'],
+      args: Record<string, unknown>,
+      done?: Recado['done'],
+    ) => {
+      // Tope de seguridad: si el lote ya va lleno, el recado se descarta y se
+      // reintenta al siguiente viaje. Nunca se pierde material por esto.
+      if (recados.length >= BULK_MAX * 2) return;
+      recados.push({ name, args, done });
+    };
+
+    const enviarLote = (session: ReturnType<typeof useSessionStore.getState>, nowMs: number) => {
+      if (recados.length === 0 || nowMs < bulkAt) return;
+      bulkAt = nowMs + BULK_MS;
+      const lote = recados.splice(0, BULK_MAX);
+      void session
+        .op('bulk', { ops: lote.map((r) => ({ name: r.name, args: r.args })) })
+        .then((out) => {
+          const res =
+            (out.data as { results?: { ok: boolean; reason?: string }[] } | undefined)?.results ??
+            [];
+          lote.forEach((r, i) => {
+            const uno = res[i];
+            r.done?.(uno?.ok ?? false, uno?.reason ?? out.reason);
+          });
+        });
+    };
 
     /* Cerebros de los robots: comportamiento visible con recuperación. */
     const brains = new Map<string, RobotBrain>();
@@ -904,50 +954,37 @@ export function GameCanvas() {
             petFlushAt[i] = nowMs + PET_FLUSH_MS;
             petBusy[i] = true;
             const qty = ev.mined.qty;
-            void session
-              .op('petMine', { stationId: ev.mined.stationId, qty, dog: i })
-              .then((out) => {
-                // Confirmado o rechazado, deja de contarse como pendiente: el
-                // servidor es quien manda sobre lo que hay en la mochila.
-                if (out.ok) dog.confirmMined(qty);
-                else dog.dropPending();
-              })
-              .finally(() => {
-                petBusy[i] = false;
-              });
+            pedir('petMine', { stationId: ev.mined.stationId, qty, dog: i }, (ok, reason) => {
+              // Confirmado o rechazado, deja de contarse como pendiente: el
+              // servidor manda sobre lo que hay en la mochila. Si sólo estaba
+              // la cola llena, se reintenta sin perder lo picado.
+              if (ok) dog.confirmMined(qty);
+              else if (reason !== 'Cola llena') dog.dropPending();
+              petBusy[i] = false;
+            });
           }
 
           if (ev.deposit && !petBusy[i]) {
             petBusy[i] = true;
             const bay = ev.deposit;
-            void session
-              .op('petDeposit', { machineId: bay.machineId, beltId: bay.beltId, dog: i })
-              .then((out) => {
-                if (out.ok) {
-                  fx.burst(dog.x, dog.y - 12, '#38bdf8', 10, 70, 'spark');
-                  fx.ring(bay.x, bay.y, '#38bdf8', 8);
-                  emit('sfx', { name: 'machine', volume: 0.5 });
-                }
-              })
-              .finally(() => {
-                petBusy[i] = false;
-              });
+            // El efecto se pinta ya: el juego responde aunque el recado viaje
+            // dentro del siguiente lote.
+            fx.burst(dog.x, dog.y - 12, '#38bdf8', 10, 70, 'spark');
+            fx.ring(bay.x, bay.y, '#38bdf8', 8);
+            emit('sfx', { name: 'machine', volume: 0.5 });
+            pedir('petDeposit', { machineId: bay.machineId, beltId: bay.beltId, dog: i }, () => {
+              petBusy[i] = false;
+            });
           }
 
           if (ev.unload && !petBusy[i]) {
             petBusy[i] = true;
-            void session
-              .op('petUnload', { dog: i })
-              .then((out) => {
-                if (out.ok) {
-                  fx.burst(dog.x, dog.y - 12, '#a78bfa', 10, 70, 'spark');
-                  fx.ring(me.x, me.y, '#a78bfa', 7);
-                  emit('sfx', { name: 'pickup', volume: 0.5 });
-                }
-              })
-              .finally(() => {
-                petBusy[i] = false;
-              });
+            fx.burst(dog.x, dog.y - 12, '#a78bfa', 10, 70, 'spark');
+            fx.ring(me.x, me.y, '#a78bfa', 7);
+            emit('sfx', { name: 'pickup', volume: 0.5 });
+            pedir('petUnload', { dog: i }, () => {
+              petBusy[i] = false;
+            });
           }
         }
 
@@ -990,31 +1027,21 @@ export function GameCanvas() {
             caexFlushAt = nowMs + CAEX_FLUSH_MS;
             caexBusy = true;
             const qty = cev.mined.qty;
-            void session
-              .op('caexMine', { stationId: cev.mined.stationId, qty })
-              .then((out) => {
-                if (out.ok) caex.confirmMined(qty);
-                else caex.dropPending();
-              })
-              .finally(() => {
-                caexBusy = false;
-              });
+            pedir('caexMine', { stationId: cev.mined.stationId, qty }, (ok, reason) => {
+              if (ok) caex.confirmMined(qty);
+              else if (reason !== 'Cola llena') caex.dropPending();
+              caexBusy = false;
+            });
           }
           if (cev.deposit && !caexBusy) {
             caexBusy = true;
             const bay = cev.deposit;
-            void session
-              .op('caexDeposit', { machineId: bay.machineId, beltId: bay.beltId })
-              .then((out) => {
-                if (out.ok) {
-                  fx.burst(caex.x, caex.y - 20, '#fbbf24', 14, 90, 'spark');
-                  fx.ring(bay.x, bay.y, '#fbbf24', 9);
-                  emit('sfx', { name: 'machine', volume: 0.55 });
-                }
-              })
-              .finally(() => {
-                caexBusy = false;
-              });
+            fx.burst(caex.x, caex.y - 20, '#fbbf24', 14, 90, 'spark');
+            fx.ring(bay.x, bay.y, '#fbbf24', 9);
+            emit('sfx', { name: 'machine', volume: 0.55 });
+            pedir('caexDeposit', { machineId: bay.machineId, beltId: bay.beltId }, () => {
+              caexBusy = false;
+            });
           }
         } else {
           caexAlive = false;
@@ -1090,21 +1117,16 @@ export function GameCanvas() {
           if (dev.deliver) {
             nextDroneOpAt = nowMs + DRONE_OP_GAP_MS;
             const { bay, items: carga, units, source } = dev.deliver;
-            void session
-              .op(source === 'pet' ? 'petDeposit' : 'droneHaul', {
-                machineId: bay.machineId,
-                beltId: bay.beltId,
-                items: carga,
-                limit: units,
-                dog: Math.max(0, i - 1),
-              })
-              .then((out) => {
-                if (out.ok) {
-                  fx.burst(d.x, d.y + 12, '#38bdf8', 8, 60, 'spark');
-                  fx.ring(bay.x, bay.y, '#38bdf8', 7);
-                  emit('sfx', { name: 'machine', volume: 0.4 });
-                }
-              });
+            fx.burst(d.x, d.y + 12, '#38bdf8', 8, 60, 'spark');
+            fx.ring(bay.x, bay.y, '#38bdf8', 7);
+            emit('sfx', { name: 'machine', volume: 0.4 });
+            pedir(source === 'pet' ? 'petDeposit' : 'droneHaul', {
+              machineId: bay.machineId,
+              beltId: bay.beltId,
+              items: carga,
+              limit: units,
+              dog: Math.max(0, i - 1),
+            });
           }
         }
 
@@ -1134,20 +1156,15 @@ export function GameCanvas() {
           if (dev.deliver) {
             nextDroneOpAt = nowMs + DRONE_OP_GAP_MS;
             const { bay, items: carga, units } = dev.deliver;
-            void session
-              .op('caexDeposit', {
-                machineId: bay.machineId,
-                beltId: bay.beltId,
-                items: carga,
-                limit: units,
-              })
-              .then((out) => {
-                if (out.ok) {
-                  fx.burst(caexDrone.x, caexDrone.y + 12, '#fbbf24', 9, 65, 'spark');
-                  fx.ring(bay.x, bay.y, '#fbbf24', 8);
-                  emit('sfx', { name: 'machine', volume: 0.4 });
-                }
-              });
+            fx.burst(caexDrone.x, caexDrone.y + 12, '#fbbf24', 9, 65, 'spark');
+            fx.ring(bay.x, bay.y, '#fbbf24', 8);
+            emit('sfx', { name: 'machine', volume: 0.4 });
+            pedir('caexDeposit', {
+              machineId: bay.machineId,
+              beltId: bay.beltId,
+              items: carga,
+              limit: units,
+            });
           }
         } else {
           caexDroneAlive = false;
@@ -1440,6 +1457,9 @@ export function GameCanvas() {
         frames = 0;
         fpsAccumulator = 0;
       }
+      // El lote de recados de la automatización sale cada pocos segundos.
+      enviarLote(session, nowMs);
+
       uiAccumulator += dt;
       if (uiAccumulator >= 0.12) {
         uiAccumulator = 0;
@@ -1450,6 +1470,7 @@ export function GameCanvas() {
           stamina: staminaNow,
           staminaMax: stats.maxStamina,
           fps,
+          writes: writeBudget(),
           onlineCount: remotes.size + 1,
           actionProgress: busyAction
             ? (nowMs - actionStart) / Math.max(1, actionUntil - actionStart)
