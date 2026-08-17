@@ -533,4 +533,4 @@ export function petFree(pet: PetState | undefined): number {
 export const PET_RATE_TOLERANCE = 1.8;
 
 /** Cada cuánto liquida el cliente lo que ha minado la mascota. */
-export const PET_FLUSH_MS = 5_000;
+export const PET_FLUSH_MS = 8_000;

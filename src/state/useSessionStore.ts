@@ -47,7 +47,55 @@ let backend: Backend | null = null;
 let booted = false;
 
 /** Cola de operaciones: se ejecutan de una en una, en orden. */
-let opQueue: Promise<void> = Promise.resolve();
+/* ───────────────────── COLA DE OPERACIONES ─────────────────────
+ *
+ * Un carril para lo que pulsas tú y otro para lo que hace la automatización
+ * sola. Lo tuyo adelanta SIEMPRE, y el carril de fondo tiene tope: si ya hay
+ * demasiados recados esperando, los nuevos se descartan en vez de engordar la
+ * cola. No se pierde nada — el material sigue en la mochila y el perro, el
+ * dron o el camión lo reintentan al siguiente viaje.
+ */
+interface Encolada {
+  op: OpName;
+  args: Record<string, unknown>;
+  resolve: (out: OpOutcome) => void;
+}
+
+const colaJugador: Encolada[] = [];
+const colaFondo: Encolada[] = [];
+let enVuelo = false;
+
+/** Recados de fondo esperando como mucho. Por encima, se descartan. */
+const MAX_FONDO = 4;
+
+const OCUPADO: OpOutcome = { ok: false, reason: 'Cola llena', events: [] };
+
+function bombear(set: Setter, get: Getter): void {
+  if (enVuelo) return;
+  const next = colaJugador.shift() ?? colaFondo.shift();
+  if (!next) return;
+  enVuelo = true;
+  runOne(next.op, next.args, set, get)
+    .then(next.resolve, () => next.resolve(OCUPADO))
+    .finally(() => {
+      enVuelo = false;
+      bombear(set, get);
+    });
+}
+
+function encolar(
+  op: OpName,
+  args: Record<string, unknown>,
+  background: boolean,
+  set: Setter,
+  get: Getter,
+): Promise<OpOutcome> {
+  if (background && colaFondo.length >= MAX_FONDO) return Promise.resolve(OCUPADO);
+  return new Promise<OpOutcome>((resolve) => {
+    (background ? colaFondo : colaJugador).push({ op, args, resolve });
+    bombear(set, get);
+  });
+}
 
 /**
  * Sombra de escritura optimista.
@@ -339,20 +387,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   async op(op, args = {}) {
-    // Las operaciones se ENCOLAN: nunca hay dos en vuelo a la vez.
-    //
-    // Sin esto, dos acciones simultáneas (la mascota soltando carga y tú
-    // pasando por una cinta, por ejemplo) resolvían en cualquier orden y la
-    // que llegaba tarde machacaba el estado de la otra: si había 10 items en
-    // la cinta y entraban 34, se quedaban en 34 en vez de sumar 44. El
-    // servidor los contaba bien; era el cliente el que pisaba el resultado.
-    const run = opQueue.then(() => runOne(op, args, set, get));
-    // La cola no se rompe aunque una operación falle.
-    opQueue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    /*
+     * Las operaciones se ENCOLAN: nunca hay dos en vuelo a la vez, porque dos
+     * a la vez se pisaban el resultado (si había 10 items en la cinta y
+     * entraban 34, se quedaban en 34 en vez de sumar 44).
+     *
+     * Pero la cola tiene DOS CARRILES y lo tuyo adelanta. Contra Firebase cada
+     * operación es una transacción de red de varios cientos de milisegundos, y
+     * tres perros, cuatro drones y el CAEX piden más de las que caben: en
+     * local —donde son instantáneas— no se notaba, pero en la partida de
+     * verdad la cola crecía sin fin. El resultado era todo el mundo lleno y
+     * parado, y TU extracción esperando detrás de treinta recados.
+     */
+    return encolar(op, args, BACKGROUND_OPS.has(op), set, get);
   },
 
   publishPresence(state) {

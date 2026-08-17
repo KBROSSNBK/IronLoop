@@ -247,4 +247,4 @@ export function caexDroneUpgradeCost(level: number): number {
 }
 
 /** Cada cuánto liquida el cliente lo que ha cargado el camión. */
-export const CAEX_FLUSH_MS = 5_000;
+export const CAEX_FLUSH_MS = 8_000;
