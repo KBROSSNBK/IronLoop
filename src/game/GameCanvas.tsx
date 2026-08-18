@@ -30,7 +30,14 @@ import { beltCount } from './logic/belts';
 import { getMachine } from '../config/machines';
 import { ROBOTS as ROBOT_LIST } from '../config/robots';
 import { RobotBrain } from './systems/robotBrain';
-import { PetBrain, RemotePet } from './systems/petBrain';
+import { PetBrain } from './systems/petBrain';
+import {
+  RemoteHerd,
+  actDesdeCaex,
+  empaquetar,
+  estadoDesdeAct,
+  mereceMandar,
+} from './systems/petSync';
 import { drawPet } from './render/pet';
 import {
   bagUsed,
@@ -44,7 +51,7 @@ import {
 import { DroneBrain } from './systems/droneBrain';
 import { CaexBrain } from './systems/caexBrain';
 import { drawCaex } from './render/caex';
-import { CAEX, CAEX_FLUSH_MS, caexUsed, deriveCaex } from '../config/caex';
+import { CAEX, CAEX_FLUSH_MS, DEFAULT_CAEX, caexUsed, deriveCaex } from '../config/caex';
 import { drawDrone } from './render/drone';
 import { dropOffFor, heaviestItem } from './logic/pet';
 import { factoryNeeds, shareNeeds } from './logic/needs';
@@ -88,6 +95,10 @@ interface RemoteEntity {
   emote: string | null;
   emoteAt: number;
   pet: PresenceState['pet'];
+  caexLook: PresenceState['caexLook'];
+  /** Su jauría y su camión, interpolados a partir de lo que llega por la red. */
+  herd: RemoteHerd;
+  truck: RemoteHerd;
 }
 
 export function GameCanvas() {
@@ -145,6 +156,15 @@ export function GameCanvas() {
     let holdProgress = 0;
     let autoAction: { kind: ActionOption['kind']; targetId: string; label: string } | null = null;
     let lastPublishAt = 0;
+    /*
+     * La jauría se emite a su propio ritmo. 320 ms es suficiente para que un
+     * perro trotando se vea fluido —el resto lo pone la interpolación— y ocho
+     * veces más barato que emitirla al ritmo del jugador.
+     */
+    const HERD_MS = 320;
+    let lastHerdAt = 0;
+    let lastHerd: number[] = [];
+    let lastCaex: number[] = [];
 
     /* Extracción automática: basta con quedarse quieto medio segundo junto a
        un yacimiento. Sólo aplica a extraer; máquinas y venta siguen siendo
@@ -238,7 +258,6 @@ export function GameCanvas() {
      * que llevan los demás antes de seguir picando.
      */
     const pets: PetBrain[] = [new PetBrain(0)];
-    const remotePets = new Map<string, RemotePet>();
     const petFlushAt: number[] = [];
     const petBusy: boolean[] = [];
 
@@ -447,7 +466,13 @@ export function GameCanvas() {
             emote: p.emote ?? null,
             emoteAt: p.emoteAt ?? 0,
             pet: p.pet ?? null,
+            caexLook: p.caexLook ?? null,
+            herd: new RemoteHerd(),
+            truck: new RemoteHerd(),
           });
+          const nuevo = remotes.get(p.uid)!;
+          nuevo.herd.target(p.pets, now);
+          nuevo.truck.target(p.caex, now);
         } else {
           e.fromX = e.x;
           e.fromY = e.y;
@@ -460,7 +485,11 @@ export function GameCanvas() {
           e.level = p.level;
           e.appearance = p.appearance;
           e.pet = p.pet ?? null;
+          e.caexLook = p.caexLook ?? null;
           e.lastAt = now;
+          // Dónde están de verdad sus perros y su camión.
+          e.herd.target(p.pets, now);
+          e.truck.target(p.caex, now);
           // Un emote nuevo dispara sus partículas también en remoto.
           if (p.emote && (p.emoteAt ?? 0) > e.emoteAt) {
             const def = getEmote(p.emote);
@@ -473,7 +502,6 @@ export function GameCanvas() {
       for (const [uid, e] of remotes) {
         if (!seen.has(uid) && now - e.lastAt > BALANCE.net.staleAfterMs) {
           remotes.delete(uid);
-          remotePets.delete(uid);
         }
       }
     };
@@ -571,14 +599,37 @@ export function GameCanvas() {
       /* — presencia — */
       // Sólo se emite a ritmo alto si hay algo que ver; parado basta un latido.
       const movingNow = input.x !== 0 || input.y !== 0;
+
+      /*
+       * La jauría va a su propio ritmo, más lento que el del jugador. Un perro
+       * trotando no necesita nueve fotos por segundo, y como esto se emite
+       * también cuando su dueño está quieto —justo cuando la jauría trabaja—
+       * mandarlo al ritmo del jugador multiplicaría el gasto de una base de
+       * datos que ahora cobra por datos.
+       */
+      const jauria = empaquetar(pets);
+      const camion =
+        caex && player?.caex?.mode !== 'off'
+          ? [Math.round(caex.x), Math.round(caex.y), actDesdeCaex(caex.state)]
+          : [];
+      const jauriaCambio =
+        now - lastHerdAt >= HERD_MS &&
+        (mereceMandar(lastHerd, jauria) || mereceMandar(lastCaex, camion));
+
       const publishNow =
         movingNow ||
         emoteJustStarted ||
         !!me.emote ||
         busyAction ||
+        jauriaCambio ||
         now - lastPublishAt >= BALANCE.net.idleHeartbeatMs;
       if (player && factory && publishNow) {
         lastPublishAt = now;
+        if (jauriaCambio) {
+          lastHerdAt = now;
+          lastHerd = jauria;
+          lastCaex = camion;
+        }
         session.publishPresence({
           uid: player.uid,
           name: player.name,
@@ -588,7 +639,6 @@ export function GameCanvas() {
           dir: me.dir,
           act: me.act,
           appearance: player.appearance,
-          // Sólo el aspecto: la posición de la mascota la simula cada cliente.
           pet:
             player.pet?.mode === 'off'
               ? null
@@ -597,6 +647,16 @@ export function GameCanvas() {
                   color: player.pet?.color ?? '#f2c015',
                   accent: player.pet?.accent ?? '#22d3ee',
                 },
+          // Dónde está de verdad cada perro y qué está haciendo.
+          pets: jauria.length > 0 ? jauria : null,
+          caex: camion.length > 0 ? camion : null,
+          caexLook:
+            camion.length > 0
+              ? {
+                  color: player.caex?.color ?? DEFAULT_CAEX.color,
+                  accent: player.caex?.accent ?? DEFAULT_CAEX.accent,
+                }
+              : null,
           emote: me.emote,
           emoteAt: me.emoteAt,
           t: now,
@@ -1171,18 +1231,10 @@ export function GameCanvas() {
         }
       }
 
-      /* Mascotas ajenas: sólo siguen a su dueño, no se sincroniza su posición. */
+      /* Jaurías ajenas: van donde su dueño dice que van, no pegadas a él. */
       for (const e of remotes.values()) {
-        if (!e.pet) {
-          remotePets.delete(e.uid);
-          continue;
-        }
-        let rp = remotePets.get(e.uid);
-        if (!rp) {
-          rp = new RemotePet();
-          remotePets.set(e.uid, rp);
-        }
-        rp.update(dt, e.x, e.y);
+        e.herd.update(nowMs, HERD_MS);
+        e.truck.update(nowMs, HERD_MS);
       }
 
       cam.follow(me.x, me.y - 10, dt, viewW, viewH);
@@ -1237,22 +1289,47 @@ export function GameCanvas() {
       sortables.push({ y: -1e9, draw: () => drawProps(ctx, time) });
 
       for (const e of remotes.values()) {
-        const rp = remotePets.get(e.uid);
-        if (rp && e.pet) {
+        // Toda su jauría, cada perro donde de verdad está y haciendo lo suyo:
+        // si está picando en una veta, se le ve picando en la veta.
+        if (e.pet) {
           const look = e.pet;
+          for (const d of e.herd.list) {
+            sortables.push({
+              y: d.y,
+              draw: () =>
+                drawPet(ctx, {
+                  x: d.x,
+                  y: d.y,
+                  facing: d.facing,
+                  gait: d.gait,
+                  t: time,
+                  state: estadoDesdeAct(d.act),
+                  chassis: look.chassis,
+                  color: look.color,
+                  accent: look.accent,
+                  carried: 0,
+                  capacity: 1,
+                  alpha: 0.96,
+                }),
+            });
+          }
+        }
+        for (const c of e.truck.list) {
           sortables.push({
-            y: rp.y,
+            y: c.y,
             draw: () =>
-              drawPet(ctx, {
-                x: rp.x,
-                y: rp.y,
-                facing: rp.facing,
-                gait: rp.gait,
+              drawCaex(ctx, {
+                x: c.x,
+                y: c.y,
+                facing: c.facing,
+                // El giro de rueda sale de lo recorrido, igual que el trote.
+                roll: c.gait,
+                tilt: 0,
                 t: time,
-                state: 'SEGUIR',
-                chassis: look.chassis,
-                color: look.color,
-                accent: look.accent,
+                state: c.act === 1 ? 'CARGANDO' : c.act === 2 ? 'VACIANDO' : 'EN_RUTA',
+                skin: DEFAULT_CAEX.skin,
+                color: e.caexLook?.color ?? DEFAULT_CAEX.color,
+                accent: e.caexLook?.accent ?? DEFAULT_CAEX.accent,
                 carried: 0,
                 capacity: 1,
                 alpha: 0.96,

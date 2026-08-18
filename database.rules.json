@@ -194,6 +194,26 @@
             "$other": { ".validate": false }
           },
 
+          // Dónde está cada perro y qué hace: [x, y, act] por cabeza, en una
+          // lista plana. Sin esto los demás veían la jauría pegada a su dueño
+          // aunque estuviera picando al otro lado del mapa.
+          "pets": {
+            ".validate": "newData.hasChildren()",
+            "$i": { ".validate": "newData.isNumber() && newData.val() >= -1 && newData.val() <= 2000" }
+          },
+
+          // Lo mismo para el camión: [x, y, act].
+          "caex": {
+            ".validate": "newData.hasChildren()",
+            "$i": { ".validate": "newData.isNumber() && newData.val() >= -1 && newData.val() <= 2000" }
+          },
+
+          "caexLook": {
+            "color":  { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "accent": { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "$other": { ".validate": false }
+          },
+
           "$other": { ".validate": false }
         }
       }

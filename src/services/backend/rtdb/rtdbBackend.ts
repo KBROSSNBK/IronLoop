@@ -483,9 +483,30 @@ export class RtdbBackend implements Backend {
         if (snap.val() === true) onDisconnect(r).remove().catch(() => {});
       });
     }
-    addBytes(pesoAprox(state));
-    set(r, state).catch(() => {});
+    const carga = this.presenciaSinJauria ? sinJauria(state) : state;
+    addBytes(pesoAprox(carga));
+    set(r, carga).catch((e) => {
+      /*
+       * Las reglas de presencia rechazan cualquier campo que no conozcan. Si
+       * el código se publica antes que las reglas, mandar la jauría tumbaría
+       * la presencia ENTERA y los jugadores dejarían de verse entre ellos.
+       * Ante un rechazo se reintenta sin ella: se pierde ver dónde están los
+       * perros del vecino, que es justo como funcionaba antes, pero nadie se
+       * queda invisible. Se arregla solo al desplegar las reglas.
+       */
+      if (!this.presenciaSinJauria && esCarrera(e)) {
+        this.presenciaSinJauria = true;
+        console.warn(
+          'Las reglas de presencia no admiten la posición de las mascotas. ' +
+            'Ejecuta: firebase deploy --only database',
+        );
+        set(r, sinJauria(state)).catch(() => {});
+      }
+    });
   }
+
+  /** Se enciende si las reglas desplegadas aún no conocen a la jauría. */
+  private presenciaSinJauria = false;
 
   watchPresence(
     fid: string,
@@ -541,4 +562,10 @@ function esCarrera(e: unknown): boolean {
 
 function pausa(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** La misma presencia sin los campos que las reglas viejas no conocen. */
+function sinJauria(state: PresenceState): PresenceState {
+  const { pets: _p, caex: _c, caexLook: _l, ...resto } = state;
+  return resto;
 }

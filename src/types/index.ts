@@ -212,10 +212,23 @@ export interface PresenceState {
   appearance: Appearance;
   /**
    * Aspecto de su mascota, para que los demás la vean como su dueño la ha
-   * pintado. La POSICIÓN no se envía: cada cliente la simula siguiendo a su
-   * dueño, así que no cuesta ni un byte por frame.
+   * pintado.
    */
   pet?: { chassis: string; color: string; accent: string } | null;
+  /**
+   * Dónde está y qué hace cada perro: `[x, y, act, x, y, act, …]`.
+   *
+   * Antes esto no viajaba y cada cliente fingía que la jauría del vecino le
+   * seguía a todas partes. Salía gratis pero era falso: veías sus perros
+   * pegados a él mientras picaban al otro lado del mapa, y saber quién tiene
+   * la jauría trabajando es información de juego. Tres números por perro
+   * cuestan poco y a cambio se ve la verdad. Ver `game/systems/petSync.ts`.
+   */
+  pets?: number[] | null;
+  /** Lo mismo para el camión: `[x, y, act]`. */
+  caex?: number[] | null;
+  /** Colores del camión, para que se vea como su dueño lo ha pintado. */
+  caexLook?: { color: string; accent: string } | null;
   /** Emote en curso (id de config/emotes) o null. */
   emote?: string | null;
   /** Instante en que empezó el emote (ms). */
